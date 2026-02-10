@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +19,56 @@ type envelope struct {
 
 // maxRequestBodySize is the upper limit for JSON request bodies (1 MB).
 const maxRequestBodySize = 1 << 20
+
+// defaultLimit is the default number of items per page when not specified.
+const defaultLimit = 20
+
+// maxLimit is the maximum allowed limit to prevent excessive result sets.
+const maxLimit = 100
+
+// Pagination holds parsed limit/offset query parameters for list endpoints.
+type Pagination struct {
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+}
+
+// PaginatedResponse wraps a list of items with pagination metadata.
+type PaginatedResponse struct {
+	Items  any `json:"items"`
+	Total  int `json:"total"`
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+}
+
+// parsePagination extracts limit and offset from query parameters with
+// validation and sensible defaults. Returns an error string (empty on success)
+// following the same pattern as readJSON.
+func parsePagination(r *http.Request) (Pagination, string) {
+	q := r.URL.Query()
+
+	limit := defaultLimit
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return Pagination{}, "limit must be a positive integer"
+		}
+		if n > maxLimit {
+			n = maxLimit
+		}
+		limit = n
+	}
+
+	offset := 0
+	if v := q.Get("offset"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return Pagination{}, "offset must be a non-negative integer"
+		}
+		offset = n
+	}
+
+	return Pagination{Limit: limit, Offset: offset}, ""
+}
 
 // writeJSON writes a JSON response with the given status code and data payload.
 func writeJSON(w http.ResponseWriter, status int, data any) {

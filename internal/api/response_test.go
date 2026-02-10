@@ -177,6 +177,139 @@ func TestReadJSON_MultipleObjects(t *testing.T) {
 	}
 }
 
+func TestParsePagination_Defaults(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/items", nil)
+
+	p, errMsg := parsePagination(r)
+	if errMsg != "" {
+		t.Fatalf("expected no error, got %q", errMsg)
+	}
+	if p.Limit != defaultLimit {
+		t.Errorf("expected default limit %d, got %d", defaultLimit, p.Limit)
+	}
+	if p.Offset != 0 {
+		t.Errorf("expected offset 0, got %d", p.Offset)
+	}
+}
+
+func TestParsePagination_CustomValues(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/items?limit=50&offset=10", nil)
+
+	p, errMsg := parsePagination(r)
+	if errMsg != "" {
+		t.Fatalf("expected no error, got %q", errMsg)
+	}
+	if p.Limit != 50 {
+		t.Errorf("expected limit 50, got %d", p.Limit)
+	}
+	if p.Offset != 10 {
+		t.Errorf("expected offset 10, got %d", p.Offset)
+	}
+}
+
+func TestParsePagination_LimitClamped(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/items?limit=500", nil)
+
+	p, errMsg := parsePagination(r)
+	if errMsg != "" {
+		t.Fatalf("expected no error, got %q", errMsg)
+	}
+	if p.Limit != maxLimit {
+		t.Errorf("expected limit clamped to %d, got %d", maxLimit, p.Limit)
+	}
+}
+
+func TestParsePagination_InvalidLimit(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{"non-numeric", "/items?limit=abc"},
+		{"zero", "/items?limit=0"},
+		{"negative", "/items?limit=-5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, tt.query, nil)
+			_, errMsg := parsePagination(r)
+			if errMsg != "limit must be a positive integer" {
+				t.Errorf("expected 'limit must be a positive integer', got %q", errMsg)
+			}
+		})
+	}
+}
+
+func TestParsePagination_InvalidOffset(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{"non-numeric", "/items?offset=abc"},
+		{"negative", "/items?offset=-1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, tt.query, nil)
+			_, errMsg := parsePagination(r)
+			if errMsg != "offset must be a non-negative integer" {
+				t.Errorf("expected 'offset must be a non-negative integer', got %q", errMsg)
+			}
+		})
+	}
+}
+
+func TestParsePagination_ZeroOffset(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/items?offset=0", nil)
+
+	p, errMsg := parsePagination(r)
+	if errMsg != "" {
+		t.Fatalf("expected no error, got %q", errMsg)
+	}
+	if p.Offset != 0 {
+		t.Errorf("expected offset 0, got %d", p.Offset)
+	}
+}
+
+func TestPaginatedResponse_JSONFormat(t *testing.T) {
+	resp := PaginatedResponse{
+		Items:  []string{"a", "b"},
+		Total:  10,
+		Limit:  20,
+		Offset: 0,
+	}
+
+	w := httptest.NewRecorder()
+	writeJSON(w, http.StatusOK, resp)
+
+	var env envelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be map, got %T", env.Data)
+	}
+	if data["total"] != float64(10) {
+		t.Errorf("expected total=10, got %v", data["total"])
+	}
+	if data["limit"] != float64(20) {
+		t.Errorf("expected limit=20, got %v", data["limit"])
+	}
+	if data["offset"] != float64(0) {
+		t.Errorf("expected offset=0, got %v", data["offset"])
+	}
+	items, ok := data["items"].([]any)
+	if !ok {
+		t.Fatalf("expected items to be array, got %T", data["items"])
+	}
+	if len(items) != 2 {
+		t.Errorf("expected 2 items, got %d", len(items))
+	}
+}
+
 func TestEnvelope_JSONFormat(t *testing.T) {
 	// Verify the envelope serializes to the expected format.
 	e := envelope{Data: map[string]string{"id": "1"}}

@@ -23,4 +23,4 @@
 - [x] Implement setup wizard API: `POST /api/v1/setup` — create admin account, set hostname, configure SIP ports
 - [x] Set up static file serving via `//go:embed` with SPA fallback (non-API routes → `index.html`)
 - [x] Implement consistent JSON response envelope `{ "data": ..., "error": ... }`
-- [ ] Add pagination helpers (`?limit=N&offset=N`) for list endpoints
+- [x] Add pagination helpers (`?limit=N&offset=N`) for list endpoints

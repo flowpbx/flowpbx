@@ -11,7 +11,7 @@
 - [x] Create `internal/api/server.go` — chi router setup, mount all route groups
 - [x] Create auth middleware (session-based, secure cookie + CSRF token)
 - [x] Create logging middleware (request ID, method, path, status, duration)
-- [ ] Create recovery middleware (panic recovery, log stack trace)
+- [x] Create recovery middleware (panic recovery, log stack trace)
 - [ ] Create CORS middleware (configurable origins)
 - [ ] Implement Argon2id password hashing utility
 - [ ] Create admin user table (migration) — username, password_hash, totp_secret (nullable, for Phase 2)

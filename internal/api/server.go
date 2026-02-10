@@ -43,7 +43,7 @@ func (s *Server) routes() {
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
 	r.Use(middleware.StructuredLogger)
-	r.Use(chimw.Recoverer)
+	r.Use(middleware.Recoverer)
 
 	// API routes under /api/v1.
 	r.Route("/api/v1", func(r chi.Router) {

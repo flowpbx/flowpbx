@@ -26,6 +26,7 @@ export type {
   HealthResponse,
   Extension,
   ExtensionRequest,
+  FollowMeNumber,
   InboundNumber,
   InboundNumberRequest,
   Trunk,

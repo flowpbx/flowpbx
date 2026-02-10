@@ -1,6 +1,6 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { listExtensions, createExtension, updateExtension, deleteExtension, ApiError } from '../api'
-import type { Extension, ExtensionRequest } from '../api'
+import type { Extension, ExtensionRequest, FollowMeNumber } from '../api'
 import DataTable, { type Column } from '../components/DataTable'
 import { TextInput, NumberInput, SelectField, Toggle } from '../components/FormFields'
 
@@ -28,9 +28,29 @@ export default function Extensions() {
       ring_timeout: 30,
       dnd: false,
       follow_me_enabled: false,
+      follow_me_numbers: [],
+      follow_me_strategy: 'sequential',
+      follow_me_confirm: false,
       recording_mode: 'off',
       max_registrations: 5,
     }
+  }
+
+  function addFollowMeNumber() {
+    const nums = [...(form.follow_me_numbers ?? [])]
+    nums.push({ number: '', delay: 0, timeout: 20 })
+    setForm({ ...form, follow_me_numbers: nums })
+  }
+
+  function updateFollowMeNumber(idx: number, field: keyof FollowMeNumber, value: string | number) {
+    const nums = [...(form.follow_me_numbers ?? [])]
+    nums[idx] = { ...nums[idx], [field]: value }
+    setForm({ ...form, follow_me_numbers: nums })
+  }
+
+  function removeFollowMeNumber(idx: number) {
+    const nums = (form.follow_me_numbers ?? []).filter((_, i) => i !== idx)
+    setForm({ ...form, follow_me_numbers: nums })
   }
 
   function load(newOffset: number) {
@@ -69,6 +89,9 @@ export default function Extensions() {
       ring_timeout: ext.ring_timeout,
       dnd: ext.dnd,
       follow_me_enabled: ext.follow_me_enabled,
+      follow_me_numbers: ext.follow_me_numbers ?? [],
+      follow_me_strategy: ext.follow_me_strategy || 'sequential',
+      follow_me_confirm: ext.follow_me_confirm ?? false,
       recording_mode: ext.recording_mode,
       max_registrations: ext.max_registrations,
     })
@@ -124,6 +147,15 @@ export default function Extensions() {
       render: (r) => (
         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${r.dnd ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-500'}`}>
           {r.dnd ? 'On' : 'Off'}
+        </span>
+      ),
+    },
+    {
+      key: 'follow_me',
+      header: 'Follow Me',
+      render: (r) => (
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${r.follow_me_enabled ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+          {r.follow_me_enabled ? 'On' : 'Off'}
         </span>
       ),
     },
@@ -264,6 +296,107 @@ export default function Extensions() {
               onChange={(v) => setForm({ ...form, follow_me_enabled: v })}
             />
           </div>
+
+          {form.follow_me_enabled && (
+            <div className="rounded-md border border-gray-200 p-4 space-y-4">
+              <h3 className="text-sm font-medium text-gray-900">Follow-Me Configuration</h3>
+
+              <div className="grid grid-cols-2 gap-4">
+                <SelectField
+                  label="Ring Strategy"
+                  id="follow_me_strategy"
+                  value={form.follow_me_strategy ?? 'sequential'}
+                  onChange={(e) => setForm({ ...form, follow_me_strategy: e.currentTarget.value })}
+                >
+                  <option value="sequential">Sequential</option>
+                  <option value="simultaneous">Simultaneous</option>
+                </SelectField>
+                <div className="flex items-end pb-2">
+                  <Toggle
+                    label="Require confirmation (Press 1)"
+                    checked={form.follow_me_confirm ?? false}
+                    onChange={(v) => setForm({ ...form, follow_me_confirm: v })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">External Numbers</label>
+                  <button
+                    type="button"
+                    onClick={addFollowMeNumber}
+                    className="text-sm text-blue-600 hover:text-blue-800"
+                  >
+                    + Add Number
+                  </button>
+                </div>
+
+                {(form.follow_me_numbers ?? []).length === 0 ? (
+                  <p className="text-sm text-gray-400">No external numbers configured.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(form.follow_me_numbers ?? []).map((num, idx) => (
+                      <div key={idx} className="flex items-end gap-2">
+                        <div className="flex-1">
+                          <label className="block text-xs text-gray-500 mb-0.5">Number</label>
+                          <input
+                            type="tel"
+                            className="block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            placeholder="0412345678"
+                            value={num.number}
+                            onChange={(e) => updateFollowMeNumber(idx, 'number', e.currentTarget.value)}
+                          />
+                        </div>
+                        <div className="w-20">
+                          <label className="block text-xs text-gray-500 mb-0.5">Delay (s)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={300}
+                            className="block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            value={num.delay}
+                            onChange={(e) => updateFollowMeNumber(idx, 'delay', Number(e.currentTarget.value))}
+                          />
+                        </div>
+                        <div className="w-24">
+                          <label className="block text-xs text-gray-500 mb-0.5">Timeout (s)</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={300}
+                            className="block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            value={num.timeout}
+                            onChange={(e) => updateFollowMeNumber(idx, 'timeout', Number(e.currentTarget.value))}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeFollowMeNumber(idx)}
+                          className="mb-0.5 rounded p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50"
+                          title="Remove number"
+                        >
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {form.follow_me_strategy === 'sequential' && (form.follow_me_numbers ?? []).length > 0 && (
+                  <p className="mt-2 text-xs text-gray-500">
+                    Numbers are tried in order. Delay controls when each number starts ringing after the call begins.
+                  </p>
+                )}
+                {form.follow_me_strategy === 'simultaneous' && (form.follow_me_numbers ?? []).length > 0 && (
+                  <p className="mt-2 text-xs text-gray-500">
+                    All numbers ring at the same time. First to answer wins.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="pt-4 border-t border-gray-100">
             <button

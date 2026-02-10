@@ -27,6 +27,7 @@ type Server struct {
 	forker         *Forker
 	auth           *Authenticator
 	dialogMgr      *DialogManager
+	pendingMgr     *PendingCallManager
 	sessionMgr     *media.SessionManager
 	cdrs           database.CDRRepository
 	cancel         context.CancelFunc
@@ -87,8 +88,9 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 	)
 
 	dialogMgr := NewDialogManager(logger)
+	pendingMgr := NewPendingCallManager(logger)
 	cdrs := database.NewCDRRepository(db)
-	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunkRegistrar, auth, forker, dialogMgr, sessionMgr, proxyIP, logger)
+	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunkRegistrar, auth, forker, dialogMgr, pendingMgr, sessionMgr, proxyIP, logger)
 
 	s := &Server{
 		cfg:            cfg,
@@ -100,6 +102,7 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 		forker:         forker,
 		auth:           auth,
 		dialogMgr:      dialogMgr,
+		pendingMgr:     pendingMgr,
 		sessionMgr:     sessionMgr,
 		cdrs:           cdrs,
 		logger:         logger,
@@ -520,8 +523,9 @@ func (s *Server) createCDR(d *Dialog) {
 }
 
 // handleCANCEL processes incoming CANCEL requests when the caller hangs up
-// before the call is answered. Full CANCEL handling (cancelling all forks)
-// will be implemented in a subsequent sprint task.
+// before the call is answered. Per RFC 3261 §9.2, the server responds 200 OK
+// to the CANCEL, cancels all forked INVITE legs, and sends 487 Request
+// Terminated on the original INVITE server transaction.
 func (s *Server) handleCANCEL(req *sip.Request, tx sip.ServerTransaction) {
 	callID := ""
 	if cid := req.CallID(); cid != nil {
@@ -540,7 +544,91 @@ func (s *Server) handleCANCEL(req *sip.Request, tx sip.ServerTransaction) {
 		s.logger.Error("failed to respond to cancel", "error", err)
 	}
 
-	// TODO: Cancel all fork legs, send 487 to original INVITE transaction.
+	// Cancel the pending call: abort all fork legs, release media, send 487.
+	if s.pendingMgr.Cancel(callID, s.logger) {
+		s.logger.Info("pending call cancelled",
+			"call_id", callID,
+		)
+
+		// Create a CDR for the cancelled call.
+		s.createCancelledCDR(req, callID)
+		return
+	}
+
+	// If no pending call found, check if it's an answered call (the caller
+	// sent CANCEL after the callee answered but before ACK was processed).
+	// In that case, treat it like a BYE.
+	if d := s.dialogMgr.GetDialog(callID); d != nil {
+		s.logger.Info("cancel for answered call, treating as bye",
+			"call_id", callID,
+		)
+		s.sendBYEToCallee(d)
+		if d.Media != nil {
+			d.Media.Release()
+		}
+		terminated := s.dialogMgr.TerminateDialog(callID, "caller_cancel")
+		if terminated != nil {
+			s.createCDR(terminated)
+		}
+		return
+	}
+
+	s.logger.Warn("cancel for unknown call",
+		"call_id", callID,
+	)
+}
+
+// createCancelledCDR creates a CDR record for a call that was cancelled
+// by the caller before being answered.
+func (s *Server) createCancelledCDR(req *sip.Request, callID string) {
+	now := time.Now()
+
+	callerIDName := ""
+	callerIDNum := ""
+	if from := req.From(); from != nil {
+		callerIDName = from.DisplayName
+		callerIDNum = from.Address.User
+	}
+
+	calledNum := ""
+	if req.Recipient.User != "" {
+		calledNum = req.Recipient.User
+	} else if to := req.To(); to != nil {
+		calledNum = to.Address.User
+	}
+
+	durationSec := 0
+	billableSec := 0
+	cdr := &models.CDR{
+		CallID:       callID,
+		StartTime:    now,
+		EndTime:      &now,
+		Duration:     &durationSec,
+		BillableDur:  &billableSec,
+		CallerIDName: callerIDName,
+		CallerIDNum:  callerIDNum,
+		Callee:       calledNum,
+		Direction:    string(CallTypeInternal),
+		Disposition:  "cancelled",
+		HangupCause:  "caller_cancel",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := s.cdrs.Create(ctx, cdr); err != nil {
+		s.logger.Error("failed to create cdr for cancelled call",
+			"call_id", callID,
+			"error", err,
+		)
+		return
+	}
+
+	s.logger.Info("cdr created for cancelled call",
+		"call_id", callID,
+		"cdr_id", cdr.ID,
+		"disposition", cdr.Disposition,
+	)
 }
 
 // DialogManager returns the call dialog tracker for querying active calls.

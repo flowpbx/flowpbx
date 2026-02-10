@@ -59,6 +59,7 @@ type InviteHandler struct {
 	router         *CallRouter
 	forker         *Forker
 	dialogMgr      *DialogManager
+	pendingMgr     *PendingCallManager
 	sessionMgr     *media.SessionManager
 	proxyIP        string
 	logger         *slog.Logger
@@ -73,6 +74,7 @@ func NewInviteHandler(
 	auth *Authenticator,
 	forker *Forker,
 	dialogMgr *DialogManager,
+	pendingMgr *PendingCallManager,
 	sessionMgr *media.SessionManager,
 	proxyIP string,
 	logger *slog.Logger,
@@ -87,6 +89,7 @@ func NewInviteHandler(
 		router:         router,
 		forker:         forker,
 		dialogMgr:      dialogMgr,
+		pendingMgr:     pendingMgr,
 		sessionMgr:     sessionMgr,
 		proxyIP:        proxyIP,
 		logger:         logger.With("subsystem", "invite"),
@@ -228,9 +231,41 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		}
 	}
 
+	// Create a cancellable context for forking. The CANCEL handler can
+	// abort all fork legs by calling cancelFork().
+	forkCtx, cancelFork := context.WithCancel(ctx)
+
+	// Register this call as pending so the CANCEL handler can find it.
+	h.pendingMgr.Add(&PendingCall{
+		CallID:     callID,
+		CallerTx:   tx,
+		CallerReq:  req,
+		CancelFork: cancelFork,
+		Bridge:     bridge,
+	})
+
 	// Fork INVITE to all registered contacts (multi-device ringing).
 	// Pass the rewritten SDP so callees send RTP to the proxy.
-	result := h.forker.Fork(ctx, req, tx, route.Contacts, ic.CallerExtension, callID, calleeSDP)
+	result := h.forker.Fork(forkCtx, req, tx, route.Contacts, ic.CallerExtension, callID, calleeSDP)
+
+	// Remove from pending calls now that forking is complete. If the CANCEL
+	// handler already removed it (race), pc will be nil and that's fine —
+	// it means the call was already cancelled and cleaned up.
+	pc := h.pendingMgr.Remove(callID)
+	cancelFork() // always clean up the context
+
+	// If the pending call was already cancelled by the CANCEL handler,
+	// the fork result doesn't matter — the caller already got 487.
+	if pc == nil {
+		h.logger.Info("fork completed but call was already cancelled",
+			"call_id", callID,
+		)
+		// If a device answered despite the cancel, terminate that leg.
+		if result.Answered && result.AnsweringTx != nil {
+			result.AnsweringTx.Terminate()
+		}
+		return
+	}
 
 	if result.Error != nil {
 		h.logger.Error("fork failed",

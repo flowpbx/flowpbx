@@ -561,6 +561,68 @@ func (a *FlowSIPActions) RingGroup(ctx context.Context, callCtx *flow.CallContex
 	return &flow.RingResult{Answered: true}, nil
 }
 
+// PlayAndCollect plays an audio prompt and collects DTMF digits from the caller.
+// This is used by the IVR menu handler for interactive voice menus.
+//
+// TODO(sprint-14): Full media implementation — play audio file via RTP, listen
+// for RFC 2833 DTMF events. Current implementation collects DTMF from the
+// call context buffer with timing logic.
+func (a *FlowSIPActions) PlayAndCollect(ctx context.Context, callCtx *flow.CallContext, prompt string, isTTS bool, timeout int, digitTimeout int, maxDigits int) (*flow.CollectResult, error) {
+	callID := callCtx.CallID
+	a.logger.Info("play and collect starting",
+		"call_id", callID,
+		"prompt", prompt,
+		"is_tts", isTTS,
+		"timeout", timeout,
+		"digit_timeout", digitTimeout,
+		"max_digits", maxDigits,
+	)
+
+	// Clear any previously collected DTMF before starting collection.
+	callCtx.ClearDTMF()
+
+	if maxDigits <= 0 {
+		maxDigits = 1
+	}
+
+	overallTimeout := time.Duration(timeout) * time.Second
+	interDigitTimeout := time.Duration(digitTimeout) * time.Second
+
+	// Wait for first digit with overall timeout.
+	timer := time.NewTimer(overallTimeout)
+	defer timer.Stop()
+
+	collected := ""
+	for {
+		select {
+		case <-ctx.Done():
+			return &flow.CollectResult{Digits: collected, TimedOut: true}, nil
+		case <-timer.C:
+			if collected == "" {
+				return &flow.CollectResult{TimedOut: true}, nil
+			}
+			return &flow.CollectResult{Digits: collected}, nil
+		default:
+			digits := callCtx.GetDTMF()
+			if len(digits) > len(collected) {
+				collected = digits
+				// Check for terminator (#).
+				if len(collected) > 0 && collected[len(collected)-1] == '#' {
+					collected = collected[:len(collected)-1]
+					return &flow.CollectResult{Digits: collected}, nil
+				}
+				if len(collected) >= maxDigits {
+					return &flow.CollectResult{Digits: collected}, nil
+				}
+				// Reset timer for inter-digit timeout.
+				timer.Reset(interDigitTimeout)
+			}
+			// Small sleep to avoid busy-waiting.
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
 // updateCDROnAnswer updates the CDR with the answer time.
 func (a *FlowSIPActions) updateCDROnAnswer(callID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

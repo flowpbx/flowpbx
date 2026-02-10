@@ -24,6 +24,15 @@ type RingResult struct {
 	Error error
 }
 
+// CollectResult describes the outcome of a play-and-collect DTMF operation.
+type CollectResult struct {
+	// Digits contains the DTMF digits collected before a terminator or timeout.
+	Digits string
+
+	// TimedOut is true if the collect operation timed out before receiving input.
+	TimedOut bool
+}
+
 // SIPActions abstracts the SIP operations that flow node handlers need to
 // perform. This interface is defined in the flow package to avoid circular
 // dependencies between flow and sip packages. The sip package implements it.
@@ -39,4 +48,11 @@ type SIPActions interface {
 	// forks INVITE to all of them, and returns the result. The first device
 	// to answer wins; all other forks are cancelled.
 	RingGroup(ctx context.Context, callCtx *CallContext, extensions []*models.Extension, ringTimeout int) (*RingResult, error)
+
+	// PlayAndCollect plays an audio prompt (by file path or TTS text) and
+	// collects DTMF digits. It waits up to timeout seconds for the first
+	// digit and up to digitTimeout seconds between subsequent digits.
+	// maxDigits limits the number of digits collected (0 = single digit).
+	// The terminator character (e.g. "#") ends collection early if pressed.
+	PlayAndCollect(ctx context.Context, callCtx *CallContext, prompt string, isTTS bool, timeout int, digitTimeout int, maxDigits int) (*CollectResult, error)
 }

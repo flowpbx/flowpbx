@@ -9,7 +9,7 @@
 ## Tasks
 
 - [x] Create `internal/api/server.go` — chi router setup, mount all route groups
-- [ ] Create auth middleware (session-based, secure cookie + CSRF token)
+- [x] Create auth middleware (session-based, secure cookie + CSRF token)
 - [ ] Create logging middleware (request ID, method, path, status, duration)
 - [ ] Create recovery middleware (panic recovery, log stack trace)
 - [ ] Create CORS middleware (configurable origins)

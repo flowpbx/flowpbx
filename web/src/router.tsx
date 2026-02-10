@@ -1,5 +1,6 @@
 import { createBrowserRouter } from 'react-router-dom'
 
+import Layout from './components/Layout'
 import Login from './pages/Login'
 import SetupWizard from './pages/SetupWizard'
 import Dashboard from './pages/Dashboard'
@@ -22,20 +23,25 @@ const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
   { path: '/setup', element: <SetupWizard /> },
 
-  // App routes (will get layout wrapper in later sprint)
-  { path: '/', element: <Dashboard /> },
-  { path: '/call-flows', element: <CallFlows /> },
-  { path: '/trunks', element: <Trunks /> },
-  { path: '/inbound-numbers', element: <InboundNumbers /> },
-  { path: '/extensions', element: <Extensions /> },
-  { path: '/voicemail', element: <VoicemailBoxes /> },
-  { path: '/ring-groups', element: <RingGroups /> },
-  { path: '/ivr-menus', element: <IVRMenus /> },
-  { path: '/time-switches', element: <TimeSwitches /> },
-  { path: '/conferences', element: <ConferenceBridges /> },
-  { path: '/recordings', element: <Recordings /> },
-  { path: '/call-history', element: <CallHistory /> },
-  { path: '/settings', element: <Settings /> },
+  // App routes (with sidebar layout)
+  {
+    element: <Layout />,
+    children: [
+      { path: '/', element: <Dashboard /> },
+      { path: '/call-flows', element: <CallFlows /> },
+      { path: '/trunks', element: <Trunks /> },
+      { path: '/inbound-numbers', element: <InboundNumbers /> },
+      { path: '/extensions', element: <Extensions /> },
+      { path: '/voicemail', element: <VoicemailBoxes /> },
+      { path: '/ring-groups', element: <RingGroups /> },
+      { path: '/ivr-menus', element: <IVRMenus /> },
+      { path: '/time-switches', element: <TimeSwitches /> },
+      { path: '/conferences', element: <ConferenceBridges /> },
+      { path: '/recordings', element: <Recordings /> },
+      { path: '/call-history', element: <CallHistory /> },
+      { path: '/settings', element: <Settings /> },
+    ],
+  },
 
   // Catch-all
   { path: '*', element: <NotFound /> },

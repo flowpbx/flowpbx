@@ -12,7 +12,7 @@
 - [x] Install and configure Tailwind CSS
 - [x] Set up React Router with route definitions for all pages
 - [x] Create API client module (`web/src/api/`) with auth handling, JSON envelope parsing
-- [ ] Create layout components: sidebar nav, header, content area
+- [x] Create layout components: sidebar nav, header, content area
 - [ ] Create Login page — username/password form, session auth
 - [ ] Create Setup Wizard UI — multi-step form (admin account, hostname, SIP ports, first trunk, first extension, license key)
 - [ ] Create Dashboard page with placeholder stats (active calls, registrations, recent CDRs)

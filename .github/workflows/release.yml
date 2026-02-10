@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION_FILE: go.mod
+  BINARY_NAME: flowpbx
+  PUSHGW_NAME: pushgw
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Create placeholder web dist
+        run: mkdir -p internal/web/dist
+
+      - name: Run tests
+        run: go test -race -count=1 ./...
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Build React UI
+        run: |
+          if [ -d "web" ] && [ -f "web/package.json" ]; then
+            cd web && npm ci && npm run build
+          else
+            echo "web/ not yet scaffolded, creating placeholder"
+            mkdir -p internal/web/dist
+          fi
+
+      - name: Cross-compile binaries
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          COMMIT: ${{ github.sha }}
+          BUILD_TIME: ${{ github.event.head_commit.timestamp }}
+          LDFLAGS: >-
+            -s -w
+            -X main.version=${{ steps.version.outputs.VERSION }}
+            -X main.commit=${{ github.sha }}
+            -X main.buildTime=${{ github.event.head_commit.timestamp }}
+        run: |
+          mkdir -p build
+
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" \
+            -o build/${BINARY_NAME}-linux-amd64 ./cmd/flowpbx
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "${LDFLAGS}" \
+            -o build/${BINARY_NAME}-linux-arm64 ./cmd/flowpbx
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" \
+            -o build/${PUSHGW_NAME}-linux-amd64 ./cmd/pushgw
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "${LDFLAGS}" \
+            -o build/${PUSHGW_NAME}-linux-arm64 ./cmd/pushgw
+
+      - name: Generate checksums
+        working-directory: build
+        run: sha256sum * > checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            build/flowpbx-linux-amd64
+            build/flowpbx-linux-arm64
+            build/pushgw-linux-amd64
+            build/pushgw-linux-arm64
+            build/checksums.txt

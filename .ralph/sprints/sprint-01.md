@@ -15,7 +15,7 @@
 - [x] Create Makefile with targets: `build`, `dev`, `test`, `lint`, `ui-build`, `release`
 - [x] Set up cross-compilation in Makefile for linux/amd64 and linux/arm64
 - [x] Create `.github/workflows/ci.yml` — lint + test on PR
-- [ ] Create `.github/workflows/release.yml` — build + release on tag
+- [x] Create `.github/workflows/release.yml` — build + release on tag
 - [ ] Create `internal/config/config.go` — load config from CLI flags, env vars (`FLOWPBX_` prefix), and defaults
 - [ ] Implement config precedence: CLI flags > env vars > database config > defaults
 - [ ] Add `--data-dir`, `--http-port`, `--sip-port`, `--sip-tls-port`, `--tls-cert`, `--tls-key`, `--log-level` flags

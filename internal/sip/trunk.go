@@ -29,15 +29,17 @@ const (
 
 // TrunkState holds the runtime state for a single trunk.
 type TrunkState struct {
-	TrunkID      int64
-	Name         string
-	Type         string
-	Status       TrunkStatus
-	LastError    string
-	RetryAttempt int
-	FailedAt     *time.Time
-	RegisteredAt *time.Time
-	ExpiresAt    *time.Time
+	TrunkID        int64
+	Name           string
+	Type           string
+	Status         TrunkStatus
+	LastError      string
+	RetryAttempt   int
+	FailedAt       *time.Time
+	RegisteredAt   *time.Time
+	ExpiresAt      *time.Time
+	LastOptionsAt  *time.Time
+	OptionsHealthy bool
 }
 
 // TrunkRegistrar manages outbound SIP registrations for register-type trunks.
@@ -51,12 +53,20 @@ type TrunkRegistrar struct {
 	states map[int64]*trunkEntry // keyed by trunk ID
 }
 
+const (
+	// healthCheckInterval is how often we send OPTIONS pings to trunks.
+	healthCheckInterval = 30 * time.Second
+	// healthCheckTimeout is the max time to wait for an OPTIONS response.
+	healthCheckTimeout = 5 * time.Second
+)
+
 // trunkEntry holds per-trunk runtime data.
 type trunkEntry struct {
-	trunk  models.Trunk
-	state  TrunkState
-	client *sipgo.Client
-	cancel context.CancelFunc
+	trunk       models.Trunk
+	state       TrunkState
+	client      *sipgo.Client
+	cancel      context.CancelFunc
+	healthClose context.CancelFunc // cancels the health check loop independently
 }
 
 // NewTrunkRegistrar creates a trunk registration manager.
@@ -108,6 +118,13 @@ func (tr *TrunkRegistrar) StartTrunk(ctx context.Context, trunk models.Trunk) er
 	tr.mu.Unlock()
 
 	go tr.registrationLoop(trunkCtx, entry)
+
+	// Start a separate health check loop that monitors trunk reachability
+	// via OPTIONS pings, independent of the registration cycle.
+	healthCtx, healthCancel := context.WithCancel(trunkCtx)
+	entry.healthClose = healthCancel
+	go tr.healthCheckLoop(healthCtx, entry)
+
 	return nil
 }
 
@@ -124,10 +141,14 @@ func (tr *TrunkRegistrar) StopTrunk(trunkID int64) {
 		return
 	}
 
+	// Cancel health check loop first.
+	if entry.healthClose != nil {
+		entry.healthClose()
+	}
 	entry.cancel()
 
 	// Best-effort un-register with a short timeout.
-	if entry.state.Status == TrunkStatusRegistered {
+	if entry.state.Status == TrunkStatusRegistered && entry.trunk.Type == "register" {
 		unregCtx, unregCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer unregCancel()
 		if _, err := tr.sendRegister(unregCtx, entry, 0); err != nil {
@@ -371,6 +392,146 @@ func (tr *TrunkRegistrar) sendRegister(ctx context.Context, entry *trunkEntry, e
 	}
 
 	return grantedExpiry, nil
+}
+
+// StartHealthCheck begins an OPTIONS ping health check loop for a trunk that
+// does not require registration (e.g. IP-auth trunks). For register-type
+// trunks, health checking is started automatically by StartTrunk.
+func (tr *TrunkRegistrar) StartHealthCheck(ctx context.Context, trunk models.Trunk) error {
+	if !trunk.Enabled {
+		tr.setStatus(trunk.ID, trunk.Name, trunk.Type, TrunkStatusDisabled, "")
+		return nil
+	}
+
+	// Stop existing entry if running.
+	tr.StopTrunk(trunk.ID)
+
+	client, err := sipgo.NewClient(tr.ua,
+		sipgo.WithClientLogger(tr.logger.With("trunk", trunk.Name)),
+	)
+	if err != nil {
+		return fmt.Errorf("creating sip client for trunk %q: %w", trunk.Name, err)
+	}
+
+	trunkCtx, cancel := context.WithCancel(ctx)
+	healthCtx, healthCancel := context.WithCancel(trunkCtx)
+
+	entry := &trunkEntry{
+		trunk:       trunk,
+		client:      client,
+		cancel:      cancel,
+		healthClose: healthCancel,
+		state: TrunkState{
+			TrunkID: trunk.ID,
+			Name:    trunk.Name,
+			Type:    trunk.Type,
+			Status:  TrunkStatusUnregistered,
+		},
+	}
+
+	tr.mu.Lock()
+	tr.states[trunk.ID] = entry
+	tr.mu.Unlock()
+
+	go tr.healthCheckLoop(healthCtx, entry)
+	return nil
+}
+
+// healthCheckLoop periodically sends OPTIONS pings to a trunk and updates
+// the OptionsHealthy flag. If the trunk was previously registered and the
+// OPTIONS ping fails, the status transitions to failed.
+func (tr *TrunkRegistrar) healthCheckLoop(ctx context.Context, entry *trunkEntry) {
+	trunk := entry.trunk
+
+	tr.logger.Info("starting health check loop",
+		"trunk", trunk.Name,
+		"interval", healthCheckInterval.String(),
+	)
+
+	// Wait one interval before the first check to allow registration to complete.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(healthCheckInterval):
+	}
+
+	for {
+		err := tr.sendOptionsEntry(ctx, entry)
+
+		tr.mu.Lock()
+		if e, ok := tr.states[trunk.ID]; ok {
+			now := time.Now()
+			if err == nil {
+				e.state.OptionsHealthy = true
+				e.state.LastOptionsAt = &now
+
+				// For IP-auth trunks, OPTIONS success means the trunk is reachable.
+				if e.state.Type == "ip" && e.state.Status != TrunkStatusRegistered {
+					e.state.Status = TrunkStatusRegistered
+					e.state.FailedAt = nil
+					e.state.LastError = ""
+				}
+			} else if ctx.Err() == nil {
+				e.state.OptionsHealthy = false
+
+				// For IP-auth trunks, OPTIONS failure means the trunk is unreachable.
+				if e.state.Type == "ip" {
+					e.state.Status = TrunkStatusFailed
+					e.state.LastError = err.Error()
+					if e.state.FailedAt == nil {
+						e.state.FailedAt = &now
+					}
+				}
+
+				tr.logger.Warn("health check failed",
+					"trunk", trunk.Name,
+					"error", err,
+				)
+			}
+		}
+		tr.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(healthCheckInterval):
+		}
+	}
+}
+
+// sendOptionsEntry sends a SIP OPTIONS request using an existing trunk entry's
+// client. This avoids creating a new client for each health check ping.
+func (tr *TrunkRegistrar) sendOptionsEntry(ctx context.Context, entry *trunkEntry) error {
+	trunk := entry.trunk
+
+	recipientStr := fmt.Sprintf("sip:%s:%d", trunk.Host, trunk.Port)
+	var recipient sip.Uri
+	if err := sip.ParseUri(recipientStr, &recipient); err != nil {
+		return fmt.Errorf("parsing recipient uri: %w", err)
+	}
+
+	req := sip.NewRequest(sip.OPTIONS, recipient)
+	req.SetTransport(strings.ToUpper(trunk.Transport))
+
+	pingCtx, pingCancel := context.WithTimeout(ctx, healthCheckTimeout)
+	defer pingCancel()
+
+	tx, err := entry.client.TransactionRequest(pingCtx, req, sipgo.ClientRequestBuild)
+	if err != nil {
+		return fmt.Errorf("sending options: %w", err)
+	}
+
+	res, err := getResponse(pingCtx, tx)
+	tx.Terminate()
+	if err != nil {
+		return fmt.Errorf("waiting for options response: %w", err)
+	}
+
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return fmt.Errorf("options ping returned status %d %s", res.StatusCode, res.Reason)
+	}
+
+	return nil
 }
 
 // SendOptions sends a SIP OPTIONS ping to a trunk and returns an error if

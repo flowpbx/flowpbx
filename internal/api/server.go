@@ -349,7 +349,7 @@ func (s *Server) routes() {
 		r.Route("/app", func(r chi.Router) {
 			r.Post("/auth", s.handleNotImplemented)
 			r.Get("/me", s.handleNotImplemented)
-			r.Put("/me", s.handleNotImplemented)
+			r.Put("/me", s.handleAppUpdateMe)
 			r.Get("/voicemail", s.handleNotImplemented)
 			r.Put("/voicemail/{id}/read", s.handleNotImplemented)
 			r.Get("/voicemail/{id}/audio", s.handleNotImplemented)

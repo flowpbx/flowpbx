@@ -23,4 +23,4 @@
 - [x] Implement confirmation prompt on external legs ("Press 1 to accept this call") to prevent voicemail pickup
 - [x] Implement per-destination ring timeout in follow-me config
 - [x] Add follow-me config UI per extension (enable/disable, add external numbers with delay/timeout)
-- [ ] Create follow-me toggle in app API: `PUT /api/v1/app/me` (follow_me_enabled)
+- [x] Create follow-me toggle in app API: `PUT /api/v1/app/me` (follow_me_enabled)

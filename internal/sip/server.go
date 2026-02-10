@@ -24,6 +24,7 @@ type Server struct {
 	inviteHandler  *InviteHandler
 	forker         *Forker
 	auth           *Authenticator
+	dialogMgr      *DialogManager
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
 	logger         *slog.Logger
@@ -64,7 +65,8 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 		return nil, fmt.Errorf("creating invite forker: %w", err)
 	}
 
-	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunkRegistrar, auth, forker, logger)
+	dialogMgr := NewDialogManager(logger)
+	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunkRegistrar, auth, forker, dialogMgr, logger)
 
 	s := &Server{
 		cfg:            cfg,
@@ -75,6 +77,7 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 		inviteHandler:  inviteHandler,
 		forker:         forker,
 		auth:           auth,
+		dialogMgr:      dialogMgr,
 		logger:         logger,
 	}
 
@@ -87,6 +90,8 @@ func (s *Server) registerHandlers() {
 	s.srv.OnInvite(s.inviteHandler.HandleInvite)
 	s.srv.OnRegister(s.registrar.HandleRegister)
 	s.srv.OnAck(s.handleACK)
+	s.srv.OnBye(s.handleBYE)
+	s.srv.OnCancel(s.handleCANCEL)
 	s.srv.OnOptions(s.handleOptions)
 	s.srv.OnInfo(s.handleInfo)
 }
@@ -183,8 +188,7 @@ func (s *Server) TrunkRegistrar() *TrunkRegistrar {
 // handleACK processes incoming ACK requests. Per RFC 3261 §13.2.2.4, when
 // the PBX (as B2BUA) sends a 200 OK to the caller, the caller responds
 // with an ACK to confirm the dialog. ACK requests are not transactional —
-// they have no response. For now we log receipt; dialog state tracking
-// (matching ACK to active calls) will be implemented in dialog.go.
+// they have no response.
 func (s *Server) handleACK(req *sip.Request, tx sip.ServerTransaction) {
 	callID := ""
 	if cid := req.CallID(); cid != nil {
@@ -197,9 +201,87 @@ func (s *Server) handleACK(req *sip.Request, tx sip.ServerTransaction) {
 		"source", req.Source(),
 	)
 
-	// TODO: Match the ACK to the active call dialog and confirm the
-	// caller leg of the call. This will be connected when dialog.go
-	// implements call state tracking.
+	// Verify the ACK matches an active dialog.
+	if d := s.dialogMgr.GetDialog(callID); d != nil {
+		s.logger.Debug("ack matched active dialog",
+			"call_id", callID,
+			"caller", d.CallerIDNum,
+			"callee", d.CalledNum,
+		)
+	} else {
+		s.logger.Debug("ack for unknown dialog (may be pre-dialog or stale)",
+			"call_id", callID,
+		)
+	}
+}
+
+// handleBYE processes incoming BYE requests to terminate an active call.
+// Full BYE handling (tearing down both legs, releasing media, updating CDR)
+// will be implemented in a subsequent sprint task.
+func (s *Server) handleBYE(req *sip.Request, tx sip.ServerTransaction) {
+	callID := ""
+	if cid := req.CallID(); cid != nil {
+		callID = cid.Value()
+	}
+
+	s.logger.Info("sip bye received",
+		"call_id", callID,
+		"from", req.From().Address.User,
+		"source", req.Source(),
+	)
+
+	// Look up the active dialog for this call.
+	d := s.dialogMgr.GetDialog(callID)
+	if d == nil {
+		s.logger.Warn("bye for unknown dialog",
+			"call_id", callID,
+		)
+		res := sip.NewResponseFromRequest(req, 481, "Call/Transaction Does Not Exist", nil)
+		if err := tx.Respond(res); err != nil {
+			s.logger.Error("failed to respond to bye", "error", err)
+		}
+		return
+	}
+
+	// Acknowledge the BYE with 200 OK.
+	res := sip.NewResponseFromRequest(req, 200, "OK", nil)
+	if err := tx.Respond(res); err != nil {
+		s.logger.Error("failed to respond to bye", "error", err)
+	}
+
+	// Terminate the dialog and record hangup cause.
+	s.dialogMgr.TerminateDialog(callID, "normal_clearing")
+
+	// TODO: Send BYE to the other leg, release media resources, create CDR.
+}
+
+// handleCANCEL processes incoming CANCEL requests when the caller hangs up
+// before the call is answered. Full CANCEL handling (cancelling all forks)
+// will be implemented in a subsequent sprint task.
+func (s *Server) handleCANCEL(req *sip.Request, tx sip.ServerTransaction) {
+	callID := ""
+	if cid := req.CallID(); cid != nil {
+		callID = cid.Value()
+	}
+
+	s.logger.Info("sip cancel received",
+		"call_id", callID,
+		"from", req.From().Address.User,
+		"source", req.Source(),
+	)
+
+	// Respond 200 OK to the CANCEL itself (per RFC 3261 §9.2).
+	res := sip.NewResponseFromRequest(req, 200, "OK", nil)
+	if err := tx.Respond(res); err != nil {
+		s.logger.Error("failed to respond to cancel", "error", err)
+	}
+
+	// TODO: Cancel all fork legs, send 487 to original INVITE transaction.
+}
+
+// DialogManager returns the call dialog tracker for querying active calls.
+func (s *Server) DialogManager() *DialogManager {
+	return s.dialogMgr
 }
 
 // handleOptions responds to SIP OPTIONS requests (keepalive pings from

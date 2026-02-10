@@ -14,7 +14,7 @@
 - [x] Implement multi-device ringing: fork INVITE to all registered contacts for target extension
 - [x] Implement `180 Ringing` and `183 Session Progress` relay (early media)
 - [x] Implement call answer: `200 OK` from first answering device → ACK → cancel other forks
-- [ ] Create `internal/sip/dialog.go` — dialog/session state management (track active calls)
+- [x] Create `internal/sip/dialog.go` — dialog/session state management (track active calls)
 - [ ] Implement media bridging: allocate RTP proxy session, rewrite SDP for both legs
 - [ ] Implement BYE handling — tear down both legs, release media, update CDR
 - [ ] Implement CANCEL handling — caller hangs up before answer, cancel all forks

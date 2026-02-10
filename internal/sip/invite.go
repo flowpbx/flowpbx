@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"time"
 
 	"github.com/emiago/sipgo/sip"
 	"github.com/flowpbx/flowpbx/internal/database"
@@ -56,6 +57,7 @@ type InviteHandler struct {
 	auth           *Authenticator
 	router         *CallRouter
 	forker         *Forker
+	dialogMgr      *DialogManager
 	logger         *slog.Logger
 }
 
@@ -67,6 +69,7 @@ func NewInviteHandler(
 	trunkRegistrar *TrunkRegistrar,
 	auth *Authenticator,
 	forker *Forker,
+	dialogMgr *DialogManager,
 	logger *slog.Logger,
 ) *InviteHandler {
 	router := NewCallRouter(extensions, registrations, logger)
@@ -78,6 +81,7 @@ func NewInviteHandler(
 		auth:           auth,
 		router:         router,
 		forker:         forker,
+		dialogMgr:      dialogMgr,
 		logger:         logger.With("subsystem", "invite"),
 	}
 }
@@ -275,9 +279,58 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		return
 	}
 
-	// TODO: Track the active call (dialog state), set up media bridging,
-	// and handle BYE/CANCEL teardown. These will be implemented in subsequent
-	// sprint tasks (dialog.go, media bridging, BYE/CANCEL handling).
+	// Track the active call as a dialog for BYE/CANCEL handling and CDR.
+	dialog := &Dialog{
+		CallID:       callID,
+		Direction:    ic.CallType,
+		CallerIDName: ic.CallerIDName,
+		CallerIDNum:  ic.CallerIDNum,
+		CalledNum:    ic.RequestURI,
+		StartTime:    time.Now(),
+		CallerTx:     tx,
+		CallerReq:    req,
+		CalleeTx:     result.AnsweringTx,
+		CalleeReq:    result.AnsweringLeg.req,
+		CalleeRes:    result.AnswerResponse,
+		Caller: CallLeg{
+			Extension: ic.CallerExtension,
+		},
+		Callee: CallLeg{
+			Extension:    ic.TargetExtension,
+			Registration: result.AnsweringContact,
+			ContactURI:   result.AnsweringContact.ContactURI,
+		},
+	}
+
+	// Extract dialog tags from the SIP headers.
+	if from := req.From(); from != nil {
+		if tag, ok := from.Params.Get("tag"); ok {
+			dialog.Caller.FromTag = tag
+		}
+	}
+	if to := result.AnswerResponse.To(); to != nil {
+		if tag, ok := to.Params.Get("tag"); ok {
+			dialog.Callee.ToTag = tag
+		}
+	}
+
+	// Extract callee remote target from Contact header in 200 OK.
+	if contact := result.AnswerResponse.Contact(); contact != nil {
+		uri := contact.Address.Clone()
+		dialog.Callee.RemoteTarget = uri
+	}
+
+	h.dialogMgr.CreateDialog(dialog)
+
+	h.logger.Info("call dialog established",
+		"call_id", callID,
+		"caller", ic.CallerIDNum,
+		"callee", ic.RequestURI,
+		"active_calls", h.dialogMgr.ActiveCallCount(),
+	)
+
+	// TODO: Set up media bridging (allocate RTP proxy session, rewrite SDP).
+	// This will be implemented in a subsequent sprint task.
 }
 
 // classifyCall determines whether the INVITE is internal, inbound, or outbound.

@@ -77,6 +77,13 @@ type ActiveCallsProvider interface {
 	GetActiveCallCount() int
 }
 
+// ConfigReloader performs a hot-reload of system configuration without
+// restarting the process. Implemented in cmd/flowpbx to coordinate the
+// SIP trunk registrar, flow engine, and other subsystems.
+type ConfigReloader interface {
+	Reload(ctx context.Context) error
+}
+
 // Server holds HTTP handler dependencies and the chi router.
 type Server struct {
 	router            *chi.Mux
@@ -97,6 +104,7 @@ type Server struct {
 	trunkTester       TrunkTester
 	trunkLifecycle    TrunkLifecycleManager
 	activeCalls       ActiveCallsProvider
+	configReloader    ConfigReloader
 	audioPrompts      database.AudioPromptRepository
 	voicemailBoxes    database.VoicemailBoxRepository
 	voicemailMessages database.VoicemailMessageRepository
@@ -108,7 +116,7 @@ type Server struct {
 }
 
 // NewServer creates the HTTP handler with all routes mounted.
-func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, trunkTester TrunkTester, trunkLifecycle TrunkLifecycleManager, activeCalls ActiveCallsProvider, enc *database.Encryptor) *Server {
+func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, trunkTester TrunkTester, trunkLifecycle TrunkLifecycleManager, activeCalls ActiveCallsProvider, enc *database.Encryptor, reloader ConfigReloader) *Server {
 	s := &Server{
 		router:            chi.NewRouter(),
 		db:                db,
@@ -135,6 +143,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		trunkTester:       trunkTester,
 		trunkLifecycle:    trunkLifecycle,
 		activeCalls:       activeCalls,
+		configReloader:    reloader,
 		encryptor:         enc,
 	}
 
@@ -300,7 +309,7 @@ func (s *Server) routes() {
 
 		r.Route("/system", func(r chi.Router) {
 			r.Get("/status", s.handleSystemStatus)
-			r.Post("/reload", s.handleNotImplemented)
+			r.Post("/reload", s.handleSystemReload)
 		})
 
 		r.Get("/dashboard/stats", s.handleDashboardStats)

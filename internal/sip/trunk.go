@@ -178,6 +178,22 @@ func (tr *TrunkRegistrar) StopTrunk(trunkID int64) {
 	tr.logger.Info("trunk registration stopped", "trunk", entry.trunk.Name)
 }
 
+// StopAllTrunks stops all running trunk registrations and health checks.
+// Returns the list of trunk IDs that were stopped.
+func (tr *TrunkRegistrar) StopAllTrunks() []int64 {
+	tr.mu.Lock()
+	ids := make([]int64, 0, len(tr.states))
+	for id := range tr.states {
+		ids = append(ids, id)
+	}
+	tr.mu.Unlock()
+
+	for _, id := range ids {
+		tr.StopTrunk(id)
+	}
+	return ids
+}
+
 // GetStatus returns the current status for a trunk.
 func (tr *TrunkRegistrar) GetStatus(trunkID int64) (TrunkState, bool) {
 	tr.mu.RLock()

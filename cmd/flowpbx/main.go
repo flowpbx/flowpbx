@@ -119,8 +119,15 @@ func main() {
 		pendingMgr: sipSrv.PendingCallManager(),
 	}
 
+	// Config reloader for hot-reload without restart.
+	reloader := &configReloader{
+		db:        db,
+		registrar: sipSrv.TrunkRegistrar(),
+		enc:       enc,
+	}
+
 	// HTTP server using the api package.
-	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, trunkTester, trunkLifecycle, activeCalls, enc)
+	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, trunkTester, trunkLifecycle, activeCalls, enc, reloader)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
@@ -367,4 +374,25 @@ func (a *activeCallsAdapter) GetActiveCalls() []api.ActiveCallEntry {
 
 func (a *activeCallsAdapter) GetActiveCallCount() int {
 	return a.dialogMgr.ActiveCallCount() + a.pendingMgr.PendingCallCount()
+}
+
+// configReloader implements api.ConfigReloader. It stops all trunk
+// registrations and health checks, then reloads enabled trunks from
+// the database.
+type configReloader struct {
+	db        *database.DB
+	registrar *sipserver.TrunkRegistrar
+	enc       *database.Encryptor
+}
+
+func (cr *configReloader) Reload(ctx context.Context) error {
+	// Stop all running trunks.
+	stopped := cr.registrar.StopAllTrunks()
+	slog.Info("reload: stopped trunks", "count", len(stopped))
+
+	// Reload enabled trunks from the database.
+	loadTrunks(ctx, cr.db, cr.registrar, cr.enc)
+
+	slog.Info("reload: trunks reloaded")
+	return nil
 }

@@ -23,4 +23,4 @@
 - [x] Create Settings page: SIP ports, TLS certs, codecs, recording storage, SMTP, license key, push gateway URL
 - [x] Implement `GET/PUT /api/v1/settings` — system config API
 - [x] Implement `GET /api/v1/system/status` — SIP stack status, trunk registrations
-- [ ] Implement `POST /api/v1/system/reload` — hot-reload config without restart
+- [x] Implement `POST /api/v1/system/reload` — hot-reload config without restart

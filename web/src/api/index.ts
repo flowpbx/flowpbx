@@ -7,6 +7,8 @@ export { listInboundNumbers, getInboundNumber, createInboundNumber, updateInboun
 export { listCDRs, getCDR, buildExportURL } from './cdrs'
 export { listPrompts, uploadPrompt, deletePrompt, promptAudioURL } from './prompts'
 export { getSettings, updateSettings } from './settings'
+export { reloadSystem } from './system'
+export type { ReloadResponse } from './system'
 export { listFlows, getFlow, createFlow, updateFlow, deleteFlow, publishFlow, validateFlow } from './flows'
 export { listRingGroups, getRingGroup, createRingGroup, updateRingGroup, deleteRingGroup } from './ring_groups'
 export { listIVRMenus, getIVRMenu, createIVRMenu, updateIVRMenu, deleteIVRMenu } from './ivr_menus'

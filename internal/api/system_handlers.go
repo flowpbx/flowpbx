@@ -156,6 +156,32 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleSystemReload triggers a hot-reload of system configuration. This
+// re-reads settings from the database and restarts subsystems (trunk
+// registrations, etc.) without restarting the process.
+func (s *Server) handleSystemReload(w http.ResponseWriter, r *http.Request) {
+	if s.configReloader == nil {
+		writeError(w, http.StatusNotImplemented, "config reload not available")
+		return
+	}
+
+	slog.Info("system reload requested")
+
+	if err := s.configReloader.Reload(r.Context()); err != nil {
+		slog.Error("system reload failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "reload failed: "+err.Error())
+		return
+	}
+
+	slog.Info("system reload completed")
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":    "ok",
+		"reloaded":  true,
+		"timestamp": time.Now().Format(time.RFC3339),
+	})
+}
+
 // formatUptime returns a human-readable uptime string like "2d 5h 30m 12s".
 func formatUptime(d time.Duration) string {
 	days := int(d.Hours()) / 24

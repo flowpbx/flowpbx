@@ -1,5 +1,5 @@
 import { useState, useEffect, type FormEvent } from 'react'
-import { getSettings, updateSettings, ApiError } from '../api'
+import { getSettings, updateSettings, reloadSystem, ApiError } from '../api'
 import type {
   SIPSettingsRequest,
   CodecsSettingsRequest,
@@ -60,6 +60,21 @@ export default function Settings() {
 
   // Track which section is being saved.
   const [savingSection, setSavingSection] = useState<string | null>(null)
+  const [reloading, setReloading] = useState(false)
+
+  async function handleReload() {
+    setError('')
+    setSuccess('')
+    setReloading(true)
+    try {
+      await reloadSystem()
+      setSuccess('System configuration reloaded')
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'failed to reload configuration')
+    } finally {
+      setReloading(false)
+    }
+  }
 
   useEffect(() => {
     setLoading(true)
@@ -138,6 +153,17 @@ export default function Settings() {
     <div>
       <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
       <p className="mt-1 text-sm text-gray-500">System configuration. Changes to SIP and codec settings require a reload to take effect.</p>
+
+      <div className="mt-4 flex items-center gap-3">
+        <button
+          onClick={handleReload}
+          disabled={reloading}
+          className="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {reloading ? 'Reloading...' : 'Reload Configuration'}
+        </button>
+        <span className="text-sm text-gray-500">Apply saved changes to the running system without restarting.</span>
+      </div>
 
       {error && (
         <div className="mt-4 max-w-lg rounded-md bg-red-50 border border-red-200 px-3 py-2">

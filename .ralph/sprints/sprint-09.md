@@ -12,7 +12,7 @@
 - [x] Route matched inbound call to destination extension (direct routing, before flow engine)
 - [x] Pass through caller ID from trunk on inbound calls
 - [x] Implement outbound dialling: extension sends INVITE to external number
-- [ ] Implement outbound trunk selection: ordered by priority field, skip failed/disabled trunks
+- [x] Implement outbound trunk selection: ordered by priority field, skip failed/disabled trunks
 - [ ] Implement prefix manipulation: strip N leading digits (`prefix_strip`), add prefix (`prefix_add`)
 - [ ] Implement caller ID rules for outbound: use extension CID, trunk CID, or override
 - [ ] Implement max_channels enforcement per trunk (reject if at limit)

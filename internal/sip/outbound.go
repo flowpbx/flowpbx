@@ -18,31 +18,35 @@ import (
 // OutboundRouter selects a trunk for outbound calls and builds the INVITE
 // to send to the trunk provider.
 type OutboundRouter struct {
-	trunks    database.TrunkRepository
-	encryptor *database.Encryptor
-	logger    *slog.Logger
+	trunks         database.TrunkRepository
+	trunkRegistrar *TrunkRegistrar
+	encryptor      *database.Encryptor
+	logger         *slog.Logger
 }
 
 // NewOutboundRouter creates a new outbound call router.
 func NewOutboundRouter(
 	trunks database.TrunkRepository,
+	trunkRegistrar *TrunkRegistrar,
 	encryptor *database.Encryptor,
 	logger *slog.Logger,
 ) *OutboundRouter {
 	return &OutboundRouter{
-		trunks:    trunks,
-		encryptor: encryptor,
-		logger:    logger.With("subsystem", "outbound-router"),
+		trunks:         trunks,
+		trunkRegistrar: trunkRegistrar,
+		encryptor:      encryptor,
+		logger:         logger.With("subsystem", "outbound-router"),
 	}
 }
 
 // ErrNoTrunksAvailable is returned when no enabled trunks exist.
 var ErrNoTrunksAvailable = fmt.Errorf("no trunks available for outbound routing")
 
-// SelectTrunk returns the first enabled trunk ordered by priority.
-// Trunk selection with failover (skip failed/disabled, try next) is
-// implemented in a subsequent sprint task.
-func (r *OutboundRouter) SelectTrunk(ctx context.Context) (*models.Trunk, error) {
+// SelectTrunks returns enabled trunks ordered by priority, skipping any whose
+// runtime status is failed or disabled. Each trunk's password is decrypted
+// before being returned. The caller should try trunks in order, falling back
+// to the next if one fails.
+func (r *OutboundRouter) SelectTrunks(ctx context.Context) ([]models.Trunk, error) {
 	trunks, err := r.trunks.ListEnabled(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing enabled trunks: %w", err)
@@ -52,24 +56,53 @@ func (r *OutboundRouter) SelectTrunk(ctx context.Context) (*models.Trunk, error)
 		return nil, ErrNoTrunksAvailable
 	}
 
-	// ListEnabled returns trunks ordered by priority, name — take the first.
-	trunk := trunks[0]
-
-	// Decrypt the trunk password if encryption is configured.
-	if trunk.Password != "" && r.encryptor != nil {
-		decrypted, err := r.encryptor.Decrypt(trunk.Password)
-		if err != nil {
-			return nil, fmt.Errorf("decrypting trunk password: %w", err)
+	// Filter out trunks whose runtime status indicates they are not usable.
+	var candidates []models.Trunk
+	for _, trunk := range trunks {
+		if r.trunkRegistrar != nil {
+			state, ok := r.trunkRegistrar.GetStatus(trunk.ID)
+			if ok && (state.Status == TrunkStatusFailed || state.Status == TrunkStatusDisabled) {
+				r.logger.Debug("skipping trunk with unhealthy status",
+					"trunk", trunk.Name,
+					"trunk_id", trunk.ID,
+					"status", state.Status,
+				)
+				continue
+			}
 		}
-		trunk.Password = decrypted
+
+		// Decrypt the trunk password if encryption is configured.
+		if trunk.Password != "" && r.encryptor != nil {
+			decrypted, err := r.encryptor.Decrypt(trunk.Password)
+			if err != nil {
+				r.logger.Warn("skipping trunk: failed to decrypt password",
+					"trunk", trunk.Name,
+					"trunk_id", trunk.ID,
+					"error", err,
+				)
+				continue
+			}
+			trunk.Password = decrypted
+		}
+
+		candidates = append(candidates, trunk)
 	}
 
-	return &trunk, nil
+	if len(candidates) == 0 {
+		return nil, ErrNoTrunksAvailable
+	}
+
+	return candidates, nil
 }
 
 // handleOutboundCall routes a call from a local extension to an external number
 // via a SIP trunk. The PBX acts as a B2BUA: the caller's INVITE is terminated
 // here and a new INVITE is sent to the trunk.
+//
+// Trunk failover: trunks are tried in priority order. If a trunk fails (network
+// error, 5xx, or 4xx indicating a trunk-level issue), the next trunk is tried.
+// Failures that indicate a callee-level issue (404, 486, 480, 487, 488, 600)
+// are returned to the caller immediately without trying the next trunk.
 func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransaction, ic *InviteContext, callID string) {
 	ctx := context.Background()
 
@@ -79,8 +112,8 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 		return
 	}
 
-	// Select the outbound trunk.
-	trunk, err := h.outboundRouter.SelectTrunk(ctx)
+	// Select candidate trunks ordered by priority, filtered by health.
+	trunks, err := h.outboundRouter.SelectTrunks(ctx)
 	if err != nil {
 		if err == ErrNoTrunksAvailable {
 			h.logger.Warn("outbound call failed: no trunks available",
@@ -97,13 +130,6 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 		h.respondError(req, tx, 500, "Internal Server Error")
 		return
 	}
-
-	h.logger.Info("outbound call routing via trunk",
-		"call_id", callID,
-		"trunk", trunk.Name,
-		"trunk_id", trunk.ID,
-		"dialed", ic.RequestURI,
-	)
 
 	// Phase 1: Allocate media bridge to proxy RTP between caller and trunk.
 	var bridge *MediaBridge
@@ -130,8 +156,66 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 		Bridge:     bridge,
 	})
 
-	// Send INVITE to the trunk (runs synchronously until final response).
-	result := h.sendOutboundInvite(outboundCtx, req, tx, ic, trunk, callID, trunkSDP)
+	// Try each trunk in priority order until one succeeds or a callee-level
+	// failure is returned that should not be retried on another trunk.
+	var result *outboundResult
+	var selectedTrunk *models.Trunk
+	for i := range trunks {
+		trunk := &trunks[i]
+
+		h.logger.Info("outbound call routing via trunk",
+			"call_id", callID,
+			"trunk", trunk.Name,
+			"trunk_id", trunk.ID,
+			"dialed", ic.RequestURI,
+			"attempt", i+1,
+			"candidates", len(trunks),
+		)
+
+		result = h.sendOutboundInvite(outboundCtx, req, tx, ic, trunk, callID, trunkSDP)
+
+		// Check if context was cancelled (e.g. CANCEL from caller).
+		if outboundCtx.Err() != nil {
+			break
+		}
+
+		if result.answered {
+			selectedTrunk = trunk
+			break
+		}
+
+		// Determine whether to try the next trunk or return the failure.
+		// Callee-level failures should not be retried on another trunk.
+		if result.err == nil && isCalleeFailure(result.statusCode) {
+			h.logger.Info("outbound call callee failure, not retrying",
+				"call_id", callID,
+				"trunk", trunk.Name,
+				"status", result.statusCode,
+				"reason", result.reason,
+			)
+			selectedTrunk = trunk
+			break
+		}
+
+		// Trunk-level failure — log and try next.
+		if result.err != nil {
+			h.logger.Warn("outbound trunk failed, trying next",
+				"call_id", callID,
+				"trunk", trunk.Name,
+				"error", result.err,
+				"attempt", i+1,
+			)
+		} else {
+			h.logger.Warn("outbound trunk rejected call, trying next",
+				"call_id", callID,
+				"trunk", trunk.Name,
+				"status", result.statusCode,
+				"reason", result.reason,
+				"attempt", i+1,
+			)
+		}
+		selectedTrunk = trunk
+	}
 
 	// Remove from pending calls.
 	pc := h.pendingMgr.Remove(callID)
@@ -153,10 +237,15 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 	}
 
 	if result.err != nil {
-		h.logger.Error("outbound invite to trunk failed",
+		trunkName := ""
+		if selectedTrunk != nil {
+			trunkName = selectedTrunk.Name
+		}
+		h.logger.Error("outbound invite failed on all trunks",
 			"call_id", callID,
-			"trunk", trunk.Name,
+			"trunk", trunkName,
 			"error", result.err,
+			"trunks_tried", len(trunks),
 		)
 		if bridge != nil {
 			bridge.Release()
@@ -166,9 +255,13 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 	}
 
 	if !result.answered {
-		h.logger.Info("outbound call not answered by trunk",
+		trunkName := ""
+		if selectedTrunk != nil {
+			trunkName = selectedTrunk.Name
+		}
+		h.logger.Info("outbound call not answered",
 			"call_id", callID,
-			"trunk", trunk.Name,
+			"trunk", trunkName,
 			"status", result.statusCode,
 			"reason", result.reason,
 		)
@@ -183,7 +276,7 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 
 	h.logger.Info("outbound call answered by trunk",
 		"call_id", callID,
-		"trunk", trunk.Name,
+		"trunk", selectedTrunk.Name,
 	)
 
 	// Send ACK to the trunk for its 200 OK.
@@ -191,7 +284,7 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 	if err := h.forker.Client().WriteRequest(ackReq); err != nil {
 		h.logger.Error("failed to send ack to trunk",
 			"call_id", callID,
-			"trunk", trunk.Name,
+			"trunk", selectedTrunk.Name,
 			"error", err,
 		)
 		result.tx.Terminate()
@@ -256,7 +349,7 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 		},
 		Callee: CallLeg{
 			// Trunk leg has no extension; ContactURI is the trunk address.
-			ContactURI: fmt.Sprintf("sip:%s:%d", trunk.Host, trunk.Port),
+			ContactURI: fmt.Sprintf("sip:%s:%d", selectedTrunk.Host, selectedTrunk.Port),
 		},
 	}
 
@@ -284,11 +377,23 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 		"call_id", callID,
 		"caller", ic.CallerIDNum,
 		"callee", ic.RequestURI,
-		"trunk", trunk.Name,
-		"trunk_id", trunk.ID,
+		"trunk", selectedTrunk.Name,
+		"trunk_id", selectedTrunk.ID,
 		"active_calls", h.dialogMgr.ActiveCallCount(),
 		"media_bridged", mediaSession != nil,
 	)
+}
+
+// isCalleeFailure returns true if the SIP status code indicates a failure
+// specific to the callee (the dialed number) rather than the trunk itself.
+// These failures should not be retried on another trunk.
+func isCalleeFailure(statusCode int) bool {
+	switch statusCode {
+	case 404, 480, 486, 487, 488, 600, 603:
+		return true
+	default:
+		return false
+	}
 }
 
 // outboundResult holds the outcome of sending an INVITE to a trunk.

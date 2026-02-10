@@ -109,9 +109,9 @@ export interface Trunk {
   username: string
   auth_username: string
   register_expiry: number
-  remote_hosts: string
+  remote_hosts: string[]
   local_host: string
-  codecs: string
+  codecs: string[]
   max_channels: number
   caller_id_name: string
   caller_id_num: string
@@ -150,9 +150,10 @@ export interface TrunkRequest {
   password?: string
   auth_username?: string
   register_expiry?: number
-  remote_hosts?: string
+  remote_hosts?: string[]
   local_host?: string
-  codecs?: string
+  codecs?: string[]
+  recording_mode?: string
   max_channels?: number
   caller_id_name?: string
   caller_id_num?: string
@@ -361,7 +362,7 @@ export interface ConferenceBridge {
   id: number
   name: string
   extension: string
-  pin: string
+  has_pin: boolean
   max_members: number
   record: boolean
   mute_on_join: boolean

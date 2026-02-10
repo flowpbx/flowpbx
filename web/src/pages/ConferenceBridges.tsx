@@ -100,7 +100,7 @@ export default function ConferenceBridges() {
     setForm({
       name: bridge.name,
       extension: bridge.extension,
-      pin: bridge.pin,
+      pin: '',
       max_members: bridge.max_members,
       record: bridge.record,
       mute_on_join: bridge.mute_on_join,
@@ -208,7 +208,7 @@ export default function ConferenceBridges() {
       key: 'pin',
       header: 'PIN',
       render: (b) =>
-        b.pin ? (
+        b.has_pin ? (
           <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
             Protected
           </span>

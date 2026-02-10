@@ -33,9 +33,9 @@ export default function Trunks() {
       password: '',
       auth_username: '',
       register_expiry: 300,
-      remote_hosts: '',
+      remote_hosts: [],
       local_host: '',
-      codecs: '',
+      codecs: [],
       max_channels: 0,
       caller_id_name: '',
       caller_id_num: '',
@@ -159,7 +159,7 @@ export default function Trunks() {
     {
       key: 'host',
       header: 'Host',
-      render: (r) => r.type === 'register' ? `${r.host}:${r.port}` : r.remote_hosts || '—',
+      render: (r) => r.type === 'register' ? `${r.host}:${r.port}` : r.remote_hosts.join(', ') || '—',
     },
     { key: 'transport', header: 'Transport', render: (r) => (r.transport || 'udp').toUpperCase() },
     {
@@ -348,8 +348,12 @@ export default function Trunks() {
               <TextInput
                 label="Remote Hosts (comma-separated IPs/CIDRs)"
                 id="trunk_remote_hosts"
-                value={form.remote_hosts ?? ''}
-                onChange={(e) => setForm({ ...form, remote_hosts: e.currentTarget.value })}
+                value={(form.remote_hosts ?? []).join(', ')}
+                onChange={(e) => {
+                  const val = e.currentTarget.value
+                  const hosts = val ? val.split(',').map((s) => s.trim()).filter(Boolean) : []
+                  setForm({ ...form, remote_hosts: hosts })
+                }}
                 placeholder="203.0.113.10, 198.51.100.0/24"
               />
               <TextInput

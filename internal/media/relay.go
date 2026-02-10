@@ -160,3 +160,11 @@ func StartPCMARelay(session *Session, callerRemote, calleeRemote *net.UDPAddr, l
 	relay.Start()
 	return relay
 }
+
+// StartPCMURelay creates and starts a relay for G.711 u-law (PCMU, payload type 0)
+// passthrough between the two legs of the session.
+func StartPCMURelay(session *Session, callerRemote, calleeRemote *net.UDPAddr, logger *slog.Logger) *Relay {
+	relay := NewRelay(session, callerRemote, calleeRemote, []int{PayloadPCMU}, logger)
+	relay.Start()
+	return relay
+}

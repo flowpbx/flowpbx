@@ -21,6 +21,11 @@ func main() {
 	httpPort := flag.Int("http-port", 8081, "HTTP server listen port")
 	dbDSN := flag.String("db-dsn", "", "PostgreSQL connection string (e.g. postgres://user:pass@host/pushgw)")
 	fcmCredentials := flag.String("fcm-credentials", "", "path to Firebase service account JSON file (or set GOOGLE_APPLICATION_CREDENTIALS)")
+	apnsKeyFile := flag.String("apns-key-file", "", "path to APNs .p8 private key file")
+	apnsKeyID := flag.String("apns-key-id", "", "APNs key ID (10-character identifier from Apple)")
+	apnsTeamID := flag.String("apns-team-id", "", "Apple Developer Team ID (10-character identifier)")
+	apnsBundleID := flag.String("apns-bundle-id", "", "iOS app bundle identifier (APNs topic)")
+	apnsSandbox := flag.Bool("apns-sandbox", false, "use APNs sandbox environment instead of production")
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
 	flag.Parse()
 
@@ -56,14 +61,39 @@ func main() {
 		slog.Warn("no --db-dsn provided, license and push logging endpoints will be unavailable")
 	}
 
-	// Initialise FCM sender if credentials are available.
-	var sender pushgw.PushSender
+	// Initialise push senders. At least one (FCM or APNs) must succeed.
+	senders := make(map[string]pushgw.PushSender)
+
 	fcmSender, err := pushgw.NewFCMSender(context.Background(), *fcmCredentials)
 	if err != nil {
-		slog.Error("failed to initialise fcm sender", "error", err)
+		slog.Warn("fcm sender not available", "error", err)
+	} else {
+		senders["fcm"] = fcmSender
+	}
+
+	if *apnsKeyFile != "" {
+		apnsSender, err := pushgw.NewAPNsSender(pushgw.APNsConfig{
+			KeyFile:  *apnsKeyFile,
+			KeyID:    *apnsKeyID,
+			TeamID:   *apnsTeamID,
+			BundleID: *apnsBundleID,
+			Sandbox:  *apnsSandbox,
+		})
+		if err != nil {
+			slog.Error("failed to initialise apns sender", "error", err)
+			os.Exit(1)
+		}
+		senders["apns"] = apnsSender
+	} else {
+		slog.Warn("apns sender not configured (no --apns-key-file provided)")
+	}
+
+	if len(senders) == 0 {
+		slog.Error("no push senders configured, at least one of FCM or APNs is required")
 		os.Exit(1)
 	}
-	sender = fcmSender
+
+	var sender pushgw.PushSender = pushgw.NewMultiSender(senders)
 
 	// Create the push gateway server.
 	var licenseStore pushgw.LicenseStore

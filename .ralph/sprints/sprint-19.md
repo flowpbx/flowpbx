@@ -12,7 +12,7 @@
 - [x] Create push gateway handlers in `internal/pushgw/` (shares Go module with PBX)
 - [x] Create PostgreSQL schema: licenses, installations, push_logs
 - [x] Implement FCM integration (Firebase Admin SDK for Go)
-- [ ] Implement APNs integration (HTTP/2 provider API)
+- [x] Implement APNs integration (HTTP/2 provider API)
 - [ ] Implement `POST /v1/push` — validate license → send push → log result
 - [ ] Implement `POST /v1/license/validate` — validate license key, return entitlements
 - [ ] Implement `POST /v1/license/activate` — activate new installation (generate instance_id)

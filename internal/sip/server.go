@@ -12,7 +12,6 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
-	"github.com/flowpbx/flowpbx/internal/database/models"
 	"github.com/flowpbx/flowpbx/internal/media"
 )
 
@@ -92,7 +91,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor) (*S
 	pendingMgr := NewPendingCallManager(logger)
 	cdrs := database.NewCDRRepository(db)
 	outboundRouter := NewOutboundRouter(trunks, trunkRegistrar, enc, logger)
-	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, proxyIP, logger)
+	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, proxyIP, logger)
 
 	s := &Server{
 		cfg:            cfg,
@@ -326,7 +325,7 @@ func (s *Server) handleBYE(req *sip.Request, tx sip.ServerTransaction) {
 	}
 
 	// Create CDR record.
-	s.createCDR(terminated)
+	s.finalizeCDR(terminated)
 }
 
 // sendBYEToCallee sends a BYE request to the callee (answering device).
@@ -482,39 +481,46 @@ func (s *Server) buildReverseDialogBYE(callerReq *sip.Request) *sip.Request {
 	return bye
 }
 
-// createCDR generates a call detail record from a terminated dialog and
-// persists it to the database.
-func (s *Server) createCDR(d *Dialog) {
-	durationSec := int(d.Duration().Seconds())
-	billableSec := int(d.BillableDuration().Seconds())
-
-	cdr := &models.CDR{
-		CallID:       d.CallID,
-		StartTime:    d.StartTime,
-		AnswerTime:   d.AnswerTime,
-		EndTime:      d.EndTime,
-		Duration:     &durationSec,
-		BillableDur:  &billableSec,
-		CallerIDName: d.CallerIDName,
-		CallerIDNum:  d.CallerIDNum,
-		Callee:       d.CalledNum,
-		Direction:    string(d.Direction),
-		Disposition:  d.Disposition(),
-		HangupCause:  d.HangupCause,
-	}
-
+// finalizeCDR updates the CDR that was created at call start with hangup
+// information from the terminated dialog.
+func (s *Server) finalizeCDR(d *Dialog) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := s.cdrs.Create(ctx, cdr); err != nil {
-		s.logger.Error("failed to create cdr",
+	cdr, err := s.cdrs.GetByCallID(ctx, d.CallID)
+	if err != nil {
+		s.logger.Error("failed to fetch cdr for finalization",
+			"call_id", d.CallID,
+			"error", err,
+		)
+		return
+	}
+	if cdr == nil {
+		s.logger.Warn("no cdr found to finalize",
+			"call_id", d.CallID,
+		)
+		return
+	}
+
+	durationSec := int(d.Duration().Seconds())
+	billableSec := int(d.BillableDuration().Seconds())
+
+	cdr.AnswerTime = d.AnswerTime
+	cdr.EndTime = d.EndTime
+	cdr.Duration = &durationSec
+	cdr.BillableDur = &billableSec
+	cdr.Disposition = d.Disposition()
+	cdr.HangupCause = d.HangupCause
+
+	if err := s.cdrs.Update(ctx, cdr); err != nil {
+		s.logger.Error("failed to finalize cdr",
 			"call_id", d.CallID,
 			"error", err,
 		)
 		return
 	}
 
-	s.logger.Info("cdr created",
+	s.logger.Info("cdr finalized",
 		"call_id", d.CallID,
 		"cdr_id", cdr.ID,
 		"direction", cdr.Direction,
@@ -552,8 +558,8 @@ func (s *Server) handleCANCEL(req *sip.Request, tx sip.ServerTransaction) {
 			"call_id", callID,
 		)
 
-		// Create a CDR for the cancelled call.
-		s.createCancelledCDR(req, callID)
+		// Finalize the CDR for the cancelled call.
+		s.finalizeCancelledCDR(callID)
 		return
 	}
 
@@ -570,7 +576,7 @@ func (s *Server) handleCANCEL(req *sip.Request, tx sip.ServerTransaction) {
 		}
 		terminated := s.dialogMgr.TerminateDialog(callID, "caller_cancel")
 		if terminated != nil {
-			s.createCDR(terminated)
+			s.finalizeCDR(terminated)
 		}
 		return
 	}
@@ -580,53 +586,45 @@ func (s *Server) handleCANCEL(req *sip.Request, tx sip.ServerTransaction) {
 	)
 }
 
-// createCancelledCDR creates a CDR record for a call that was cancelled
+// finalizeCancelledCDR updates the CDR for a call that was cancelled
 // by the caller before being answered.
-func (s *Server) createCancelledCDR(req *sip.Request, callID string) {
-	now := time.Now()
-
-	callerIDName := ""
-	callerIDNum := ""
-	if from := req.From(); from != nil {
-		callerIDName = from.DisplayName
-		callerIDNum = from.Address.User
-	}
-
-	calledNum := ""
-	if req.Recipient.User != "" {
-		calledNum = req.Recipient.User
-	} else if to := req.To(); to != nil {
-		calledNum = to.Address.User
-	}
-
-	durationSec := 0
-	billableSec := 0
-	cdr := &models.CDR{
-		CallID:       callID,
-		StartTime:    now,
-		EndTime:      &now,
-		Duration:     &durationSec,
-		BillableDur:  &billableSec,
-		CallerIDName: callerIDName,
-		CallerIDNum:  callerIDNum,
-		Callee:       calledNum,
-		Direction:    string(CallTypeInternal),
-		Disposition:  "cancelled",
-		HangupCause:  "caller_cancel",
-	}
-
+func (s *Server) finalizeCancelledCDR(callID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := s.cdrs.Create(ctx, cdr); err != nil {
-		s.logger.Error("failed to create cdr for cancelled call",
+	cdr, err := s.cdrs.GetByCallID(ctx, callID)
+	if err != nil {
+		s.logger.Error("failed to fetch cdr for cancelled call",
+			"call_id", callID,
+			"error", err,
+		)
+		return
+	}
+	if cdr == nil {
+		s.logger.Warn("no cdr found for cancelled call",
+			"call_id", callID,
+		)
+		return
+	}
+
+	now := time.Now()
+	durationSec := int(now.Sub(cdr.StartTime).Seconds())
+	billableSec := 0
+	cdr.EndTime = &now
+	cdr.Duration = &durationSec
+	cdr.BillableDur = &billableSec
+	cdr.Disposition = "cancelled"
+	cdr.HangupCause = "caller_cancel"
+
+	if err := s.cdrs.Update(ctx, cdr); err != nil {
+		s.logger.Error("failed to finalize cdr for cancelled call",
 			"call_id", callID,
 			"error", err,
 		)
 		return
 	}
 
-	s.logger.Info("cdr created for cancelled call",
+	s.logger.Info("cdr finalized for cancelled call",
 		"call_id", callID,
 		"cdr_id", cdr.ID,
 		"disposition", cdr.Disposition,

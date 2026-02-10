@@ -88,6 +88,7 @@ type Server struct {
 	trunks         database.TrunkRepository
 	inboundNumbers database.InboundNumberRepository
 	registrations  database.RegistrationRepository
+	cdrs           database.CDRRepository
 	trunkStatus    TrunkStatusProvider
 	trunkTester    TrunkTester
 	trunkLifecycle TrunkLifecycleManager
@@ -108,6 +109,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		trunks:         database.NewTrunkRepository(db),
 		inboundNumbers: database.NewInboundNumberRepository(db),
 		registrations:  database.NewRegistrationRepository(db),
+		cdrs:           database.NewCDRRepository(db),
 		trunkStatus:    trunkStatus,
 		trunkTester:    trunkTester,
 		trunkLifecycle: trunkLifecycle,
@@ -254,9 +256,9 @@ func (s *Server) routes() {
 		})
 
 		r.Route("/cdrs", func(r chi.Router) {
-			r.Get("/", s.handleNotImplemented)
-			r.Get("/export", s.handleNotImplemented)
-			r.Get("/{id}", s.handleNotImplemented)
+			r.Get("/", s.handleListCDRs)
+			r.Get("/export", s.handleExportCDRs)
+			r.Get("/{id}", s.handleGetCDR)
 		})
 
 		r.Route("/recordings", func(r chi.Router) {
@@ -280,7 +282,7 @@ func (s *Server) routes() {
 			r.Post("/reload", s.handleNotImplemented)
 		})
 
-		r.Get("/dashboard/stats", s.handleNotImplemented)
+		r.Get("/dashboard/stats", s.handleDashboardStats)
 
 		r.Route("/calls", func(r chi.Router) {
 			r.Get("/active", s.handleListActiveCalls)

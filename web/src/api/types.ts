@@ -202,3 +202,23 @@ export interface VoicemailBoxRequest {
   retention_days?: number
   notify_extension_id?: number | null
 }
+
+/** Call detail record resource. */
+export interface CDR {
+  id: number
+  call_id: string
+  start_time: string
+  answer_time?: string
+  end_time?: string
+  duration?: number
+  billable_dur?: number
+  caller_id_name: string
+  caller_id_num: string
+  callee: string
+  trunk_id?: number
+  direction: string
+  disposition: string
+  recording_file?: string
+  flow_path?: string
+  hangup_cause: string
+}

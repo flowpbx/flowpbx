@@ -116,3 +116,13 @@ func (r *registrationRepo) CountByExtensionID(ctx context.Context, extensionID i
 	}
 	return count, nil
 }
+
+// Count returns the total number of active registrations.
+func (r *registrationRepo) Count(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM registrations`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("counting all registrations: %w", err)
+	}
+	return count, nil
+}

@@ -63,6 +63,7 @@ type InviteHandler struct {
 	dialogMgr      *DialogManager
 	pendingMgr     *PendingCallManager
 	sessionMgr     *media.SessionManager
+	cdrs           database.CDRRepository
 	proxyIP        string
 	logger         *slog.Logger
 }
@@ -80,6 +81,7 @@ func NewInviteHandler(
 	dialogMgr *DialogManager,
 	pendingMgr *PendingCallManager,
 	sessionMgr *media.SessionManager,
+	cdrs database.CDRRepository,
 	proxyIP string,
 	logger *slog.Logger,
 ) *InviteHandler {
@@ -97,6 +99,7 @@ func NewInviteHandler(
 		dialogMgr:      dialogMgr,
 		pendingMgr:     pendingMgr,
 		sessionMgr:     sessionMgr,
+		cdrs:           cdrs,
 		proxyIP:        proxyIP,
 		logger:         logger.With("subsystem", "invite"),
 	}
@@ -150,6 +153,9 @@ func (h *InviteHandler) HandleInvite(req *sip.Request, tx sip.ServerTransaction)
 		"trunk_id", ic.TrunkID,
 	)
 
+	// Create CDR at call start with initial fields.
+	h.createInitialCDR(ic, callID)
+
 	// Dispatch to call routing based on call type.
 	switch ic.CallType {
 	case CallTypeInternal:
@@ -180,35 +186,35 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 				"call_id", callID,
 				"target", ic.TargetExtension.Extension,
 			)
-			h.respondError(req, tx, 486, "Busy Here")
+			h.respondErrorWithCDR(req, tx, 486, "Busy Here", callID)
 			return
 		case ErrAllBusy:
 			h.logger.Info("internal call rejected: all devices busy",
 				"call_id", callID,
 				"target", ic.TargetExtension.Extension,
 			)
-			h.respondError(req, tx, 486, "Busy Here")
+			h.respondErrorWithCDR(req, tx, 486, "Busy Here", callID)
 			return
 		case ErrNoRegistrations:
 			h.logger.Info("internal call failed: no registrations",
 				"call_id", callID,
 				"target", ic.TargetExtension.Extension,
 			)
-			h.respondError(req, tx, 480, "Temporarily Unavailable")
+			h.respondErrorWithCDR(req, tx, 480, "Temporarily Unavailable", callID)
 			return
 		case ErrExtensionNotFound:
 			h.logger.Info("internal call failed: extension not found",
 				"call_id", callID,
 				"request_uri", ic.RequestURI,
 			)
-			h.respondError(req, tx, 404, "Not Found")
+			h.respondErrorWithCDR(req, tx, 404, "Not Found", callID)
 			return
 		default:
 			h.logger.Error("internal call routing error",
 				"call_id", callID,
 				"error", err,
 			)
-			h.respondError(req, tx, 500, "Internal Server Error")
+			h.respondErrorWithCDR(req, tx, 500, "Internal Server Error", callID)
 			return
 		}
 	}
@@ -231,7 +237,7 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 				"call_id", callID,
 				"error", err,
 			)
-			h.respondError(req, tx, 500, "Internal Server Error")
+			h.respondErrorWithCDR(req, tx, 500, "Internal Server Error", callID)
 			return
 		}
 	}
@@ -292,7 +298,7 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		if bridge != nil {
 			bridge.Release()
 		}
-		h.respondError(req, tx, 500, "Internal Server Error")
+		h.respondErrorWithCDR(req, tx, 500, "Internal Server Error", callID)
 		return
 	}
 
@@ -304,7 +310,7 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		if bridge != nil {
 			bridge.Release()
 		}
-		h.respondError(req, tx, 486, "Busy Here")
+		h.respondErrorWithCDR(req, tx, 486, "Busy Here", callID)
 		return
 	}
 
@@ -318,7 +324,7 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 			bridge.Release()
 		}
 		// 480 Temporarily Unavailable — no device picked up within ring timeout.
-		h.respondError(req, tx, 480, "Temporarily Unavailable")
+		h.respondErrorWithCDR(req, tx, 480, "Temporarily Unavailable", callID)
 		return
 	}
 
@@ -343,7 +349,7 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		if bridge != nil {
 			bridge.Release()
 		}
-		h.respondError(req, tx, 500, "Internal Server Error")
+		h.respondErrorWithCDR(req, tx, 500, "Internal Server Error", callID)
 		return
 	}
 
@@ -433,6 +439,7 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 	}
 
 	h.dialogMgr.CreateDialog(dialog)
+	h.updateCDROnAnswer(callID, 0)
 
 	h.logger.Info("call dialog established",
 		"call_id", callID,
@@ -474,7 +481,7 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 					"active_channels", active,
 					"max_channels", trunk.MaxChannels,
 				)
-				h.respondError(req, tx, 503, "Service Unavailable")
+				h.respondErrorWithCDR(req, tx, 503, "Service Unavailable", callID)
 				return
 			}
 		}
@@ -489,7 +496,7 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 			"did", ic.InboundNumber.Number,
 			"flow_id", ic.InboundNumber.FlowID,
 		)
-		h.respondError(req, tx, 501, "Not Implemented")
+		h.respondErrorWithCDR(req, tx, 501, "Not Implemented", callID)
 		return
 	}
 
@@ -500,7 +507,7 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 			"request_uri", ic.RequestURI,
 			"trunk_id", ic.TrunkID,
 		)
-		h.respondError(req, tx, 404, "Not Found")
+		h.respondErrorWithCDR(req, tx, 404, "Not Found", callID)
 		return
 	}
 
@@ -513,35 +520,35 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 				"call_id", callID,
 				"target", ic.TargetExtension.Extension,
 			)
-			h.respondError(req, tx, 486, "Busy Here")
+			h.respondErrorWithCDR(req, tx, 486, "Busy Here", callID)
 			return
 		case ErrAllBusy:
 			h.logger.Info("inbound call rejected: all devices busy",
 				"call_id", callID,
 				"target", ic.TargetExtension.Extension,
 			)
-			h.respondError(req, tx, 486, "Busy Here")
+			h.respondErrorWithCDR(req, tx, 486, "Busy Here", callID)
 			return
 		case ErrNoRegistrations:
 			h.logger.Info("inbound call failed: no registrations",
 				"call_id", callID,
 				"target", ic.TargetExtension.Extension,
 			)
-			h.respondError(req, tx, 480, "Temporarily Unavailable")
+			h.respondErrorWithCDR(req, tx, 480, "Temporarily Unavailable", callID)
 			return
 		case ErrExtensionNotFound:
 			h.logger.Info("inbound call failed: extension not found",
 				"call_id", callID,
 				"request_uri", ic.RequestURI,
 			)
-			h.respondError(req, tx, 404, "Not Found")
+			h.respondErrorWithCDR(req, tx, 404, "Not Found", callID)
 			return
 		default:
 			h.logger.Error("inbound call routing error",
 				"call_id", callID,
 				"error", err,
 			)
-			h.respondError(req, tx, 500, "Internal Server Error")
+			h.respondErrorWithCDR(req, tx, 500, "Internal Server Error", callID)
 			return
 		}
 	}
@@ -564,7 +571,7 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 				"call_id", callID,
 				"error", err,
 			)
-			h.respondError(req, tx, 500, "Internal Server Error")
+			h.respondErrorWithCDR(req, tx, 500, "Internal Server Error", callID)
 			return
 		}
 	}
@@ -615,7 +622,7 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 		if bridge != nil {
 			bridge.Release()
 		}
-		h.respondError(req, tx, 500, "Internal Server Error")
+		h.respondErrorWithCDR(req, tx, 500, "Internal Server Error", callID)
 		return
 	}
 
@@ -627,7 +634,7 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 		if bridge != nil {
 			bridge.Release()
 		}
-		h.respondError(req, tx, 486, "Busy Here")
+		h.respondErrorWithCDR(req, tx, 486, "Busy Here", callID)
 		return
 	}
 
@@ -640,7 +647,7 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 		if bridge != nil {
 			bridge.Release()
 		}
-		h.respondError(req, tx, 480, "Temporarily Unavailable")
+		h.respondErrorWithCDR(req, tx, 480, "Temporarily Unavailable", callID)
 		return
 	}
 
@@ -663,7 +670,7 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 		if bridge != nil {
 			bridge.Release()
 		}
-		h.respondError(req, tx, 500, "Internal Server Error")
+		h.respondErrorWithCDR(req, tx, 500, "Internal Server Error", callID)
 		return
 	}
 
@@ -743,6 +750,7 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 	}
 
 	h.dialogMgr.CreateDialog(dialog)
+	h.updateCDROnAnswer(callID, ic.TrunkID)
 
 	h.logger.Info("inbound call dialog established",
 		"call_id", callID,
@@ -925,6 +933,169 @@ func buildACKFor2xx(inviteReq *sip.Request, inviteResp *sip.Response) *sip.Reque
 	ack.SetSource(inviteReq.Source())
 
 	return ack
+}
+
+// updateCDROnAnswer updates the CDR with the answer time when a call is answered.
+func (h *InviteHandler) updateCDROnAnswer(callID string, trunkID int64) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cdr, err := h.cdrs.GetByCallID(ctx, callID)
+	if err != nil {
+		h.logger.Error("failed to fetch cdr for answer update",
+			"call_id", callID,
+			"error", err,
+		)
+		return
+	}
+	if cdr == nil {
+		h.logger.Warn("no cdr found to update on answer",
+			"call_id", callID,
+		)
+		return
+	}
+
+	now := time.Now()
+	cdr.AnswerTime = &now
+
+	// Set trunk_id if known at answer time (e.g. outbound calls select trunk during routing).
+	if trunkID > 0 && cdr.TrunkID == nil {
+		cdr.TrunkID = &trunkID
+	}
+
+	if err := h.cdrs.Update(ctx, cdr); err != nil {
+		h.logger.Error("failed to update cdr on answer",
+			"call_id", callID,
+			"error", err,
+		)
+		return
+	}
+
+	h.logger.Debug("cdr updated on answer",
+		"call_id", callID,
+		"cdr_id", cdr.ID,
+	)
+}
+
+// createInitialCDR inserts a CDR row at call start with initial fields.
+// The CDR will be updated on answer and hangup.
+func (h *InviteHandler) createInitialCDR(ic *InviteContext, callID string) {
+	cdr := &models.CDR{
+		CallID:       callID,
+		StartTime:    time.Now(),
+		CallerIDName: ic.CallerIDName,
+		CallerIDNum:  ic.CallerIDNum,
+		Callee:       ic.RequestURI,
+		Direction:    string(ic.CallType),
+		Disposition:  "in_progress",
+	}
+
+	if ic.TrunkID > 0 {
+		cdr.TrunkID = &ic.TrunkID
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := h.cdrs.Create(ctx, cdr); err != nil {
+		h.logger.Error("failed to create initial cdr",
+			"call_id", callID,
+			"error", err,
+		)
+		return
+	}
+
+	h.logger.Debug("initial cdr created",
+		"call_id", callID,
+		"cdr_id", cdr.ID,
+		"direction", cdr.Direction,
+	)
+}
+
+// MapSIPToDisposition maps a SIP response status code to a CDR-friendly
+// disposition label and hangup cause string.
+func MapSIPToDisposition(statusCode int) (disposition string, hangupCause string) {
+	switch {
+	case statusCode >= 200 && statusCode < 300:
+		return "answered", "normal_clearing"
+	case statusCode == 486 || statusCode == 600:
+		return "busy", "busy"
+	case statusCode == 480 || statusCode == 408:
+		return "no_answer", "no_answer"
+	case statusCode == 487:
+		return "cancelled", "caller_cancel"
+	case statusCode == 404:
+		return "failed", "not_found"
+	case statusCode == 403:
+		return "failed", "forbidden"
+	case statusCode == 488:
+		return "failed", "not_acceptable"
+	case statusCode == 501:
+		return "failed", "not_implemented"
+	case statusCode == 503:
+		return "failed", "service_unavailable"
+	case statusCode == 603:
+		return "failed", "declined"
+	case statusCode >= 400 && statusCode < 500:
+		return "failed", "client_error"
+	case statusCode >= 500:
+		return "failed", "server_error"
+	default:
+		return "failed", "unknown"
+	}
+}
+
+// finalizeCDRFailed updates a CDR when a call fails before being answered
+// (e.g. rejected, not found, busy). Uses the SIP response code to determine
+// the disposition and hangup cause.
+func (h *InviteHandler) finalizeCDRFailed(callID string, sipCode int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cdr, err := h.cdrs.GetByCallID(ctx, callID)
+	if err != nil {
+		h.logger.Error("failed to fetch cdr for failure update",
+			"call_id", callID,
+			"error", err,
+		)
+		return
+	}
+	if cdr == nil {
+		return
+	}
+
+	now := time.Now()
+	durationSec := int(now.Sub(cdr.StartTime).Seconds())
+	billableSec := 0
+	disposition, hangupCause := MapSIPToDisposition(sipCode)
+
+	cdr.EndTime = &now
+	cdr.Duration = &durationSec
+	cdr.BillableDur = &billableSec
+	cdr.Disposition = disposition
+	cdr.HangupCause = hangupCause
+
+	if err := h.cdrs.Update(ctx, cdr); err != nil {
+		h.logger.Error("failed to finalize cdr on failure",
+			"call_id", callID,
+			"error", err,
+		)
+	}
+}
+
+// respondErrorWithCDR sends a SIP error response and finalizes the CDR with
+// the failure disposition based on the SIP status code.
+func (h *InviteHandler) respondErrorWithCDR(req *sip.Request, tx sip.ServerTransaction, code int, reason string, callID string) {
+	res := sip.NewResponseFromRequest(req, code, reason, nil)
+	if err := tx.Respond(res); err != nil {
+		h.logger.Error("failed to send error response",
+			"code", code,
+			"error", err,
+		)
+	}
+	if callID != "" {
+		h.finalizeCDRFailed(callID, code)
+	}
 }
 
 func (h *InviteHandler) respondError(req *sip.Request, tx sip.ServerTransaction, code int, reason string) {

@@ -108,7 +108,7 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 
 	if h.outboundRouter == nil {
 		h.logger.Error("outbound router not configured", "call_id", callID)
-		h.respondError(req, tx, 500, "Internal Server Error")
+		h.respondErrorWithCDR(req, tx, 500, "Internal Server Error", callID)
 		return
 	}
 
@@ -120,14 +120,14 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 				"call_id", callID,
 				"dialed", ic.RequestURI,
 			)
-			h.respondError(req, tx, 503, "Service Unavailable")
+			h.respondErrorWithCDR(req, tx, 503, "Service Unavailable", callID)
 			return
 		}
 		h.logger.Error("outbound call failed: trunk selection error",
 			"call_id", callID,
 			"error", err,
 		)
-		h.respondError(req, tx, 500, "Internal Server Error")
+		h.respondErrorWithCDR(req, tx, 500, "Internal Server Error", callID)
 		return
 	}
 
@@ -141,7 +141,7 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 				"call_id", callID,
 				"error", err,
 			)
-			h.respondError(req, tx, 500, "Internal Server Error")
+			h.respondErrorWithCDR(req, tx, 500, "Internal Server Error", callID)
 			return
 		}
 	}
@@ -260,7 +260,7 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 		if bridge != nil {
 			bridge.Release()
 		}
-		h.respondError(req, tx, 503, "Service Unavailable")
+		h.respondErrorWithCDR(req, tx, 503, "Service Unavailable", callID)
 		return
 	}
 
@@ -278,7 +278,7 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 		if bridge != nil {
 			bridge.Release()
 		}
-		h.respondError(req, tx, 502, "Bad Gateway")
+		h.respondErrorWithCDR(req, tx, 502, "Bad Gateway", callID)
 		return
 	}
 
@@ -298,7 +298,7 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 		}
 		// Map trunk response codes to caller-facing responses.
 		code, reason := mapTrunkFailure(result.statusCode, result.reason)
-		h.respondError(req, tx, code, reason)
+		h.respondErrorWithCDR(req, tx, code, reason, callID)
 		return
 	}
 
@@ -319,7 +319,7 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 		if bridge != nil {
 			bridge.Release()
 		}
-		h.respondError(req, tx, 500, "Internal Server Error")
+		h.respondErrorWithCDR(req, tx, 500, "Internal Server Error", callID)
 		return
 	}
 
@@ -401,6 +401,7 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 	}
 
 	h.dialogMgr.CreateDialog(dialog)
+	h.updateCDROnAnswer(callID, selectedTrunk.ID)
 
 	h.logger.Info("outbound call dialog established",
 		"call_id", callID,

@@ -111,12 +111,24 @@ type CallFlowRepository interface {
 	Delete(ctx context.Context, id int64) error
 }
 
+// CDRListFilter specifies filtering and pagination for CDR list queries.
+type CDRListFilter struct {
+	Limit     int
+	Offset    int
+	Search    string // matches caller_id_name, caller_id_num, or callee
+	Direction string // "inbound", "outbound", "internal", or "" for all
+	StartDate string // RFC3339 or YYYY-MM-DD
+	EndDate   string // RFC3339 or YYYY-MM-DD
+}
+
 // CDRRepository manages call detail records.
 type CDRRepository interface {
 	Create(ctx context.Context, cdr *models.CDR) error
 	GetByID(ctx context.Context, id int64) (*models.CDR, error)
 	GetByCallID(ctx context.Context, callID string) (*models.CDR, error)
 	Update(ctx context.Context, cdr *models.CDR) error
+	List(ctx context.Context, filter CDRListFilter) ([]models.CDR, int, error)
+	ListRecent(ctx context.Context, limit int) ([]models.CDR, error)
 }
 
 // RegistrationRepository manages active SIP registrations.
@@ -128,6 +140,7 @@ type RegistrationRepository interface {
 	DeleteAll(ctx context.Context) (int64, error)
 	DeleteByExtensionAndContact(ctx context.Context, extensionID int64, contactURI string) error
 	CountByExtensionID(ctx context.Context, extensionID int64) (int64, error)
+	Count(ctx context.Context) (int64, error)
 }
 
 // ConferenceBridgeRepository manages conference bridges.

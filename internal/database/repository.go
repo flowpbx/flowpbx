@@ -40,6 +40,7 @@ type TrunkRepository interface {
 	Create(ctx context.Context, trunk *models.Trunk) error
 	GetByID(ctx context.Context, id int64) (*models.Trunk, error)
 	List(ctx context.Context) ([]models.Trunk, error)
+	ListEnabled(ctx context.Context) ([]models.Trunk, error)
 	Update(ctx context.Context, trunk *models.Trunk) error
 	Delete(ctx context.Context, id int64) error
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -271,11 +272,16 @@ func generateToken(byteLen int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// authEnvelope matches the api package's envelope format for error responses.
+// Defined here to avoid importing the api package (circular dependency).
+type authEnvelope struct {
+	Error string `json:"error,omitempty"`
+}
+
 // writeAuthError writes a JSON error matching the API envelope format.
-// This avoids importing the api package (which would create a circular dependency).
+// Uses json.NewEncoder for safe encoding instead of string concatenation.
 func writeAuthError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	// Manually format to match envelope: { "error": "..." }
-	w.Write([]byte(`{"error":"` + msg + `"}`))
+	json.NewEncoder(w).Encode(authEnvelope{Error: msg}) //nolint:errcheck
 }

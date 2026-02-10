@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -26,10 +27,9 @@ func Recoverer(next http.Handler) http.Handler {
 					"stack", string(stack),
 				)
 
-				// Avoid writing if the response has already started.
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(`{"error":"internal server error"}`))
+				json.NewEncoder(w).Encode(authEnvelope{Error: "internal server error"}) //nolint:errcheck
 			}
 		}()
 

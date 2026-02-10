@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -278,8 +277,8 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		SIPPort  int    `json:"sip_port"`
 		SIPTLS   int    `json:"sip_tls_port"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if errMsg := readJSON(r, &req); errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
 		return
 	}
 
@@ -350,8 +349,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if errMsg := readJSON(r, &req); errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
 		return
 	}
 	if req.Username == "" || req.Password == "" {

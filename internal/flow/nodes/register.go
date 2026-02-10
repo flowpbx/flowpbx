@@ -28,4 +28,11 @@ func RegisterAll(
 	engine.RegisterHandler("time_switch", NewTimeSwitchHandler(engine, logger))
 	engine.RegisterHandler("ivr_menu", NewIVRMenuHandler(engine, sipActions, logger))
 	engine.RegisterHandler("voicemail", NewVoicemailHandler(engine, sipActions, voicemailMessages, extensions, logger, dataDir))
+	engine.RegisterHandler("play_message", NewPlayMessageHandler(engine, sipActions, logger))
+	engine.RegisterHandler("hangup", NewHangupHandler(sipActions, logger))
+	engine.RegisterHandler("set_caller_id", NewSetCallerIDHandler(logger))
+	engine.RegisterHandler("transfer", NewTransferHandler(sipActions, logger))
+	engine.RegisterHandler("conference", NewConferenceHandler(engine, sipActions, logger))
+	engine.RegisterHandler("webhook", NewWebhookHandler(logger))
+	engine.RegisterHandler("queue", NewQueueHandler(logger))
 }

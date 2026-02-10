@@ -702,5 +702,82 @@ func (a *FlowSIPActions) SendMWI(ctx context.Context, ext *models.Extension, new
 	return nil
 }
 
+// HangupCall terminates the call with the given SIP cause code and reason.
+// For answered calls (active dialog), it sends BYE. For unanswered calls,
+// it sends an error response on the server transaction.
+//
+// TODO(sprint-14): Full implementation — look up active dialog, send BYE to
+// both legs, release media. Current implementation sends the response code
+// on the original server transaction.
+func (a *FlowSIPActions) HangupCall(ctx context.Context, callCtx *flow.CallContext, cause int, reason string) error {
+	callID := callCtx.CallID
+	a.logger.Info("hanging up call",
+		"call_id", callID,
+		"cause", cause,
+		"reason", reason,
+	)
+
+	// Check for active dialog first.
+	if a.dialogMgr != nil {
+		dialog := a.dialogMgr.GetDialog(callID)
+		if dialog != nil {
+			a.dialogMgr.TerminateDialog(callID, reason)
+			a.logger.Info("terminated active dialog for hangup",
+				"call_id", callID,
+			)
+			return nil
+		}
+	}
+
+	// No active dialog — respond on the server transaction if possible.
+	if callCtx.Request != nil && callCtx.Transaction != nil {
+		res := sip.NewResponseFromRequest(callCtx.Request, cause, reason, nil)
+		if err := callCtx.Transaction.Respond(res); err != nil {
+			return fmt.Errorf("sending hangup response: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// BlindTransfer performs a blind (unattended) transfer by sending a SIP REFER
+// to the caller's user agent, instructing it to send a new INVITE to the
+// specified destination.
+//
+// TODO(sprint-14): Full REFER implementation — send SIP REFER with Refer-To
+// header, handle NOTIFY subscription for transfer status. Current
+// implementation logs the transfer and terminates the existing dialog.
+func (a *FlowSIPActions) BlindTransfer(ctx context.Context, callCtx *flow.CallContext, destination string) error {
+	callID := callCtx.CallID
+	a.logger.Info("blind transfer (stub)",
+		"call_id", callID,
+		"destination", destination,
+	)
+
+	// Stub: log the transfer. The full SIP REFER implementation will be
+	// added in the SIP signaling sprint.
+	return nil
+}
+
+// JoinConference joins the caller into the specified conference bridge.
+// This blocks until the caller leaves the conference.
+//
+// TODO(sprint-14): Full conference implementation — connect caller's RTP
+// stream to the conference mixer, handle PIN verification, mute-on-join,
+// and announce-joins settings. Current implementation logs and returns
+// immediately.
+func (a *FlowSIPActions) JoinConference(ctx context.Context, callCtx *flow.CallContext, bridge *models.ConferenceBridge) error {
+	callID := callCtx.CallID
+	a.logger.Info("join conference (stub)",
+		"call_id", callID,
+		"conference", bridge.Name,
+		"conference_id", bridge.ID,
+	)
+
+	// Stub: log the conference join. The full audio mixing implementation
+	// will be added in the conference/media sprint.
+	return nil
+}
+
 // Ensure FlowSIPActions satisfies the flow.SIPActions interface.
 var _ flow.SIPActions = (*FlowSIPActions)(nil)

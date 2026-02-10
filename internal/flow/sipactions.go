@@ -75,4 +75,20 @@ type SIPActions interface {
 	// update the Message Waiting Indicator (voicemail lamp). newMessages
 	// and oldMessages indicate the counts for the mailbox summary.
 	SendMWI(ctx context.Context, ext *models.Extension, newMessages int, oldMessages int) error
+
+	// HangupCall terminates the call with the given SIP cause code and
+	// reason phrase. For answered calls this sends BYE; for unanswered
+	// calls this sends the appropriate error response.
+	HangupCall(ctx context.Context, callCtx *CallContext, cause int, reason string) error
+
+	// BlindTransfer performs a blind (unattended) transfer of the call
+	// to the specified destination URI or extension number. The call is
+	// handed off and the flow terminates.
+	BlindTransfer(ctx context.Context, callCtx *CallContext, destination string) error
+
+	// JoinConference joins the caller into the specified conference bridge.
+	// This call blocks until the caller leaves the conference (hang up,
+	// kicked, or context cancellation). PIN verification is handled
+	// internally if the bridge requires one.
+	JoinConference(ctx context.Context, callCtx *CallContext, bridge *models.ConferenceBridge) error
 }

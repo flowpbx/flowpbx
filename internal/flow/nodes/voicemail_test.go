@@ -53,6 +53,18 @@ func (m *mockVoicemailSIPActions) SendMWI(_ context.Context, ext *models.Extensi
 	return m.mwiErr
 }
 
+func (m *mockVoicemailSIPActions) HangupCall(_ context.Context, _ *flow.CallContext, _ int, _ string) error {
+	return nil
+}
+
+func (m *mockVoicemailSIPActions) BlindTransfer(_ context.Context, _ *flow.CallContext, _ string) error {
+	return nil
+}
+
+func (m *mockVoicemailSIPActions) JoinConference(_ context.Context, _ *flow.CallContext, _ *models.ConferenceBridge) error {
+	return nil
+}
+
 // mockVoicemailMessageRepo implements database.VoicemailMessageRepository
 // for testing. It stores created messages in memory.
 type mockVoicemailMessageRepo struct {

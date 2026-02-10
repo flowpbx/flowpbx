@@ -49,6 +49,18 @@ func (m *mockSIPActions) SendMWI(_ context.Context, _ *models.Extension, _ int, 
 	return nil
 }
 
+func (m *mockSIPActions) HangupCall(_ context.Context, _ *flow.CallContext, _ int, _ string) error {
+	return nil
+}
+
+func (m *mockSIPActions) BlindTransfer(_ context.Context, _ *flow.CallContext, _ string) error {
+	return nil
+}
+
+func (m *mockSIPActions) JoinConference(_ context.Context, _ *flow.CallContext, _ *models.ConferenceBridge) error {
+	return nil
+}
+
 func newTestIVRHandler(menu *models.IVRMenu, sip *mockSIPActions) *IVRMenuHandler {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	resolver := &mockEntityResolver{entity: menu}

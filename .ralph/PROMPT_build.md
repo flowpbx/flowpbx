@@ -38,6 +38,7 @@ The full PRD is at `.ralph/flowpbx.md`. Read relevant sections before implementi
 5. **Verify** with `gofmt`, `go vet`, and `go build ./...`
 6. **Update** the sprint file (mark `[x]`)
 7. **Commit** with conventional format: `feat(scope): description` or `fix(scope): description`
+8. **Push** to remote with `git push`
 
 ## Rules
 

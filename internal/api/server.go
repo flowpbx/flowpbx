@@ -102,6 +102,7 @@ type Server struct {
 	ringGroups        database.RingGroupRepository
 	ivrMenus          database.IVRMenuRepository
 	timeSwitches      database.TimeSwitchRepository
+	conferenceBridges database.ConferenceBridgeRepository
 	encryptor         *database.Encryptor
 }
 
@@ -126,6 +127,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		ringGroups:        database.NewRingGroupRepository(db),
 		ivrMenus:          database.NewIVRMenuRepository(db),
 		timeSwitches:      database.NewTimeSwitchRepository(db),
+		conferenceBridges: database.NewConferenceBridgeRepository(db),
 		flowValidator:     flow.NewValidator(nil),
 		trunkStatus:       trunkStatus,
 		trunkTester:       trunkTester,
@@ -251,12 +253,12 @@ func (s *Server) routes() {
 		})
 
 		r.Route("/conferences", func(r chi.Router) {
-			r.Get("/", s.handleNotImplemented)
-			r.Post("/", s.handleNotImplemented)
+			r.Get("/", s.handleListConferenceBridges)
+			r.Post("/", s.handleCreateConferenceBridge)
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", s.handleNotImplemented)
-				r.Put("/", s.handleNotImplemented)
-				r.Delete("/", s.handleNotImplemented)
+				r.Get("/", s.handleGetConferenceBridge)
+				r.Put("/", s.handleUpdateConferenceBridge)
+				r.Delete("/", s.handleDeleteConferenceBridge)
 			})
 		})
 

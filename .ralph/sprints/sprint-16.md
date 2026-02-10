@@ -17,7 +17,7 @@
 - [x] Create time switch weekly grid preview
 - [x] Create time switch holiday/specific date override support
 - [x] Create timezone selector component
-- [ ] Create Conference Bridges CRUD page + API: `GET/POST/PUT/DELETE /api/v1/conferences`
+- [x] Create Conference Bridges CRUD page + API: `GET/POST/PUT/DELETE /api/v1/conferences`
 - [ ] Create Recordings browser page: list, search, play, download, delete
 - [ ] Create Recordings API: `GET /api/v1/recordings`, `GET .../download`, `DELETE`
 - [ ] Create Settings page: SIP ports, TLS certs, codecs, recording storage, SMTP, license key, push gateway URL

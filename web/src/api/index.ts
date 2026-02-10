@@ -11,6 +11,7 @@ export { listFlows, getFlow, createFlow, updateFlow, deleteFlow, publishFlow, va
 export { listRingGroups, getRingGroup, createRingGroup, updateRingGroup, deleteRingGroup } from './ring_groups'
 export { listIVRMenus, getIVRMenu, createIVRMenu, updateIVRMenu, deleteIVRMenu } from './ivr_menus'
 export { listTimeSwitches, getTimeSwitch, createTimeSwitch, updateTimeSwitch, deleteTimeSwitch } from './time_switches'
+export { listConferenceBridges, getConferenceBridge, createConferenceBridge, updateConferenceBridge, deleteConferenceBridge } from './conferences'
 export type {
   ApiEnvelope,
   PaginatedResponse,
@@ -39,6 +40,8 @@ export type {
   TimeSwitchRequest,
   TimeSwitchRule,
   TimeSwitchOverride,
+  ConferenceBridge,
+  ConferenceBridgeRequest,
   CDR,
   CallFlow,
   CallFlowRequest,

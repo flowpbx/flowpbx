@@ -343,6 +343,30 @@ export interface TimeSwitchRequest {
   default_dest?: string
 }
 
+/** Conference bridge resource. */
+export interface ConferenceBridge {
+  id: number
+  name: string
+  extension: string
+  pin: string
+  max_members: number
+  record: boolean
+  mute_on_join: boolean
+  announce_joins: boolean
+  created_at: string
+}
+
+/** Conference bridge create/update request. */
+export interface ConferenceBridgeRequest {
+  name: string
+  extension?: string
+  pin?: string
+  max_members?: number
+  record?: boolean
+  mute_on_join?: boolean
+  announce_joins?: boolean
+}
+
 /** Call detail record resource. */
 export interface CDR {
   id: number

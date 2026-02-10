@@ -1,6 +1,6 @@
-import { useState, useEffect, type FormEvent } from 'react'
-import { listTrunks, createTrunk, updateTrunk, deleteTrunk, ApiError } from '../api'
-import type { Trunk, TrunkRequest } from '../api'
+import { useState, useEffect, useRef, useCallback, type FormEvent } from 'react'
+import { listTrunks, listTrunkStatuses, createTrunk, updateTrunk, deleteTrunk, ApiError } from '../api'
+import type { Trunk, TrunkRequest, TrunkStatusEntry } from '../api'
 import DataTable, { type Column } from '../components/DataTable'
 import { TextInput, NumberInput, SelectField, Toggle } from '../components/FormFields'
 
@@ -15,6 +15,9 @@ export default function Trunks() {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  const [statuses, setStatuses] = useState<Record<number, TrunkStatusEntry>>({})
+  const statusInterval = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const [form, setForm] = useState<TrunkRequest>(emptyForm())
 
@@ -42,6 +45,18 @@ export default function Trunks() {
     }
   }
 
+  const fetchStatuses = useCallback(() => {
+    listTrunkStatuses()
+      .then((entries) => {
+        const map: Record<number, TrunkStatusEntry> = {}
+        for (const e of entries) {
+          map[e.trunk_id] = e
+        }
+        setStatuses(map)
+      })
+      .catch(() => {})
+  }, [])
+
   function load(newOffset: number) {
     setLoading(true)
     listTrunks({ limit: PAGE_SIZE, offset: newOffset })
@@ -59,7 +74,14 @@ export default function Trunks() {
 
   useEffect(() => {
     load(0)
-  }, [])
+    fetchStatuses()
+
+    // Poll trunk statuses every 10 seconds while viewing the list.
+    statusInterval.current = setInterval(fetchStatuses, 10000)
+    return () => {
+      if (statusInterval.current) clearInterval(statusInterval.current)
+    }
+  }, [fetchStatuses])
 
   function openCreate() {
     setForm(emptyForm())
@@ -143,12 +165,49 @@ export default function Trunks() {
     {
       key: 'enabled',
       header: 'Status',
-      render: (r) => (
-        <div className="flex items-center gap-1.5">
-          <span className={`inline-block w-2 h-2 rounded-full ${r.enabled ? 'bg-green-500' : 'bg-gray-300'}`} />
-          <span className="text-sm">{r.enabled ? 'Enabled' : 'Disabled'}</span>
-        </div>
-      ),
+      render: (r) => {
+        if (!r.enabled) {
+          return (
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block w-2 h-2 rounded-full bg-gray-300" />
+              <span className="text-sm text-gray-500">Disabled</span>
+            </div>
+          )
+        }
+
+        const st = statuses[r.id]
+        const status = st?.status ?? 'unknown'
+
+        const styles: Record<string, { dot: string; text: string; label: string }> = {
+          registered:   { dot: 'bg-green-500', text: 'text-green-700', label: 'Registered' },
+          registering:  { dot: 'bg-yellow-400', text: 'text-yellow-700', label: 'Registering' },
+          failed:       { dot: 'bg-red-500', text: 'text-red-700', label: 'Failed' },
+          unregistered: { dot: 'bg-gray-400', text: 'text-gray-600', label: 'Unregistered' },
+          unknown:      { dot: 'bg-gray-400', text: 'text-gray-600', label: 'Unknown' },
+        }
+
+        // IP-auth trunks don't register — show healthy/unhealthy based on OPTIONS if available.
+        if (r.type === 'ip' && st) {
+          const ipStyle = st.options_healthy
+            ? { dot: 'bg-green-500', text: 'text-green-700', label: 'Healthy' }
+            : { dot: 'bg-gray-400', text: 'text-gray-600', label: 'IP Auth' }
+          return (
+            <div className="flex items-center gap-1.5">
+              <span className={`inline-block w-2 h-2 rounded-full ${ipStyle.dot}`} />
+              <span className={`text-sm ${ipStyle.text}`}>{ipStyle.label}</span>
+            </div>
+          )
+        }
+
+        const s = styles[status] ?? styles.unknown
+
+        return (
+          <div className="flex items-center gap-1.5" title={st?.last_error || undefined}>
+            <span className={`inline-block w-2 h-2 rounded-full ${s.dot}`} />
+            <span className={`text-sm ${s.text}`}>{s.label}</span>
+          </div>
+        )
+      },
     },
     {
       key: 'actions',

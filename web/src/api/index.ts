@@ -1,7 +1,7 @@
 export { ApiError, get, post, put, del, list } from './client'
 export { getHealth, login, logout, getMe, setup } from './auth'
 export { listExtensions, getExtension, createExtension, updateExtension, deleteExtension } from './extensions'
-export { listTrunks, getTrunk, createTrunk, updateTrunk, deleteTrunk } from './trunks'
+export { listTrunks, getTrunk, createTrunk, updateTrunk, deleteTrunk, listTrunkStatuses } from './trunks'
 export { listVoicemailBoxes, getVoicemailBox, createVoicemailBox, updateVoicemailBox, deleteVoicemailBox } from './voicemail'
 export type {
   ApiEnvelope,
@@ -16,6 +16,7 @@ export type {
   ExtensionRequest,
   Trunk,
   TrunkRequest,
+  TrunkStatusEntry,
   VoicemailBox,
   VoicemailBoxRequest,
 } from './types'

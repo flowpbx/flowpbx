@@ -14,6 +14,7 @@ export interface PaginatedResponse<T> {
 
 /** Pagination query parameters. */
 export interface PaginationParams {
+  [key: string]: string | number | undefined
   limit?: number
   offset?: number
 }
@@ -107,6 +108,21 @@ export interface Trunk {
   status?: string
   created_at: string
   updated_at: string
+}
+
+/** Trunk runtime registration status from GET /api/v1/trunks/status. */
+export interface TrunkStatusEntry {
+  trunk_id: number
+  name: string
+  type: string
+  status: string
+  last_error: string
+  retry_attempt: number
+  options_healthy: boolean
+  failed_at?: string
+  registered_at?: string
+  expires_at?: string
+  last_options_at?: string
 }
 
 /** Trunk create/update request. */

@@ -1,5 +1,5 @@
 import { get, post, put, del, list } from './client'
-import type { Trunk, TrunkRequest, PaginatedResponse, PaginationParams } from './types'
+import type { Trunk, TrunkRequest, TrunkStatusEntry, PaginatedResponse, PaginationParams } from './types'
 
 /** List trunks with pagination. */
 export function listTrunks(params?: PaginationParams): Promise<PaginatedResponse<Trunk>> {
@@ -24,4 +24,9 @@ export function updateTrunk(id: number, data: TrunkRequest): Promise<Trunk> {
 /** Delete a trunk. */
 export function deleteTrunk(id: number): Promise<null> {
   return del(`/trunks/${id}`)
+}
+
+/** List all trunk registration statuses. */
+export function listTrunkStatuses(): Promise<TrunkStatusEntry[]> {
+  return get<TrunkStatusEntry[]>('/trunks/status')
 }

@@ -24,14 +24,14 @@ func (r *trunkRepo) Create(ctx context.Context, trunk *models.Trunk) error {
 		`INSERT INTO trunks (name, type, enabled, host, port, transport, username,
 		 password, auth_username, register_expiry, remote_hosts, local_host, codecs,
 		 max_channels, caller_id_name, caller_id_num, prefix_strip, prefix_add,
-		 priority, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+		 priority, recording_mode, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		 datetime('now'), datetime('now'))`,
 		trunk.Name, trunk.Type, trunk.Enabled, trunk.Host, trunk.Port, trunk.Transport,
 		trunk.Username, trunk.Password, trunk.AuthUsername, trunk.RegisterExpiry,
 		trunk.RemoteHosts, trunk.LocalHost, trunk.Codecs, trunk.MaxChannels,
 		trunk.CallerIDName, trunk.CallerIDNum, trunk.PrefixStrip, trunk.PrefixAdd,
-		trunk.Priority,
+		trunk.Priority, trunk.RecordingMode,
 	)
 	if err != nil {
 		return fmt.Errorf("inserting trunk: %w", err)
@@ -51,7 +51,7 @@ func (r *trunkRepo) GetByID(ctx context.Context, id int64) (*models.Trunk, error
 		`SELECT id, name, type, enabled, host, port, transport, username, password,
 		 auth_username, register_expiry, remote_hosts, local_host, codecs,
 		 max_channels, caller_id_name, caller_id_num, prefix_strip, prefix_add,
-		 priority, created_at, updated_at
+		 priority, recording_mode, created_at, updated_at
 		 FROM trunks WHERE id = ?`, id,
 	))
 }
@@ -62,7 +62,7 @@ func (r *trunkRepo) List(ctx context.Context) ([]models.Trunk, error) {
 		`SELECT id, name, type, enabled, host, port, transport, username, password,
 		 auth_username, register_expiry, remote_hosts, local_host, codecs,
 		 max_channels, caller_id_name, caller_id_num, prefix_strip, prefix_add,
-		 priority, created_at, updated_at
+		 priority, recording_mode, created_at, updated_at
 		 FROM trunks ORDER BY priority, name`)
 	if err != nil {
 		return nil, fmt.Errorf("querying trunks: %w", err)
@@ -78,7 +78,7 @@ func (r *trunkRepo) ListEnabled(ctx context.Context) ([]models.Trunk, error) {
 		`SELECT id, name, type, enabled, host, port, transport, username, password,
 		 auth_username, register_expiry, remote_hosts, local_host, codecs,
 		 max_channels, caller_id_name, caller_id_num, prefix_strip, prefix_add,
-		 priority, created_at, updated_at
+		 priority, recording_mode, created_at, updated_at
 		 FROM trunks WHERE enabled = 1 ORDER BY priority, name`)
 	if err != nil {
 		return nil, fmt.Errorf("querying enabled trunks: %w", err)
@@ -95,13 +95,13 @@ func (r *trunkRepo) Update(ctx context.Context, trunk *models.Trunk) error {
 		 transport = ?, username = ?, password = ?, auth_username = ?,
 		 register_expiry = ?, remote_hosts = ?, local_host = ?, codecs = ?,
 		 max_channels = ?, caller_id_name = ?, caller_id_num = ?, prefix_strip = ?,
-		 prefix_add = ?, priority = ?, updated_at = datetime('now')
+		 prefix_add = ?, priority = ?, recording_mode = ?, updated_at = datetime('now')
 		 WHERE id = ?`,
 		trunk.Name, trunk.Type, trunk.Enabled, trunk.Host, trunk.Port, trunk.Transport,
 		trunk.Username, trunk.Password, trunk.AuthUsername, trunk.RegisterExpiry,
 		trunk.RemoteHosts, trunk.LocalHost, trunk.Codecs, trunk.MaxChannels,
 		trunk.CallerIDName, trunk.CallerIDNum, trunk.PrefixStrip, trunk.PrefixAdd,
-		trunk.Priority, trunk.ID,
+		trunk.Priority, trunk.RecordingMode, trunk.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("updating trunk: %w", err)
@@ -124,7 +124,7 @@ func (r *trunkRepo) scanOne(row *sql.Row) (*models.Trunk, error) {
 		&t.Transport, &t.Username, &t.Password, &t.AuthUsername, &t.RegisterExpiry,
 		&t.RemoteHosts, &t.LocalHost, &t.Codecs, &t.MaxChannels, &t.CallerIDName,
 		&t.CallerIDNum, &t.PrefixStrip, &t.PrefixAdd, &t.Priority,
-		&t.CreatedAt, &t.UpdatedAt)
+		&t.RecordingMode, &t.CreatedAt, &t.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -142,7 +142,7 @@ func (r *trunkRepo) scanMany(rows *sql.Rows) ([]models.Trunk, error) {
 			&t.Transport, &t.Username, &t.Password, &t.AuthUsername, &t.RegisterExpiry,
 			&t.RemoteHosts, &t.LocalHost, &t.Codecs, &t.MaxChannels, &t.CallerIDName,
 			&t.CallerIDNum, &t.PrefixStrip, &t.PrefixAdd, &t.Priority,
-			&t.CreatedAt, &t.UpdatedAt); err != nil {
+			&t.RecordingMode, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning trunk row: %w", err)
 		}
 		trunks = append(trunks, t)

@@ -10,7 +10,7 @@
 
 - [x] Create `internal/media/recorder.go` — fork RTP stream to WAV writer (separate goroutine, non-blocking)
 - [x] Implement per-extension recording config: always / off / on_demand
-- [ ] Implement per-trunk recording config
+- [x] Implement per-trunk recording config
 - [ ] Implement global recording policy setting
 - [ ] Organize recording files by date: `$DATA_DIR/recordings/YYYY/MM/DD/call_{id}.wav`
 - [ ] Store recording_file path in CDR on recording completion

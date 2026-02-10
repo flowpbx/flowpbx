@@ -33,6 +33,7 @@ type trunkRequest struct {
 	PrefixStrip    int      `json:"prefix_strip"`
 	PrefixAdd      string   `json:"prefix_add"`
 	Priority       int      `json:"priority"`
+	RecordingMode  string   `json:"recording_mode"`
 }
 
 // trunkResponse is the JSON response for a single trunk. Password is never returned.
@@ -56,6 +57,7 @@ type trunkResponse struct {
 	PrefixStrip    int      `json:"prefix_strip"`
 	PrefixAdd      string   `json:"prefix_add"`
 	Priority       int      `json:"priority"`
+	RecordingMode  string   `json:"recording_mode"`
 	CreatedAt      string   `json:"created_at"`
 	UpdatedAt      string   `json:"updated_at"`
 }
@@ -94,6 +96,7 @@ func toTrunkResponse(t *models.Trunk) trunkResponse {
 		PrefixStrip:    t.PrefixStrip,
 		PrefixAdd:      t.PrefixAdd,
 		Priority:       t.Priority,
+		RecordingMode:  t.RecordingMode,
 		CreatedAt:      t.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:      t.UpdatedAt.Format(time.RFC3339),
 	}
@@ -177,6 +180,11 @@ func (s *Server) handleCreateTrunk(w http.ResponseWriter, r *http.Request) {
 		enabled = *req.Enabled
 	}
 
+	recordingMode := req.RecordingMode
+	if recordingMode == "" {
+		recordingMode = "off"
+	}
+
 	trunk := &models.Trunk{
 		Name:           req.Name,
 		Type:           req.Type,
@@ -197,6 +205,7 @@ func (s *Server) handleCreateTrunk(w http.ResponseWriter, r *http.Request) {
 		PrefixStrip:    req.PrefixStrip,
 		PrefixAdd:      req.PrefixAdd,
 		Priority:       req.Priority,
+		RecordingMode:  recordingMode,
 	}
 
 	// Apply defaults.
@@ -366,6 +375,11 @@ func (s *Server) handleUpdateTrunk(w http.ResponseWriter, r *http.Request) {
 		priority = existing.Priority
 	}
 
+	recordingMode := req.RecordingMode
+	if recordingMode == "" {
+		recordingMode = existing.RecordingMode
+	}
+
 	existing.Name = req.Name
 	existing.Type = req.Type
 	existing.Enabled = enabled
@@ -385,6 +399,7 @@ func (s *Server) handleUpdateTrunk(w http.ResponseWriter, r *http.Request) {
 	existing.PrefixStrip = req.PrefixStrip
 	existing.PrefixAdd = req.PrefixAdd
 	existing.Priority = priority
+	existing.RecordingMode = recordingMode
 
 	if err := s.trunks.Update(r.Context(), existing); err != nil {
 		slog.Error("update trunk: failed to update", "error", err, "trunk_id", id)
@@ -593,6 +608,9 @@ func validateTrunkRequest(req trunkRequest) string {
 	}
 	if req.Priority < 0 {
 		return "priority must be non-negative"
+	}
+	if req.RecordingMode != "" && req.RecordingMode != "off" && req.RecordingMode != "always" && req.RecordingMode != "on_demand" {
+		return "recording_mode must be \"off\", \"always\", or \"on_demand\""
 	}
 	return ""
 }

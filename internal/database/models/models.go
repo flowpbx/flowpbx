@@ -50,6 +50,7 @@ type Trunk struct {
 	PrefixStrip    int
 	PrefixAdd      string
 	Priority       int
+	RecordingMode  string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }

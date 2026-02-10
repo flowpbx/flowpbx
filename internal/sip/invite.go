@@ -446,7 +446,7 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 	}
 
 	// Start call recording if either extension has recording_mode "always".
-	if shouldRecord(ic.CallerExtension, ic.TargetExtension) && mediaSession != nil {
+	if shouldRecord(ic.CallerExtension, ic.TargetExtension, nil) && mediaSession != nil {
 		dialog.Recorder = h.startCallRecording(callID, mediaSession)
 	}
 
@@ -475,28 +475,34 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransaction, ic *InviteContext, callID string) {
 	ctx := context.Background()
 
-	// Enforce max_channels on the inbound trunk.
+	// Look up the inbound trunk for channel limits and recording config.
+	var inboundTrunk *models.Trunk
 	if ic.TrunkID > 0 && h.trunks != nil {
 		trunk, err := h.trunks.GetByID(ctx, ic.TrunkID)
 		if err != nil {
-			h.logger.Error("failed to look up inbound trunk for channel limit",
+			h.logger.Error("failed to look up inbound trunk",
 				"call_id", callID,
 				"trunk_id", ic.TrunkID,
 				"error", err,
 			)
 			// Continue — don't block the call on a DB read error.
-		} else if trunk != nil && trunk.MaxChannels > 0 {
-			active := h.dialogMgr.ActiveCallCountForTrunk(ic.TrunkID)
-			if active >= trunk.MaxChannels {
-				h.logger.Warn("inbound call rejected: trunk at max channels",
-					"call_id", callID,
-					"trunk_id", ic.TrunkID,
-					"active_channels", active,
-					"max_channels", trunk.MaxChannels,
-				)
-				h.respondErrorWithCDR(req, tx, 503, "Service Unavailable", callID)
-				return
-			}
+		} else {
+			inboundTrunk = trunk
+		}
+	}
+
+	// Enforce max_channels on the inbound trunk.
+	if inboundTrunk != nil && inboundTrunk.MaxChannels > 0 {
+		active := h.dialogMgr.ActiveCallCountForTrunk(ic.TrunkID)
+		if active >= inboundTrunk.MaxChannels {
+			h.logger.Warn("inbound call rejected: trunk at max channels",
+				"call_id", callID,
+				"trunk_id", ic.TrunkID,
+				"active_channels", active,
+				"max_channels", inboundTrunk.MaxChannels,
+			)
+			h.respondErrorWithCDR(req, tx, 503, "Service Unavailable", callID)
+			return
 		}
 	}
 
@@ -793,8 +799,8 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 		dialog.Callee.RemoteTarget = uri
 	}
 
-	// Start call recording if the target extension has recording_mode "always".
-	if shouldRecord(nil, ic.TargetExtension) && mediaSession != nil {
+	// Start call recording if the target extension or inbound trunk has recording_mode "always".
+	if shouldRecord(nil, ic.TargetExtension, inboundTrunk) && mediaSession != nil {
 		dialog.Recorder = h.startCallRecording(callID, mediaSession)
 	}
 
@@ -1063,13 +1069,16 @@ func (h *InviteHandler) createInitialCDR(ic *InviteContext, callID string) {
 }
 
 // shouldRecord determines whether a call should be recorded based on the
-// recording_mode of both the caller and callee extensions. Returns true if
-// either party has recording_mode set to "always".
-func shouldRecord(caller, callee *models.Extension) bool {
+// recording_mode of the caller extension, callee extension, and/or trunk.
+// Returns true if any party has recording_mode set to "always".
+func shouldRecord(caller, callee *models.Extension, trunk *models.Trunk) bool {
 	if caller != nil && caller.RecordingMode == "always" {
 		return true
 	}
 	if callee != nil && callee.RecordingMode == "always" {
+		return true
+	}
+	if trunk != nil && trunk.RecordingMode == "always" {
 		return true
 	}
 	return false

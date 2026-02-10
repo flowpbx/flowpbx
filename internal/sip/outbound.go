@@ -400,9 +400,9 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 		dialog.Callee.RemoteTarget = uri
 	}
 
-	// Start call recording if the caller extension has recording_mode "always".
+	// Start call recording if the caller extension or outbound trunk has recording_mode "always".
 	// Outbound calls have no callee extension (trunk leg).
-	if shouldRecord(ic.CallerExtension, nil) && mediaSession != nil {
+	if shouldRecord(ic.CallerExtension, nil, selectedTrunk) && mediaSession != nil {
 		dialog.Recorder = h.startCallRecording(callID, mediaSession)
 	}
 

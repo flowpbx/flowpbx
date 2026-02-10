@@ -2,19 +2,11 @@ import { useState, useEffect, type FormEvent } from 'react'
 import { listTimeSwitches, createTimeSwitch, updateTimeSwitch, deleteTimeSwitch, ApiError } from '../api'
 import type { TimeSwitch, TimeSwitchRequest } from '../api'
 import DataTable, { type Column } from '../components/DataTable'
-import { TextInput, SelectField } from '../components/FormFields'
+import { TextInput } from '../components/FormFields'
 import TimeSwitchRuleEditor from '../components/TimeSwitchRuleEditor'
 import HolidayOverrideEditor from '../components/HolidayOverrideEditor'
 import WeeklyGridPreview from '../components/WeeklyGridPreview'
-
-const TIMEZONES = [
-  { group: 'Australia', zones: ['Australia/Sydney', 'Australia/Melbourne', 'Australia/Brisbane', 'Australia/Perth', 'Australia/Adelaide'] },
-  { group: 'Pacific', zones: ['Pacific/Auckland'] },
-  { group: 'Asia', zones: ['Asia/Tokyo', 'Asia/Shanghai', 'Asia/Singapore', 'Asia/Kolkata'] },
-  { group: 'Europe', zones: ['Europe/London', 'Europe/Berlin', 'Europe/Paris'] },
-  { group: 'Americas', zones: ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles'] },
-  { group: 'Other', zones: ['UTC'] },
-]
+import TimezoneSelector from '../components/TimezoneSelector'
 
 export default function TimeSwitches() {
   const [switches, setSwitches] = useState<TimeSwitch[]>([])
@@ -191,20 +183,11 @@ export default function TimeSwitches() {
           />
 
           <div className="grid grid-cols-2 gap-4">
-            <SelectField
-              label="Timezone"
+            <TimezoneSelector
               id="ts_timezone"
               value={form.timezone ?? 'Australia/Sydney'}
               onChange={(e) => setForm({ ...form, timezone: e.currentTarget.value })}
-            >
-              {TIMEZONES.map((group) => (
-                <optgroup key={group.group} label={group.group}>
-                  {group.zones.map((tz) => (
-                    <option key={tz} value={tz}>{tz}</option>
-                  ))}
-                </optgroup>
-              ))}
-            </SelectField>
+            />
 
             <TextInput
               label="Default Destination"

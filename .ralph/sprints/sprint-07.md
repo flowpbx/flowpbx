@@ -10,7 +10,7 @@
 
 - [x] Create `internal/media/proxy.go` — UDP socket pool for RTP relay (configurable port range, default 10000-20000)
 - [x] Implement RTP session allocation: allocate a pair of ports (RTP + RTCP) per call leg
-- [ ] Implement SDP parsing (extract media lines, codecs, connection info)
+- [x] Implement SDP parsing (extract media lines, codecs, connection info)
 - [ ] Implement SDP rewriting (replace endpoint IPs/ports with proxy addresses)
 - [ ] Implement G.711 alaw (PCMA, payload 8) passthrough relay
 - [ ] Implement G.711 ulaw (PCMU, payload 0) passthrough relay

@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
@@ -682,20 +683,134 @@ func (a *FlowSIPActions) RecordMessage(ctx context.Context, callCtx *flow.CallCo
 	}, nil
 }
 
-// SendMWI sends a SIP NOTIFY to update the message waiting indicator for
-// the specified extension.
-//
-// TODO(sprint-14): Full MWI implementation — send SIP NOTIFY with
-// Messages-Waiting header to all registered devices for the extension.
+// SendMWI sends a SIP NOTIFY to all registered devices for the specified
+// extension to update the Message Waiting Indicator (voicemail lamp). The
+// NOTIFY carries an Event: message-summary header and an RFC 3842 body
+// with the voice-message counts.
 func (a *FlowSIPActions) SendMWI(ctx context.Context, ext *models.Extension, newMessages int, oldMessages int) error {
-	a.logger.Info("sending MWI notification (stub)",
+	a.logger.Info("sending MWI notification",
 		"extension", ext.Extension,
 		"new_messages", newMessages,
 		"old_messages", oldMessages,
 	)
 
-	// Stub: log the MWI event. The full SIP NOTIFY implementation will be
-	// added in the media sprint.
+	// Look up active registrations for the extension.
+	regs, err := a.registrations.GetByExtensionID(ctx, ext.ID)
+	if err != nil {
+		return fmt.Errorf("looking up registrations for MWI: %w", err)
+	}
+
+	// Filter expired registrations.
+	now := time.Now()
+	active := make([]models.Registration, 0, len(regs))
+	for _, reg := range regs {
+		if reg.Expires.After(now) {
+			active = append(active, reg)
+		}
+	}
+
+	if len(active) == 0 {
+		a.logger.Debug("no active registrations for MWI, skipping",
+			"extension", ext.Extension,
+		)
+		return nil
+	}
+
+	// Build the RFC 3842 message-summary body.
+	waiting := "no"
+	if newMessages > 0 {
+		waiting = "yes"
+	}
+	body := fmt.Sprintf("Messages-Waiting: %s\r\nMessage-Account: sip:%s@%s\r\nVoice-Message: %d/%d (%d new, %d old)\r\n",
+		waiting,
+		ext.Extension,
+		a.proxyIP,
+		newMessages, oldMessages,
+		newMessages, oldMessages,
+	)
+
+	// Send NOTIFY to each active registration.
+	var lastErr error
+	for i := range active {
+		if err := a.sendMWINotify(&active[i], ext, body); err != nil {
+			a.logger.Error("failed to send MWI NOTIFY",
+				"extension", ext.Extension,
+				"contact", active[i].ContactURI,
+				"error", err,
+			)
+			lastErr = err
+			continue
+		}
+		a.logger.Debug("MWI NOTIFY sent",
+			"extension", ext.Extension,
+			"contact", active[i].ContactURI,
+		)
+	}
+
+	return lastErr
+}
+
+// sendMWINotify builds and sends a single SIP NOTIFY request with
+// message-summary event to one registered contact.
+func (a *FlowSIPActions) sendMWINotify(reg *models.Registration, ext *models.Extension, body string) error {
+	// Parse the contact URI as the Request-URI.
+	var recipient sip.Uri
+	if err := sip.ParseUri(reg.ContactURI, &recipient); err != nil {
+		return fmt.Errorf("parsing contact uri %q: %w", reg.ContactURI, err)
+	}
+
+	// NAT traversal: use the source IP:port from the registration.
+	if reg.SourceIP != "" && reg.SourcePort > 0 {
+		recipient.Host = reg.SourceIP
+		recipient.Port = reg.SourcePort
+	}
+
+	req := sip.NewRequest(sip.NOTIFY, recipient)
+	req.SetTransport(transportForContact(reg))
+
+	// Event header per RFC 3842.
+	req.AppendHeader(sip.NewHeader("Event", "message-summary"))
+
+	// Subscription-State: we send unsolicited NOTIFY (no SUBSCRIBE dialog).
+	req.AppendHeader(sip.NewHeader("Subscription-State", "active"))
+
+	// Content-Type for the message-summary body.
+	req.AppendHeader(sip.NewHeader("Content-Type", "application/simple-message-summary"))
+
+	// Max-Forwards.
+	maxFwd := sip.MaxForwardsHeader(70)
+	req.AppendHeader(&maxFwd)
+
+	// Set the body.
+	req.SetBody([]byte(body))
+
+	// Send via a client transaction so we get a proper response.
+	tx, err := a.forker.Client().TransactionRequest(context.Background(), req, sipgo.ClientRequestBuild)
+	if err != nil {
+		return fmt.Errorf("sending MWI NOTIFY to %s: %w", reg.ContactURI, err)
+	}
+
+	// Wait briefly for the response but don't block the caller indefinitely.
+	select {
+	case res := <-tx.Responses():
+		if res.StatusCode >= 300 {
+			a.logger.Warn("MWI NOTIFY rejected",
+				"contact", reg.ContactURI,
+				"status", res.StatusCode,
+				"reason", res.Reason,
+			)
+		}
+	case <-tx.Done():
+		if err := tx.Err(); err != nil {
+			return fmt.Errorf("MWI NOTIFY transaction failed for %s: %w", reg.ContactURI, err)
+		}
+	case <-time.After(5 * time.Second):
+		tx.Terminate()
+		a.logger.Warn("MWI NOTIFY timed out",
+			"contact", reg.ContactURI,
+		)
+	}
+
 	return nil
 }
 

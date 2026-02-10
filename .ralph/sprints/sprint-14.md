@@ -14,7 +14,7 @@
 - [x] Store voicemail message metadata in `voicemail_messages` table (caller ID, timestamp, duration, file_path)
 - [x] Organize voicemail files by box: `$DATA_DIR/voicemail/box_{id}/msg_{id}.wav`
 - [x] Store voicemail box greetings at `$DATA_DIR/greetings/box_{id}.wav`
-- [ ] Implement MWI: send SIP NOTIFY to extension linked via `notify_extension_id` on new message
+- [x] Implement MWI: send SIP NOTIFY to extension linked via `notify_extension_id` on new message
 - [ ] Implement email notification with WAV attachment via SMTP (per-box `email_notify` + `email_address` settings)
 - [ ] Implement auto-delete of messages older than `retention_days` (per-box setting, cleanup goroutine)
 - [ ] Implement max_messages limit per box (reject recording if at limit)

@@ -21,5 +21,5 @@
 - [x] Create voicemail box CRUD API: `GET/POST/PUT/DELETE /api/v1/voicemail-boxes`
 - [x] Create voicemail message API: `GET /api/v1/voicemail-boxes/:id/messages`, `DELETE .../messages/:msg_id`, `PUT .../messages/:msg_id/read`, `GET .../messages/:msg_id/audio`
 - [x] Create `POST /api/v1/voicemail-boxes/:id/greeting` — upload custom greeting
-- [ ] Create voicemail browser in admin UI: per-box message list, play, download, delete, mark read
+- [x] Create voicemail browser in admin UI: per-box message list, play, download, delete, mark read
 - [ ] Add SMTP configuration to Settings page

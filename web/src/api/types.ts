@@ -203,6 +203,20 @@ export interface VoicemailBoxRequest {
   notify_extension_id?: number | null
 }
 
+/** Voicemail message resource. */
+export interface VoicemailMessage {
+  id: number
+  mailbox_id: number
+  caller_id_name: string
+  caller_id_num: string
+  timestamp: string
+  duration: number
+  read: boolean
+  read_at: string | null
+  transcription?: string
+  created_at: string
+}
+
 /** Audio prompt resource. */
 export interface AudioPrompt {
   id: number

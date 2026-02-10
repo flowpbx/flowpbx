@@ -1,5 +1,5 @@
 import { get, post, put, del, list } from './client'
-import type { VoicemailBox, VoicemailBoxRequest, PaginatedResponse, PaginationParams } from './types'
+import type { VoicemailBox, VoicemailBoxRequest, VoicemailMessage, PaginatedResponse, PaginationParams } from './types'
 
 /** List voicemail boxes with pagination. */
 export function listVoicemailBoxes(params?: PaginationParams): Promise<PaginatedResponse<VoicemailBox>> {
@@ -24,4 +24,24 @@ export function updateVoicemailBox(id: number, data: VoicemailBoxRequest): Promi
 /** Delete a voicemail box. */
 export function deleteVoicemailBox(id: number): Promise<null> {
   return del(`/voicemail-boxes/${id}`)
+}
+
+/** List voicemail messages for a box. */
+export function listVoicemailMessages(boxId: number): Promise<VoicemailMessage[]> {
+  return get<VoicemailMessage[]>(`/voicemail-boxes/${boxId}/messages`)
+}
+
+/** Delete a voicemail message. */
+export function deleteVoicemailMessage(boxId: number, msgId: number): Promise<null> {
+  return del(`/voicemail-boxes/${boxId}/messages/${msgId}`)
+}
+
+/** Mark a voicemail message as read. */
+export function markVoicemailMessageRead(boxId: number, msgId: number): Promise<VoicemailMessage> {
+  return put<VoicemailMessage>(`/voicemail-boxes/${boxId}/messages/${msgId}/read`)
+}
+
+/** Build the audio URL for a voicemail message. */
+export function voicemailAudioURL(boxId: number, msgId: number): string {
+  return `/api/v1/voicemail-boxes/${boxId}/messages/${msgId}/audio`
 }

@@ -1,10 +1,201 @@
-import { useState, useEffect, type FormEvent } from 'react'
-import { listVoicemailBoxes, createVoicemailBox, updateVoicemailBox, deleteVoicemailBox, ApiError } from '../api'
-import type { VoicemailBox, VoicemailBoxRequest } from '../api'
+import { useState, useEffect, useRef, type FormEvent } from 'react'
+import {
+  listVoicemailBoxes, createVoicemailBox, updateVoicemailBox, deleteVoicemailBox,
+  listVoicemailMessages, deleteVoicemailMessage, markVoicemailMessageRead, voicemailAudioURL,
+  ApiError,
+} from '../api'
+import type { VoicemailBox, VoicemailBoxRequest, VoicemailMessage } from '../api'
 import DataTable, { type Column } from '../components/DataTable'
 import { TextInput, NumberInput, SelectField, Toggle } from '../components/FormFields'
 
 const PAGE_SIZE = 20
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return m > 0 ? `${m}m ${s}s` : `${s}s`
+}
+
+/** Message browser for a single voicemail box. */
+function MessageBrowser({ box, onBack }: { box: VoicemailBox; onBack: () => void }) {
+  const [messages, setMessages] = useState<VoicemailMessage[]>([])
+  const [loading, setLoading] = useState(true)
+  const [playingId, setPlayingId] = useState<number | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  function load() {
+    setLoading(true)
+    listVoicemailMessages(box.id)
+      .then((items) => setMessages(items))
+      .catch(() => setMessages([]))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    load()
+    return () => stopPlayback()
+  }, [box.id])
+
+  function togglePlay(msg: VoicemailMessage) {
+    if (playingId === msg.id) {
+      stopPlayback()
+      return
+    }
+
+    stopPlayback()
+    const audio = new Audio(voicemailAudioURL(box.id, msg.id))
+    audio.addEventListener('ended', () => setPlayingId(null))
+    audio.addEventListener('error', () => setPlayingId(null))
+    audio.play()
+    audioRef.current = audio
+    setPlayingId(msg.id)
+  }
+
+  function stopPlayback() {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current = null
+    }
+    setPlayingId(null)
+  }
+
+  async function handleMarkRead(msg: VoicemailMessage) {
+    try {
+      const updated = await markVoicemailMessageRead(box.id, msg.id)
+      setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)))
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : 'unable to mark message as read')
+    }
+  }
+
+  async function handleDelete(msg: VoicemailMessage) {
+    if (!confirm('Delete this voicemail message?')) return
+    stopPlayback()
+    try {
+      await deleteVoicemailMessage(box.id, msg.id)
+      setMessages((prev) => prev.filter((m) => m.id !== msg.id))
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : 'unable to delete message')
+    }
+  }
+
+  const columns: Column<VoicemailMessage>[] = [
+    {
+      key: 'status',
+      header: '',
+      className: 'w-8',
+      render: (r) => (
+        <span className={`inline-block h-2 w-2 rounded-full ${r.read ? 'bg-gray-300' : 'bg-blue-500'}`} title={r.read ? 'Read' : 'Unread'} />
+      ),
+    },
+    {
+      key: 'caller',
+      header: 'Caller',
+      render: (r) => (
+        <div>
+          <span className={`${r.read ? 'text-gray-700' : 'font-medium text-gray-900'}`}>
+            {r.caller_id_name || 'Unknown'}
+          </span>
+          {r.caller_id_num && (
+            <span className="ml-2 text-gray-400 text-xs">{r.caller_id_num}</span>
+          )}
+        </div>
+      ),
+    },
+    { key: 'timestamp', header: 'Date', render: (r) => formatDate(r.timestamp) },
+    { key: 'duration', header: 'Duration', render: (r) => formatDuration(r.duration) },
+    {
+      key: 'actions',
+      header: '',
+      className: 'w-48',
+      render: (r) => (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); togglePlay(r) }}
+            className="text-sm text-blue-600 hover:text-blue-800"
+          >
+            {playingId === r.id ? 'Stop' : 'Play'}
+          </button>
+          <a
+            href={voicemailAudioURL(box.id, r.id)}
+            download
+            onClick={(e) => e.stopPropagation()}
+            className="text-sm text-blue-600 hover:text-blue-800"
+          >
+            Download
+          </a>
+          {!r.read && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleMarkRead(r) }}
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              Mark Read
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); handleDelete(r) }}
+            className="text-sm text-red-600 hover:text-red-800"
+          >
+            Delete
+          </button>
+        </div>
+      ),
+    },
+  ]
+
+  const unreadCount = messages.filter((m) => !m.read).length
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onBack}
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              &larr; Back
+            </button>
+            <h1 className="text-2xl font-bold text-gray-900">{box.name}</h1>
+          </div>
+          <p className="mt-1 text-sm text-gray-500">
+            {messages.length} message{messages.length !== 1 ? 's' : ''}
+            {unreadCount > 0 && <span className="ml-1 text-blue-600">({unreadCount} unread)</span>}
+          </p>
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-gray-400">Loading messages...</p>
+      ) : (
+        <DataTable
+          columns={columns}
+          rows={messages}
+          keyFn={(r) => r.id}
+          total={messages.length}
+          limit={messages.length || 1}
+          offset={0}
+          onPageChange={() => {}}
+          emptyMessage="No voicemail messages in this box."
+        />
+      )}
+    </div>
+  )
+}
 
 export default function VoicemailBoxes() {
   const [boxes, setBoxes] = useState<VoicemailBox[]>([])
@@ -13,6 +204,7 @@ export default function VoicemailBoxes() {
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<VoicemailBox | null>(null)
   const [creating, setCreating] = useState(false)
+  const [browsing, setBrowsing] = useState<VoicemailBox | null>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -137,9 +329,16 @@ export default function VoicemailBoxes() {
     {
       key: 'actions',
       header: '',
-      className: 'w-24',
+      className: 'w-36',
       render: (r) => (
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setBrowsing(r) }}
+            className="text-sm text-blue-600 hover:text-blue-800"
+          >
+            Messages
+          </button>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); openEdit(r) }}
@@ -159,6 +358,12 @@ export default function VoicemailBoxes() {
     },
   ]
 
+  // Message browser view
+  if (browsing) {
+    return <MessageBrowser box={browsing} onBack={() => setBrowsing(null)} />
+  }
+
+  // Create/edit form view
   if (creating) {
     return (
       <div>
@@ -286,6 +491,7 @@ export default function VoicemailBoxes() {
     )
   }
 
+  // Main list view
   return (
     <div>
       <div className="flex items-center justify-between mb-6">

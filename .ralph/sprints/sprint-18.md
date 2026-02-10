@@ -16,7 +16,7 @@
 - [x] Store recording_file path in CDR on recording completion
 - [x] Implement recording retention policy: auto-delete recordings older than configurable days
 - [x] Add storage usage monitoring (total recordings size)
-- [ ] Create recording browser API with playback stream and download
+- [x] Create recording browser API with playback stream and download
 - [ ] Implement follow-me: sequential ring — ring registered devices → after timeout → ring external numbers via trunk
 - [ ] Implement follow-me: simultaneous ring option (ring all at once)
 - [ ] Implement external number dialling via outbound trunk for follow-me legs

@@ -90,7 +90,90 @@ func (s *Server) handleListRecordings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleDownloadRecording streams the recording file for a CDR.
+// handleGetRecording returns metadata for a single recording (CDR with recording_file).
+func (s *Server) handleGetRecording(w http.ResponseWriter, r *http.Request) {
+	id, err := parseRecordingID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid recording id")
+		return
+	}
+
+	cdr, err := s.cdrs.GetByID(r.Context(), id)
+	if err != nil {
+		slog.Error("get recording: failed to query cdr", "error", err, "cdr_id", id)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if cdr == nil || cdr.RecordingFile == "" {
+		writeError(w, http.StatusNotFound, "recording not found")
+		return
+	}
+
+	resp := recordingResponse{
+		ID:           cdr.ID,
+		CallID:       cdr.CallID,
+		StartTime:    cdr.StartTime.Format(time.RFC3339),
+		Duration:     cdr.Duration,
+		CallerIDName: cdr.CallerIDName,
+		CallerIDNum:  cdr.CallerIDNum,
+		Callee:       cdr.Callee,
+		Direction:    cdr.Direction,
+		Disposition:  cdr.Disposition,
+		Filename:     filepath.Base(cdr.RecordingFile),
+	}
+
+	fullPath := s.recordingFilePath(cdr.RecordingFile)
+	if info, err := os.Stat(fullPath); err == nil {
+		size := info.Size()
+		resp.FileSize = &size
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleStreamRecording serves the recording audio inline for in-browser playback.
+// Supports HTTP range requests for seeking in the audio player.
+func (s *Server) handleStreamRecording(w http.ResponseWriter, r *http.Request) {
+	id, err := parseRecordingID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid recording id")
+		return
+	}
+
+	cdr, err := s.cdrs.GetByID(r.Context(), id)
+	if err != nil {
+		slog.Error("stream recording: failed to query cdr", "error", err, "cdr_id", id)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if cdr == nil || cdr.RecordingFile == "" {
+		writeError(w, http.StatusNotFound, "recording not found")
+		return
+	}
+
+	fullPath := s.recordingFilePath(cdr.RecordingFile)
+
+	f, err := os.Open(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, "recording file not found on disk")
+			return
+		}
+		slog.Error("stream recording: failed to open file", "error", err, "cdr_id", id, "path", fullPath)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	defer f.Close()
+
+	filename := filepath.Base(cdr.RecordingFile)
+	w.Header().Set("Content-Type", "audio/wav")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", filename))
+
+	// ServeContent handles Range requests for seeking support.
+	http.ServeContent(w, r, filename, cdr.StartTime, f)
+}
+
+// handleDownloadRecording serves the recording file as an attachment download.
 func (s *Server) handleDownloadRecording(w http.ResponseWriter, r *http.Request) {
 	id, err := parseRecordingID(r)
 	if err != nil {

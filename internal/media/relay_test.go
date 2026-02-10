@@ -405,6 +405,117 @@ func TestOpusRelay(t *testing.T) {
 	})
 }
 
+func TestRelayStats(t *testing.T) {
+	logger := slog.Default()
+
+	callerPair, callerLocalAddr := allocateTestPair(t)
+	defer callerPair.Close()
+	calleePair, calleeLocalAddr := allocateTestPair(t)
+	defer calleePair.Close()
+
+	callerPhone, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen caller phone: %v", err)
+	}
+	defer callerPhone.Close()
+
+	calleePhone, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen callee phone: %v", err)
+	}
+	defer calleePhone.Close()
+
+	callerPhoneAddr := callerPhone.LocalAddr().(*net.UDPAddr)
+	calleePhoneAddr := calleePhone.LocalAddr().(*net.UDPAddr)
+
+	session := &Session{
+		ID:        "test-session-stats",
+		CallID:    "test-call-stats",
+		CallerLeg: callerPair,
+		CalleeLeg: calleePair,
+		CreatedAt: time.Now(),
+		state:     SessionStateNew,
+	}
+
+	relay := StartPCMARelay(session, callerPhoneAddr, calleePhoneAddr, logger)
+
+	// Send 3 packets caller→callee.
+	for i := 0; i < 3; i++ {
+		pkt := makeTestRTPPacket(PayloadPCMA, []byte{0xD5, 0xD5})
+		_, err := callerPhone.WriteToUDP(pkt, callerLocalAddr)
+		if err != nil {
+			t.Fatalf("write caller→callee %d: %v", i, err)
+		}
+		calleePhone.SetReadDeadline(time.Now().Add(2 * time.Second))
+		buf := make([]byte, maxRTPPacket)
+		_, _, err = calleePhone.ReadFromUDP(buf)
+		if err != nil {
+			t.Fatalf("read callee %d: %v", i, err)
+		}
+	}
+
+	// Send 2 packets callee→caller.
+	for i := 0; i < 2; i++ {
+		pkt := makeTestRTPPacket(PayloadPCMA, []byte{0xAA, 0xBB, 0xCC})
+		_, err := calleePhone.WriteToUDP(pkt, calleeLocalAddr)
+		if err != nil {
+			t.Fatalf("write callee→caller %d: %v", i, err)
+		}
+		callerPhone.SetReadDeadline(time.Now().Add(2 * time.Second))
+		buf := make([]byte, maxRTPPacket)
+		_, _, err = callerPhone.ReadFromUDP(buf)
+		if err != nil {
+			t.Fatalf("read caller %d: %v", i, err)
+		}
+	}
+
+	// Send 1 dropped packet (wrong payload type for PCMA-only relay).
+	pkt := makeTestRTPPacket(PayloadPCMU, []byte{0x01})
+	_, err = callerPhone.WriteToUDP(pkt, callerLocalAddr)
+	if err != nil {
+		t.Fatalf("write dropped packet: %v", err)
+	}
+	// Wait briefly for the relay to process the dropped packet.
+	time.Sleep(200 * time.Millisecond)
+
+	// Send 1 too-small packet (also dropped).
+	_, err = callerPhone.WriteToUDP([]byte{0x80, 0x08}, callerLocalAddr)
+	if err != nil {
+		t.Fatalf("write too-small packet: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	relay.Stop()
+
+	stats := session.Stats()
+
+	if stats.PacketsCallerToCallee != 3 {
+		t.Errorf("PacketsCallerToCallee = %d, want 3", stats.PacketsCallerToCallee)
+	}
+	if stats.PacketsCalleeToCaller != 2 {
+		t.Errorf("PacketsCalleeToCaller = %d, want 2", stats.PacketsCalleeToCaller)
+	}
+	if stats.TotalPackets() != 5 {
+		t.Errorf("TotalPackets() = %d, want 5", stats.TotalPackets())
+	}
+
+	// Each PCMA caller→callee packet: 12-byte header + 2-byte payload = 14 bytes.
+	expectedCallerBytes := uint64(3 * 14)
+	if stats.BytesCallerToCallee != expectedCallerBytes {
+		t.Errorf("BytesCallerToCallee = %d, want %d", stats.BytesCallerToCallee, expectedCallerBytes)
+	}
+
+	// Each PCMA callee→caller packet: 12-byte header + 3-byte payload = 15 bytes.
+	expectedCalleeBytes := uint64(2 * 15)
+	if stats.BytesCalleeToCaller != expectedCalleeBytes {
+		t.Errorf("BytesCalleeToCaller = %d, want %d", stats.BytesCalleeToCaller, expectedCalleeBytes)
+	}
+
+	if stats.PacketsDropped < 2 {
+		t.Errorf("PacketsDropped = %d, want >= 2", stats.PacketsDropped)
+	}
+}
+
 func TestSymmetricRTP_NAT(t *testing.T) {
 	logger := slog.Default()
 

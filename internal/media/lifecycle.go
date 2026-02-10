@@ -140,3 +140,8 @@ func (ms *MediaSession) CallerRTPPort() int {
 func (ms *MediaSession) CalleeRTPPort() int {
 	return ms.session.CalleeLeg.Ports.RTP
 }
+
+// Stats returns a snapshot of the session's RTP packet counters.
+func (ms *MediaSession) Stats() SessionStats {
+	return ms.session.Stats()
+}

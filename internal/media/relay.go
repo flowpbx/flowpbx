@@ -129,7 +129,15 @@ func (r *Relay) Start() {
 func (r *Relay) Stop() {
 	r.session.Stop()
 	r.wg.Wait()
-	r.logger.Info("rtp relay stopped", "session_id", r.session.ID)
+	stats := r.session.Stats()
+	r.logger.Info("rtp relay stopped",
+		"session_id", r.session.ID,
+		"packets_caller_to_callee", stats.PacketsCallerToCallee,
+		"packets_callee_to_caller", stats.PacketsCalleeToCaller,
+		"bytes_caller_to_callee", stats.BytesCallerToCallee,
+		"bytes_callee_to_caller", stats.BytesCalleeToCaller,
+		"packets_dropped", stats.PacketsDropped,
+	)
 }
 
 // CallerAddr returns the current remote address for the caller leg.
@@ -187,11 +195,13 @@ func (r *Relay) forward(direction string, src, dst *net.UDPConn, writeRemote, le
 		pt := rtpPayloadType(pkt)
 		if pt < 0 {
 			// Too small to be valid RTP; drop.
+			r.session.RecordDrop()
 			continue
 		}
 
 		if _, ok := r.allowedPT[pt]; !ok {
 			// Payload type not in allowed set; drop.
+			r.session.RecordDrop()
 			continue
 		}
 
@@ -221,6 +231,7 @@ func (r *Relay) forward(direction string, src, dst *net.UDPConn, writeRemote, le
 		}
 
 		r.session.TouchActivity()
+		r.session.RecordPacket(direction, n)
 	}
 }
 

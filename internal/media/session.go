@@ -31,6 +31,31 @@ func (s SessionState) String() string {
 	}
 }
 
+// SessionStats holds RTP packet counters and byte totals for a session.
+// All values are snapshots captured atomically at the time of the call.
+type SessionStats struct {
+	// PacketsCallerToCallee is the number of RTP packets forwarded from caller to callee.
+	PacketsCallerToCallee uint64
+	// PacketsCalleeToCaller is the number of RTP packets forwarded from callee to caller.
+	PacketsCalleeToCaller uint64
+	// BytesCallerToCallee is the total bytes forwarded from caller to callee.
+	BytesCallerToCallee uint64
+	// BytesCalleeToCaller is the total bytes forwarded from callee to caller.
+	BytesCalleeToCaller uint64
+	// PacketsDropped is the total number of packets dropped (invalid or filtered).
+	PacketsDropped uint64
+}
+
+// TotalPackets returns the total number of packets forwarded in both directions.
+func (s SessionStats) TotalPackets() uint64 {
+	return s.PacketsCallerToCallee + s.PacketsCalleeToCaller
+}
+
+// TotalBytes returns the total bytes forwarded in both directions.
+func (s SessionStats) TotalBytes() uint64 {
+	return s.BytesCallerToCallee + s.BytesCalleeToCaller
+}
+
 // Session represents an RTP media session for a single call.
 // Each call has two legs (caller and callee), and each leg gets a dedicated
 // RTP+RTCP socket pair. The session manages the lifecycle of both pairs.
@@ -50,6 +75,13 @@ type Session struct {
 	// lastActivity stores the unix nanosecond timestamp of the last
 	// forwarded RTP packet. Used by the reaper to detect orphaned sessions.
 	lastActivity atomic.Int64
+
+	// RTP packet counters — updated atomically by the relay goroutines.
+	packetsCallerToCallee atomic.Uint64
+	packetsCalleeToCaller atomic.Uint64
+	bytesCallerToCallee   atomic.Uint64
+	bytesCalleeToCaller   atomic.Uint64
+	packetsDropped        atomic.Uint64
 }
 
 // State returns the current session state.
@@ -91,6 +123,35 @@ func (s *Session) LastActivity() time.Time {
 		return s.CreatedAt
 	}
 	return time.Unix(0, ns)
+}
+
+// RecordPacket records a successfully forwarded packet for the given direction.
+// direction should be "caller→callee" or "callee→caller".
+func (s *Session) RecordPacket(direction string, size int) {
+	switch direction {
+	case "caller→callee":
+		s.packetsCallerToCallee.Add(1)
+		s.bytesCallerToCallee.Add(uint64(size))
+	case "callee→caller":
+		s.packetsCalleeToCaller.Add(1)
+		s.bytesCalleeToCaller.Add(uint64(size))
+	}
+}
+
+// RecordDrop records a dropped packet.
+func (s *Session) RecordDrop() {
+	s.packetsDropped.Add(1)
+}
+
+// Stats returns a snapshot of the session's RTP packet counters.
+func (s *Session) Stats() SessionStats {
+	return SessionStats{
+		PacketsCallerToCallee: s.packetsCallerToCallee.Load(),
+		PacketsCalleeToCaller: s.packetsCalleeToCaller.Load(),
+		BytesCallerToCallee:   s.bytesCallerToCallee.Load(),
+		BytesCalleeToCaller:   s.bytesCalleeToCaller.Load(),
+		PacketsDropped:        s.packetsDropped.Load(),
+	}
 }
 
 const (

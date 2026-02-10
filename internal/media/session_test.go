@@ -126,6 +126,72 @@ func TestReaperStartStop(t *testing.T) {
 	}
 }
 
+func TestSessionStats(t *testing.T) {
+	session := &Session{
+		ID:        "test-stats",
+		CallID:    "call-stats",
+		CreatedAt: time.Now(),
+		state:     SessionStateNew,
+	}
+
+	// Initial stats should be zero.
+	stats := session.Stats()
+	if stats.TotalPackets() != 0 {
+		t.Errorf("initial TotalPackets() = %d, want 0", stats.TotalPackets())
+	}
+	if stats.TotalBytes() != 0 {
+		t.Errorf("initial TotalBytes() = %d, want 0", stats.TotalBytes())
+	}
+
+	// Record some packets in each direction.
+	session.RecordPacket("caller→callee", 160)
+	session.RecordPacket("caller→callee", 160)
+	session.RecordPacket("callee→caller", 320)
+	session.RecordDrop()
+	session.RecordDrop()
+
+	stats = session.Stats()
+
+	if stats.PacketsCallerToCallee != 2 {
+		t.Errorf("PacketsCallerToCallee = %d, want 2", stats.PacketsCallerToCallee)
+	}
+	if stats.PacketsCalleeToCaller != 1 {
+		t.Errorf("PacketsCalleeToCaller = %d, want 1", stats.PacketsCalleeToCaller)
+	}
+	if stats.BytesCallerToCallee != 320 {
+		t.Errorf("BytesCallerToCallee = %d, want 320", stats.BytesCallerToCallee)
+	}
+	if stats.BytesCalleeToCaller != 320 {
+		t.Errorf("BytesCalleeToCaller = %d, want 320", stats.BytesCalleeToCaller)
+	}
+	if stats.PacketsDropped != 2 {
+		t.Errorf("PacketsDropped = %d, want 2", stats.PacketsDropped)
+	}
+	if stats.TotalPackets() != 3 {
+		t.Errorf("TotalPackets() = %d, want 3", stats.TotalPackets())
+	}
+	if stats.TotalBytes() != 640 {
+		t.Errorf("TotalBytes() = %d, want 640", stats.TotalBytes())
+	}
+}
+
+func TestSessionStatsUnknownDirection(t *testing.T) {
+	session := &Session{
+		ID:        "test-stats-unknown",
+		CallID:    "call-stats-unknown",
+		CreatedAt: time.Now(),
+		state:     SessionStateNew,
+	}
+
+	// Unknown direction should be a no-op (no panic, no increment).
+	session.RecordPacket("unknown", 100)
+
+	stats := session.Stats()
+	if stats.TotalPackets() != 0 {
+		t.Errorf("TotalPackets() = %d, want 0 after unknown direction", stats.TotalPackets())
+	}
+}
+
 func TestStopReaperWithoutStart(t *testing.T) {
 	logger := slog.Default()
 

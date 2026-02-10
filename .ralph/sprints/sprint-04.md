@@ -15,10 +15,10 @@
 - [x] Create layout components: sidebar nav, header, content area
 - [x] Create Login page — username/password form, session auth
 - [x] Create Setup Wizard UI — multi-step form (admin account, hostname, SIP ports, first trunk, first extension, license key)
-- [ ] Create Dashboard page with placeholder stats (active calls, registrations, recent CDRs)
-- [ ] Create Extensions CRUD page — list, create, edit, delete
-- [ ] Create Trunks CRUD page — list, create, edit, delete, status indicator
-- [ ] Create Voicemail Boxes CRUD page — list, create, edit, delete
-- [ ] Create shared form components (text input, select, toggle, number input)
-- [ ] Create shared table component with pagination
-- [ ] Wire up embed: add `web/dist/` placeholder so `//go:embed` compiles
+- [x] Create Dashboard page with placeholder stats (active calls, registrations, recent CDRs)
+- [x] Create Extensions CRUD page — list, create, edit, delete
+- [x] Create Trunks CRUD page — list, create, edit, delete, status indicator
+- [x] Create Voicemail Boxes CRUD page — list, create, edit, delete
+- [x] Create shared form components (text input, select, toggle, number input)
+- [x] Create shared table component with pagination
+- [x] Wire up embed: add `web/dist/` placeholder so `//go:embed` compiles

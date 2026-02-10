@@ -14,6 +14,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/api/middleware"
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
+	sipserver "github.com/flowpbx/flowpbx/internal/sip"
 )
 
 func main() {
@@ -41,8 +42,20 @@ func main() {
 	}
 	defer db.Close()
 
-	// Placeholder: SIP stack initialization.
-	slog.Info("sip stack initialization placeholder", "sip_port", cfg.SIPPort)
+	// Application context for background goroutines.
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+
+	// Initialize SIP server.
+	sipSrv, err := sipserver.NewServer(cfg, db)
+	if err != nil {
+		slog.Error("failed to create sip server", "error", err)
+		os.Exit(1)
+	}
+	if err := sipSrv.Start(appCtx); err != nil {
+		slog.Error("failed to start sip server", "error", err)
+		os.Exit(1)
+	}
 
 	// Load system configuration from database.
 	sysConfig, err := database.NewSystemConfigRepository(context.Background(), db)
@@ -53,8 +66,6 @@ func main() {
 
 	// Session store for admin auth.
 	sessions := middleware.NewSessionStore()
-	appCtx, appCancel := context.WithCancel(context.Background())
-	defer appCancel()
 	middleware.StartCleanupTicker(appCtx, sessions, 15*time.Minute)
 
 	// HTTP server using the api package.
@@ -92,7 +103,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	slog.Info("shutting down http server")
+	slog.Info("shutting down servers")
+	sipSrv.Stop()
+
 	if err := srv.Shutdown(ctx); err != nil {
 		slog.Error("http server shutdown error", "error", err)
 		os.Exit(1)

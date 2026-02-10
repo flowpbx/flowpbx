@@ -125,6 +125,8 @@ type RegistrationRepository interface {
 	DeleteByID(ctx context.Context, id int64) error
 	DeleteExpired(ctx context.Context) (int64, error)
 	DeleteAll(ctx context.Context) (int64, error)
+	DeleteByExtensionAndContact(ctx context.Context, extensionID int64, contactURI string) error
+	CountByExtensionID(ctx context.Context, extensionID int64) (int64, error)
 }
 
 // ConferenceBridgeRepository manages conference bridges.

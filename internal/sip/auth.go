@@ -1,0 +1,188 @@
+package sip
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/emiago/sipgo/sip"
+	"github.com/flowpbx/flowpbx/internal/database"
+	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/icholy/digest"
+)
+
+const (
+	authRealm   = "flowpbx"
+	nonceExpiry = 5 * time.Minute
+	authAlgoMD5 = "MD5"
+)
+
+// Authenticator handles SIP digest authentication against the extensions table.
+type Authenticator struct {
+	extensions database.ExtensionRepository
+	logger     *slog.Logger
+	nonces     sync.Map // map[string]time.Time — tracks issued nonces
+}
+
+// NewAuthenticator creates a new SIP digest authenticator.
+func NewAuthenticator(extensions database.ExtensionRepository, logger *slog.Logger) *Authenticator {
+	return &Authenticator{
+		extensions: extensions,
+		logger:     logger.With("subsystem", "auth"),
+	}
+}
+
+// Challenge sends a 401 Unauthorized response with a WWW-Authenticate header.
+func (a *Authenticator) Challenge(req *sip.Request, tx sip.ServerTransaction) {
+	nonce := a.generateNonce()
+	a.nonces.Store(nonce, time.Now())
+
+	chal := digest.Challenge{
+		Realm:     authRealm,
+		Nonce:     nonce,
+		Opaque:    "flowpbx",
+		Algorithm: authAlgoMD5,
+	}
+
+	res := sip.NewResponseFromRequest(req, 401, "Unauthorized", nil)
+	res.AppendHeader(sip.NewHeader("WWW-Authenticate", chal.String()))
+
+	if err := tx.Respond(res); err != nil {
+		a.logger.Error("failed to send auth challenge", "error", err)
+	}
+}
+
+// Authenticate validates the Authorization header against the extensions table.
+// Returns the matched extension on success, or nil if authentication fails.
+// When authentication fails, it sends the appropriate SIP error response.
+func (a *Authenticator) Authenticate(req *sip.Request, tx sip.ServerTransaction) *models.Extension {
+	h := req.GetHeader("Authorization")
+	if h == nil {
+		a.Challenge(req, tx)
+		return nil
+	}
+
+	cred, err := digest.ParseCredentials(h.Value())
+	if err != nil {
+		a.logger.Warn("failed to parse authorization header",
+			"error", err,
+			"source", req.Source(),
+		)
+		a.respondError(req, tx, 400, "Bad Request")
+		return nil
+	}
+
+	// Validate nonce to prevent replay attacks.
+	nonceTime, ok := a.nonces.Load(cred.Nonce)
+	if !ok {
+		a.logger.Debug("unknown nonce, re-challenging",
+			"username", cred.Username,
+			"source", req.Source(),
+		)
+		a.Challenge(req, tx)
+		return nil
+	}
+	if time.Since(nonceTime.(time.Time)) > nonceExpiry {
+		a.nonces.Delete(cred.Nonce)
+		a.logger.Debug("expired nonce, re-challenging",
+			"username", cred.Username,
+			"source", req.Source(),
+		)
+		a.Challenge(req, tx)
+		return nil
+	}
+
+	// Look up extension by SIP username.
+	ext, err := a.extensions.GetBySIPUsername(context.Background(), cred.Username)
+	if err != nil {
+		a.logger.Error("failed to look up extension",
+			"username", cred.Username,
+			"error", err,
+		)
+		a.respondError(req, tx, 500, "Internal Server Error")
+		return nil
+	}
+	if ext == nil {
+		a.logger.Warn("unknown sip username",
+			"username", cred.Username,
+			"source", req.Source(),
+		)
+		a.respondError(req, tx, 403, "Forbidden")
+		return nil
+	}
+
+	// Reconstruct the challenge to verify the digest response.
+	chal := digest.Challenge{
+		Realm:     authRealm,
+		Nonce:     cred.Nonce,
+		Opaque:    "flowpbx",
+		Algorithm: authAlgoMD5,
+	}
+
+	expected, err := digest.Digest(&chal, digest.Options{
+		Method:   string(req.Method),
+		URI:      cred.URI,
+		Username: cred.Username,
+		Password: ext.SIPPassword,
+	})
+	if err != nil {
+		a.logger.Error("failed to compute digest",
+			"username", cred.Username,
+			"error", err,
+		)
+		a.respondError(req, tx, 500, "Internal Server Error")
+		return nil
+	}
+
+	if cred.Response != expected.Response {
+		a.logger.Warn("digest auth failed",
+			"username", cred.Username,
+			"source", req.Source(),
+		)
+		a.Challenge(req, tx)
+		return nil
+	}
+
+	// Consume the nonce after successful auth.
+	a.nonces.Delete(cred.Nonce)
+
+	a.logger.Debug("digest auth successful",
+		"username", cred.Username,
+		"extension", ext.Extension,
+	)
+	return ext
+}
+
+// CleanExpiredNonces removes nonces that are older than the expiry window.
+func (a *Authenticator) CleanExpiredNonces() {
+	now := time.Now()
+	a.nonces.Range(func(key, value any) bool {
+		if now.Sub(value.(time.Time)) > nonceExpiry {
+			a.nonces.Delete(key)
+		}
+		return true
+	})
+}
+
+func (a *Authenticator) generateNonce() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based nonce.
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+func (a *Authenticator) respondError(req *sip.Request, tx sip.ServerTransaction, code int, reason string) {
+	res := sip.NewResponseFromRequest(req, code, reason, nil)
+	if err := tx.Respond(res); err != nil {
+		a.logger.Error("failed to send error response",
+			"code", code,
+			"error", err,
+		)
+	}
+}

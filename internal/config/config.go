@@ -147,6 +147,16 @@ func (c *Config) validate() error {
 	return nil
 }
 
+// SIPHost returns the hostname to use for the SIP User-Agent. It defaults
+// to the machine hostname if not set via system config.
+func (c *Config) SIPHost() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "localhost"
+	}
+	return hostname
+}
+
 // SlogLevel returns the slog.Level corresponding to the configured log level.
 func (c *Config) SlogLevel() slog.Level {
 	switch c.LogLevel {

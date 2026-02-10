@@ -163,6 +163,21 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 	for i := range trunks {
 		trunk := &trunks[i]
 
+		// Enforce max_channels: skip trunks that are at capacity.
+		if trunk.MaxChannels > 0 {
+			active := h.dialogMgr.ActiveCallCountForTrunk(trunk.ID)
+			if active >= trunk.MaxChannels {
+				h.logger.Info("outbound trunk at max channels, skipping",
+					"call_id", callID,
+					"trunk", trunk.Name,
+					"trunk_id", trunk.ID,
+					"active_channels", active,
+					"max_channels", trunk.MaxChannels,
+				)
+				continue
+			}
+		}
+
 		h.logger.Info("outbound call routing via trunk",
 			"call_id", callID,
 			"trunk", trunk.Name,
@@ -233,6 +248,19 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 		if bridge != nil {
 			bridge.Release()
 		}
+		return
+	}
+
+	// If no trunk was tried (all at max_channels), reject the call.
+	if result == nil {
+		h.logger.Warn("outbound call failed: all trunks at max channels",
+			"call_id", callID,
+			"trunks_available", len(trunks),
+		)
+		if bridge != nil {
+			bridge.Release()
+		}
+		h.respondError(req, tx, 503, "Service Unavailable")
 		return
 	}
 
@@ -334,6 +362,7 @@ func (h *InviteHandler) handleOutboundCall(req *sip.Request, tx sip.ServerTransa
 	dialog := &Dialog{
 		CallID:       callID,
 		Direction:    ic.CallType,
+		TrunkID:      selectedTrunk.ID,
 		CallerIDName: ic.CallerIDName,
 		CallerIDNum:  ic.CallerIDNum,
 		CalledNum:    ic.RequestURI,

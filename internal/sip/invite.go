@@ -54,6 +54,7 @@ type InviteHandler struct {
 	extensions     database.ExtensionRepository
 	registrations  database.RegistrationRepository
 	inboundNumbers database.InboundNumberRepository
+	trunks         database.TrunkRepository
 	trunkRegistrar *TrunkRegistrar
 	auth           *Authenticator
 	router         *CallRouter
@@ -71,6 +72,7 @@ func NewInviteHandler(
 	extensions database.ExtensionRepository,
 	registrations database.RegistrationRepository,
 	inboundNumbers database.InboundNumberRepository,
+	trunks database.TrunkRepository,
 	trunkRegistrar *TrunkRegistrar,
 	auth *Authenticator,
 	outboundRouter *OutboundRouter,
@@ -86,6 +88,7 @@ func NewInviteHandler(
 		extensions:     extensions,
 		registrations:  registrations,
 		inboundNumbers: inboundNumbers,
+		trunks:         trunks,
 		trunkRegistrar: trunkRegistrar,
 		auth:           auth,
 		router:         router,
@@ -452,6 +455,31 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransaction, ic *InviteContext, callID string) {
 	ctx := context.Background()
 
+	// Enforce max_channels on the inbound trunk.
+	if ic.TrunkID > 0 && h.trunks != nil {
+		trunk, err := h.trunks.GetByID(ctx, ic.TrunkID)
+		if err != nil {
+			h.logger.Error("failed to look up inbound trunk for channel limit",
+				"call_id", callID,
+				"trunk_id", ic.TrunkID,
+				"error", err,
+			)
+			// Continue — don't block the call on a DB read error.
+		} else if trunk != nil && trunk.MaxChannels > 0 {
+			active := h.dialogMgr.ActiveCallCountForTrunk(ic.TrunkID)
+			if active >= trunk.MaxChannels {
+				h.logger.Warn("inbound call rejected: trunk at max channels",
+					"call_id", callID,
+					"trunk_id", ic.TrunkID,
+					"active_channels", active,
+					"max_channels", trunk.MaxChannels,
+				)
+				h.respondError(req, tx, 503, "Service Unavailable")
+				return
+			}
+		}
+	}
+
 	// If the inbound number matched a DID but we have no target extension,
 	// that means the DID is mapped to a flow. Flow engine is not yet
 	// implemented, so return 501 for now.
@@ -677,6 +705,7 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 	dialog := &Dialog{
 		CallID:       callID,
 		Direction:    ic.CallType,
+		TrunkID:      ic.TrunkID,
 		CallerIDName: ic.CallerIDName,
 		CallerIDNum:  ic.CallerIDNum,
 		CalledNum:    ic.RequestURI,

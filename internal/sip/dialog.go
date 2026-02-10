@@ -53,6 +53,10 @@ type Dialog struct {
 	// Direction is the call type (internal, inbound, outbound).
 	Direction CallType
 
+	// TrunkID is the trunk used for this call (inbound or outbound).
+	// Zero for internal calls.
+	TrunkID int64
+
 	// Caller is the originating leg of the call.
 	Caller CallLeg
 
@@ -235,6 +239,22 @@ func (dm *DialogManager) HasDialog(callID string) bool {
 	defer dm.mu.RUnlock()
 	_, ok := dm.dialogs[callID]
 	return ok
+}
+
+// ActiveCallCountForTrunk returns the number of active calls using the given
+// trunk ID. This is used to enforce the trunk's max_channels limit: if the
+// count equals or exceeds max_channels, the trunk should not accept new calls.
+func (dm *DialogManager) ActiveCallCountForTrunk(trunkID int64) int {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+
+	count := 0
+	for _, d := range dm.dialogs {
+		if d.TrunkID == trunkID {
+			count++
+		}
+	}
+	return count
 }
 
 // ActiveCallCountForExtension returns the number of active calls involving

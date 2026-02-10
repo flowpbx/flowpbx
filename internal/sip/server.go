@@ -92,7 +92,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor) (*S
 	pendingMgr := NewPendingCallManager(logger)
 	cdrs := database.NewCDRRepository(db)
 	outboundRouter := NewOutboundRouter(trunks, trunkRegistrar, enc, logger)
-	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, proxyIP, logger)
+	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, proxyIP, logger)
 
 	s := &Server{
 		cfg:            cfg,

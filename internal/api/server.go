@@ -97,6 +97,7 @@ type Server struct {
 	trunkLifecycle TrunkLifecycleManager
 	activeCalls    ActiveCallsProvider
 	audioPrompts   database.AudioPromptRepository
+	voicemailBoxes database.VoicemailBoxRepository
 	encryptor      *database.Encryptor
 }
 
@@ -116,6 +117,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		cdrs:           database.NewCDRRepository(db),
 		callFlows:      database.NewCallFlowRepository(db),
 		audioPrompts:   database.NewAudioPromptRepository(db),
+		voicemailBoxes: database.NewVoicemailBoxRepository(db),
 		flowValidator:  flow.NewValidator(nil),
 		trunkStatus:    trunkStatus,
 		trunkTester:    trunkTester,
@@ -194,12 +196,12 @@ func (s *Server) routes() {
 		})
 
 		r.Route("/voicemail-boxes", func(r chi.Router) {
-			r.Get("/", s.handleNotImplemented)
-			r.Post("/", s.handleNotImplemented)
+			r.Get("/", s.handleListVoicemailBoxes)
+			r.Post("/", s.handleCreateVoicemailBox)
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", s.handleNotImplemented)
-				r.Put("/", s.handleNotImplemented)
-				r.Delete("/", s.handleNotImplemented)
+				r.Get("/", s.handleGetVoicemailBox)
+				r.Put("/", s.handleUpdateVoicemailBox)
+				r.Delete("/", s.handleDeleteVoicemailBox)
 				r.Get("/messages", s.handleNotImplemented)
 				r.Post("/greeting", s.handleNotImplemented)
 				r.Route("/messages/{msgID}", func(r chi.Router) {

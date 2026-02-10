@@ -38,6 +38,7 @@ export type {
   TimeSwitch,
   TimeSwitchRequest,
   TimeSwitchRule,
+  TimeSwitchOverride,
   CDR,
   CallFlow,
   CallFlowRequest,

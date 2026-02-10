@@ -133,6 +133,7 @@ type TimeSwitch struct {
 	Name        string
 	Timezone    string
 	Rules       string // JSON
+	Overrides   string // JSON — holiday/specific date overrides
 	DefaultDest string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time

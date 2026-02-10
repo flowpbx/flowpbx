@@ -21,6 +21,16 @@ type timeRule struct {
 	End   string   `json:"end"`   // "HH:MM" format
 }
 
+// timeOverride represents a holiday or specific-date override that takes
+// priority over regular day/time rules. If Start and End are empty the
+// override applies for the entire day.
+type timeOverride struct {
+	Label string `json:"label"`
+	Date  string `json:"date"`  // "YYYY-MM-DD" format
+	Start string `json:"start"` // "HH:MM" format, optional — empty means all day
+	End   string `json:"end"`   // "HH:MM" format, optional — empty means all day
+}
+
 // TimeSwitchHandler handles the Time Switch node type. It evaluates time-based
 // rules against the current time in the configured timezone and follows the
 // matching rule's output edge, or the "default" edge if no rule matches.
@@ -69,6 +79,14 @@ func (h *TimeSwitchHandler) Execute(ctx context.Context, callCtx *flow.CallConte
 		return "", fmt.Errorf("time switch node %s: parsing rules: %w", node.ID, err)
 	}
 
+	// Parse the overrides JSON (may be empty or "[]").
+	var overrides []timeOverride
+	if ts.Overrides != "" && ts.Overrides != "[]" {
+		if err := json.Unmarshal([]byte(ts.Overrides), &overrides); err != nil {
+			return "", fmt.Errorf("time switch node %s: parsing overrides: %w", node.ID, err)
+		}
+	}
+
 	// Load the timezone.
 	tz := ts.Timezone
 	if tz == "" {
@@ -86,9 +104,24 @@ func (h *TimeSwitchHandler) Execute(ctx context.Context, callCtx *flow.CallConte
 		"call_id", callCtx.CallID,
 		"node_id", node.ID,
 		"timezone", tz,
-		"local_time", now.Format("Mon 15:04"),
+		"local_time", now.Format("Mon 2006-01-02 15:04"),
 		"rule_count", len(rules),
+		"override_count", len(overrides),
 	)
+
+	// Check overrides first — specific date overrides take priority.
+	for _, ov := range overrides {
+		if matchesOverride(now, ov) {
+			h.logger.Info("time switch override matched",
+				"call_id", callCtx.CallID,
+				"node_id", node.ID,
+				"override_label", ov.Label,
+				"override_date", ov.Date,
+				"local_time", now.Format("Mon 2006-01-02 15:04"),
+			)
+			return ov.Label, nil
+		}
+	}
 
 	// Evaluate rules top-to-bottom; first match wins.
 	for _, rule := range rules {
@@ -111,6 +144,43 @@ func (h *TimeSwitchHandler) Execute(ctx context.Context, callCtx *flow.CallConte
 	)
 
 	return "default", nil
+}
+
+// matchesOverride checks whether the given time matches a date override.
+// If the override has start/end times, the current time must fall within
+// that range. If start/end are empty, the override matches the entire day.
+func matchesOverride(now time.Time, ov timeOverride) bool {
+	// Compare the date portion.
+	currentDate := now.Format("2006-01-02")
+	if currentDate != ov.Date {
+		return false
+	}
+
+	// If no time range specified, override applies all day.
+	if ov.Start == "" && ov.End == "" {
+		return true
+	}
+
+	// Parse start and end times for partial-day override.
+	startH, startM, ok := parseHHMM(ov.Start)
+	if !ok {
+		return false
+	}
+	endH, endM, ok := parseHHMM(ov.End)
+	if !ok {
+		return false
+	}
+
+	nowMinutes := now.Hour()*60 + now.Minute()
+	startMinutes := startH*60 + startM
+	endMinutes := endH*60 + endM
+
+	// Handle overnight ranges.
+	if startMinutes > endMinutes {
+		return nowMinutes >= startMinutes || nowMinutes < endMinutes
+	}
+
+	return nowMinutes >= startMinutes && nowMinutes < endMinutes
 }
 
 // matchesRule checks whether the given time matches a time rule.

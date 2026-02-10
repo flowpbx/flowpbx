@@ -21,10 +21,10 @@ func NewTimeSwitchRepository(db *DB) TimeSwitchRepository {
 // Create inserts a new time switch.
 func (r *timeSwitchRepo) Create(ctx context.Context, ts *models.TimeSwitch) error {
 	result, err := r.db.ExecContext(ctx,
-		`INSERT INTO time_switches (name, timezone, rules, default_dest,
+		`INSERT INTO time_switches (name, timezone, rules, overrides, default_dest,
 		 created_at, updated_at)
-		 VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		ts.Name, ts.Timezone, ts.Rules, ts.DefaultDest,
+		 VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		ts.Name, ts.Timezone, ts.Rules, ts.Overrides, ts.DefaultDest,
 	)
 	if err != nil {
 		return fmt.Errorf("inserting time switch: %w", err)
@@ -41,7 +41,7 @@ func (r *timeSwitchRepo) Create(ctx context.Context, ts *models.TimeSwitch) erro
 // GetByID returns a time switch by ID.
 func (r *timeSwitchRepo) GetByID(ctx context.Context, id int64) (*models.TimeSwitch, error) {
 	return r.scanOne(r.db.QueryRowContext(ctx,
-		`SELECT id, name, timezone, rules, default_dest,
+		`SELECT id, name, timezone, rules, overrides, default_dest,
 		 created_at, updated_at
 		 FROM time_switches WHERE id = ?`, id,
 	))
@@ -50,7 +50,7 @@ func (r *timeSwitchRepo) GetByID(ctx context.Context, id int64) (*models.TimeSwi
 // List returns all time switches ordered by name.
 func (r *timeSwitchRepo) List(ctx context.Context) ([]models.TimeSwitch, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, timezone, rules, default_dest,
+		`SELECT id, name, timezone, rules, overrides, default_dest,
 		 created_at, updated_at
 		 FROM time_switches ORDER BY name`)
 	if err != nil {
@@ -62,7 +62,7 @@ func (r *timeSwitchRepo) List(ctx context.Context) ([]models.TimeSwitch, error) 
 	for rows.Next() {
 		var ts models.TimeSwitch
 		if err := rows.Scan(&ts.ID, &ts.Name, &ts.Timezone, &ts.Rules,
-			&ts.DefaultDest, &ts.CreatedAt, &ts.UpdatedAt); err != nil {
+			&ts.Overrides, &ts.DefaultDest, &ts.CreatedAt, &ts.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning time switch row: %w", err)
 		}
 		switches = append(switches, ts)
@@ -74,9 +74,9 @@ func (r *timeSwitchRepo) List(ctx context.Context) ([]models.TimeSwitch, error) 
 func (r *timeSwitchRepo) Update(ctx context.Context, ts *models.TimeSwitch) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE time_switches SET name = ?, timezone = ?, rules = ?,
-		 default_dest = ?, updated_at = datetime('now')
+		 overrides = ?, default_dest = ?, updated_at = datetime('now')
 		 WHERE id = ?`,
-		ts.Name, ts.Timezone, ts.Rules, ts.DefaultDest, ts.ID,
+		ts.Name, ts.Timezone, ts.Rules, ts.Overrides, ts.DefaultDest, ts.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("updating time switch: %w", err)
@@ -96,7 +96,7 @@ func (r *timeSwitchRepo) Delete(ctx context.Context, id int64) error {
 func (r *timeSwitchRepo) scanOne(row *sql.Row) (*models.TimeSwitch, error) {
 	var ts models.TimeSwitch
 	err := row.Scan(&ts.ID, &ts.Name, &ts.Timezone, &ts.Rules,
-		&ts.DefaultDest, &ts.CreatedAt, &ts.UpdatedAt)
+		&ts.Overrides, &ts.DefaultDest, &ts.CreatedAt, &ts.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

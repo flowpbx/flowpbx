@@ -16,6 +16,7 @@ type timeSwitchRequest struct {
 	Name        string          `json:"name"`
 	Timezone    string          `json:"timezone"`
 	Rules       json.RawMessage `json:"rules"`
+	Overrides   json.RawMessage `json:"overrides"`
 	DefaultDest string          `json:"default_dest"`
 }
 
@@ -25,6 +26,7 @@ type timeSwitchResponse struct {
 	Name        string          `json:"name"`
 	Timezone    string          `json:"timezone"`
 	Rules       json.RawMessage `json:"rules"`
+	Overrides   json.RawMessage `json:"overrides"`
 	DefaultDest string          `json:"default_dest"`
 	CreatedAt   string          `json:"created_at"`
 	UpdatedAt   string          `json:"updated_at"`
@@ -45,6 +47,12 @@ func toTimeSwitchResponse(ts *models.TimeSwitch) timeSwitchResponse {
 		resp.Rules = json.RawMessage(ts.Rules)
 	} else {
 		resp.Rules = json.RawMessage("[]")
+	}
+
+	if ts.Overrides != "" {
+		resp.Overrides = json.RawMessage(ts.Overrides)
+	} else {
+		resp.Overrides = json.RawMessage("[]")
 	}
 
 	return resp
@@ -80,10 +88,16 @@ func (s *Server) handleCreateTimeSwitch(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	overrides := "[]"
+	if req.Overrides != nil {
+		overrides = string(req.Overrides)
+	}
+
 	ts := &models.TimeSwitch{
 		Name:        req.Name,
 		Timezone:    "Australia/Sydney",
 		Rules:       string(req.Rules),
+		Overrides:   overrides,
 		DefaultDest: req.DefaultDest,
 	}
 
@@ -168,6 +182,9 @@ func (s *Server) handleUpdateTimeSwitch(w http.ResponseWriter, r *http.Request) 
 	if req.Rules != nil {
 		existing.Rules = string(req.Rules)
 	}
+	if req.Overrides != nil {
+		existing.Overrides = string(req.Overrides)
+	}
 	existing.DefaultDest = req.DefaultDest
 
 	if err := s.timeSwitches.Update(r.Context(), existing); err != nil {
@@ -235,6 +252,12 @@ func validateTimeSwitchRequest(req timeSwitchRequest, isCreate bool) string {
 		var arr []json.RawMessage
 		if err := json.Unmarshal(req.Rules, &arr); err != nil {
 			return "rules must be a valid JSON array"
+		}
+	}
+	if req.Overrides != nil {
+		var arr []json.RawMessage
+		if err := json.Unmarshal(req.Overrides, &arr); err != nil {
+			return "overrides must be a valid JSON array"
 		}
 	}
 	return ""

@@ -4,6 +4,7 @@ import type { TimeSwitch, TimeSwitchRequest } from '../api'
 import DataTable, { type Column } from '../components/DataTable'
 import { TextInput, SelectField } from '../components/FormFields'
 import TimeSwitchRuleEditor from '../components/TimeSwitchRuleEditor'
+import HolidayOverrideEditor from '../components/HolidayOverrideEditor'
 import WeeklyGridPreview from '../components/WeeklyGridPreview'
 
 const TIMEZONES = [
@@ -30,6 +31,7 @@ export default function TimeSwitches() {
       name: '',
       timezone: 'Australia/Sydney',
       rules: [{ label: '', days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:30', end: '17:00', dest_node: '' }],
+      overrides: [],
       default_dest: '',
     }
   }
@@ -58,6 +60,7 @@ export default function TimeSwitches() {
       name: ts.name,
       timezone: ts.timezone,
       rules: ts.rules ?? [],
+      overrides: ts.overrides ?? [],
       default_dest: ts.default_dest ?? '',
     })
     setEditing(ts)
@@ -116,8 +119,18 @@ export default function TimeSwitches() {
       key: 'rules',
       header: 'Rules',
       render: (r) => {
-        const count = r.rules?.length ?? 0
-        return <span className="text-gray-600">{count} rule{count !== 1 ? 's' : ''}</span>
+        const ruleCount = r.rules?.length ?? 0
+        const overrideCount = r.overrides?.length ?? 0
+        return (
+          <span className="text-gray-600">
+            {ruleCount} rule{ruleCount !== 1 ? 's' : ''}
+            {overrideCount > 0 && (
+              <span className="ml-1.5 text-amber-600">
+                + {overrideCount} override{overrideCount !== 1 ? 's' : ''}
+              </span>
+            )}
+          </span>
+        )
       },
     },
     {
@@ -205,6 +218,11 @@ export default function TimeSwitches() {
           <TimeSwitchRuleEditor
             rules={form.rules}
             onChange={(rules) => setForm({ ...form, rules })}
+          />
+
+          <HolidayOverrideEditor
+            overrides={form.overrides ?? []}
+            onChange={(overrides) => setForm({ ...form, overrides })}
           />
 
           <WeeklyGridPreview rules={form.rules} />

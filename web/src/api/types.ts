@@ -313,12 +313,22 @@ export interface TimeSwitchRule {
   dest_node: string
 }
 
+/** Holiday or specific-date override. Evaluated before regular rules. */
+export interface TimeSwitchOverride {
+  label: string
+  date: string      // "YYYY-MM-DD"
+  start?: string    // "HH:MM", optional — empty means all day
+  end?: string      // "HH:MM", optional — empty means all day
+  dest_node: string
+}
+
 /** Time switch resource. */
 export interface TimeSwitch {
   id: number
   name: string
   timezone: string
   rules: TimeSwitchRule[]
+  overrides: TimeSwitchOverride[]
   default_dest: string
   created_at: string
   updated_at: string
@@ -329,6 +339,7 @@ export interface TimeSwitchRequest {
   name: string
   timezone?: string
   rules: TimeSwitchRule[]
+  overrides?: TimeSwitchOverride[]
   default_dest?: string
 }
 

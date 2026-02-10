@@ -15,7 +15,7 @@
 - [x] Create Time Switches CRUD page + API: `GET/POST/PUT/DELETE /api/v1/time-switches`
 - [x] Create time switch visual rule editor: day checkboxes + time range pickers
 - [x] Create time switch weekly grid preview
-- [ ] Create time switch holiday/specific date override support
+- [x] Create time switch holiday/specific date override support
 - [ ] Create timezone selector component
 - [ ] Create Conference Bridges CRUD page + API: `GET/POST/PUT/DELETE /api/v1/conferences`
 - [ ] Create Recordings browser page: list, search, play, download, delete

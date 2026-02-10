@@ -13,11 +13,11 @@
 - [x] Create PostgreSQL schema: licenses, installations, push_logs
 - [x] Implement FCM integration (Firebase Admin SDK for Go)
 - [x] Implement APNs integration (HTTP/2 provider API)
-- [ ] Implement `POST /v1/push` — validate license → send push → log result
-- [ ] Implement `POST /v1/license/validate` — validate license key, return entitlements
-- [ ] Implement `POST /v1/license/activate` — activate new installation (generate instance_id)
-- [ ] Implement `GET /v1/license/status` — check license status
-- [ ] Implement rate limiting per license key
+- [x] Implement `POST /v1/push` — validate license → send push → log result
+- [x] Implement `POST /v1/license/validate` — validate license key, return entitlements
+- [x] Implement `POST /v1/license/activate` — activate new installation (generate instance_id)
+- [x] Implement `GET /v1/license/status` — check license status
+- [x] Implement rate limiting per license key
 - [ ] Containerize push gateway for deployment
 
 ### PBX ↔ Push Gateway Integration

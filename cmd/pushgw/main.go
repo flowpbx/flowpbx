@@ -15,6 +15,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/pushgw/pgstore"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"golang.org/x/time/rate"
 )
 
 func main() {
@@ -26,6 +27,8 @@ func main() {
 	apnsTeamID := flag.String("apns-team-id", "", "Apple Developer Team ID (10-character identifier)")
 	apnsBundleID := flag.String("apns-bundle-id", "", "iOS app bundle identifier (APNs topic)")
 	apnsSandbox := flag.Bool("apns-sandbox", false, "use APNs sandbox environment instead of production")
+	rateLimitRate := flag.Float64("rate-limit-rate", 1.0, "push requests allowed per second per license key")
+	rateLimitBurst := flag.Int("rate-limit-burst", 10, "maximum burst size per license key")
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
 	flag.Parse()
 
@@ -95,6 +98,15 @@ func main() {
 
 	var sender pushgw.PushSender = pushgw.NewMultiSender(senders)
 
+	// Create per-license-key rate limiter for the push endpoint.
+	rlCfg := pushgw.DefaultRateLimiterConfig()
+	rlCfg.Rate = rate.Limit(*rateLimitRate)
+	rlCfg.Burst = *rateLimitBurst
+	rateLimiter := pushgw.NewRateLimiter(rlCfg)
+	defer rateLimiter.Stop()
+
+	slog.Info("rate limiter configured", "rate", *rateLimitRate, "burst", *rateLimitBurst)
+
 	// Create the push gateway server.
 	var licenseStore pushgw.LicenseStore
 	var pushLog pushgw.PushLogger
@@ -102,7 +114,7 @@ func main() {
 		licenseStore = store
 		pushLog = store
 	}
-	gwServer := pushgw.NewServer(licenseStore, sender, pushLog)
+	gwServer := pushgw.NewServer(licenseStore, sender, pushLog, rateLimiter)
 
 	// HTTP router with global middleware.
 	r := chi.NewRouter()

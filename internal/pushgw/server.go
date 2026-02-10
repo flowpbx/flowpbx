@@ -39,19 +39,22 @@ type PushLogger interface {
 
 // Server holds the push gateway HTTP handler dependencies.
 type Server struct {
-	router  *chi.Mux
-	store   LicenseStore
-	sender  PushSender
-	pushLog PushLogger
+	router      *chi.Mux
+	store       LicenseStore
+	sender      PushSender
+	pushLog     PushLogger
+	rateLimiter *RateLimiter
 }
 
 // NewServer creates a push gateway HTTP server with all routes mounted.
-func NewServer(store LicenseStore, sender PushSender, pushLog PushLogger) *Server {
+// If rateLimiter is non-nil, rate limiting is applied to the push endpoint.
+func NewServer(store LicenseStore, sender PushSender, pushLog PushLogger, rateLimiter *RateLimiter) *Server {
 	s := &Server{
-		router:  chi.NewRouter(),
-		store:   store,
-		sender:  sender,
-		pushLog: pushLog,
+		router:      chi.NewRouter(),
+		store:       store,
+		sender:      sender,
+		pushLog:     pushLog,
+		rateLimiter: rateLimiter,
 	}
 
 	s.routes()
@@ -73,7 +76,12 @@ func (s *Server) routes() {
 	r := s.router
 
 	r.Route("/v1", func(r chi.Router) {
-		r.Post("/push", s.handlePush)
+		// Apply rate limiting to the push endpoint if configured.
+		if s.rateLimiter != nil {
+			r.With(s.rateLimiter.Middleware).Post("/push", s.handlePush)
+		} else {
+			r.Post("/push", s.handlePush)
+		}
 		r.Post("/license/validate", s.handleLicenseValidate)
 		r.Post("/license/activate", s.handleLicenseActivate)
 		r.Get("/license/status", s.handleLicenseStatus)

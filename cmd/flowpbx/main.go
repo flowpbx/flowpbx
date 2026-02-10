@@ -18,6 +18,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/email"
 	"github.com/flowpbx/flowpbx/internal/media"
 	"github.com/flowpbx/flowpbx/internal/prompts"
+	"github.com/flowpbx/flowpbx/internal/recording"
 	sipserver "github.com/flowpbx/flowpbx/internal/sip"
 	"github.com/flowpbx/flowpbx/internal/voicemail"
 )
@@ -100,6 +101,9 @@ func main() {
 
 	// Voicemail retention cleanup: delete messages older than per-box retention_days.
 	voicemail.StartCleanupTicker(appCtx, db, 1*time.Hour)
+
+	// Recording retention cleanup: delete recordings older than recording_max_days setting.
+	recording.StartCleanupTicker(appCtx, db, sysConfig, 1*time.Hour)
 
 	// Create adapter for trunk status so the API can query SIP trunk state.
 	trunkStatus := &trunkStatusAdapter{registrar: sipSrv.TrunkRegistrar()}

@@ -231,6 +231,49 @@ func (r *cdrRepo) ListRecent(ctx context.Context, limit int) ([]models.CDR, erro
 	return cdrs, nil
 }
 
+// DeleteExpiredRecordings clears the recording_file field on CDRs whose
+// start_time is older than the given number of days and that have a non-empty
+// recording_file. Returns the file paths of the cleared recordings so callers
+// can remove the WAV files from disk.
+func (r *cdrRepo) DeleteExpiredRecordings(ctx context.Context, days int) ([]string, error) {
+	// Select recording file paths that will be cleared.
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT recording_file FROM cdrs
+		 WHERE recording_file IS NOT NULL AND recording_file != ''
+		 AND start_time < datetime('now', '-' || ? || ' days')`, days)
+	if err != nil {
+		return nil, fmt.Errorf("querying expired recordings: %w", err)
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scanning expired recording path: %w", err)
+		}
+		paths = append(paths, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating expired recording rows: %w", err)
+	}
+
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	// Clear the recording_file field on expired CDRs (don't delete the CDR itself).
+	_, err = r.db.ExecContext(ctx,
+		`UPDATE cdrs SET recording_file = ''
+		 WHERE recording_file IS NOT NULL AND recording_file != ''
+		 AND start_time < datetime('now', '-' || ? || ' days')`, days)
+	if err != nil {
+		return nil, fmt.Errorf("clearing expired recording paths: %w", err)
+	}
+
+	return paths, nil
+}
+
 func (r *cdrRepo) scanOne(row *sql.Row) (*models.CDR, error) {
 	var c models.CDR
 	err := row.Scan(&c.ID, &c.CallID, &c.StartTime, &c.AnswerTime, &c.EndTime,

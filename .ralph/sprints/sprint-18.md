@@ -12,9 +12,9 @@
 - [x] Implement per-extension recording config: always / off / on_demand
 - [x] Implement per-trunk recording config
 - [x] Implement global recording policy setting
-- [ ] Organize recording files by date: `$DATA_DIR/recordings/YYYY/MM/DD/call_{id}.wav`
-- [ ] Store recording_file path in CDR on recording completion
-- [ ] Implement recording retention policy: auto-delete recordings older than configurable days
+- [x] Organize recording files by date: `$DATA_DIR/recordings/YYYY/MM/DD/call_{id}.wav`
+- [x] Store recording_file path in CDR on recording completion
+- [x] Implement recording retention policy: auto-delete recordings older than configurable days
 - [ ] Add storage usage monitoring (total recordings size)
 - [ ] Create recording browser API with playback stream and download
 - [ ] Implement follow-me: sequential ring — ring registered devices → after timeout → ring external numbers via trunk

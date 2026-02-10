@@ -8,7 +8,7 @@
 
 ## Tasks
 
-- [ ] Create `internal/media/proxy.go` — UDP socket pool for RTP relay (configurable port range, default 10000-20000)
+- [x] Create `internal/media/proxy.go` — UDP socket pool for RTP relay (configurable port range, default 10000-20000)
 - [ ] Implement RTP session allocation: allocate a pair of ports (RTP + RTCP) per call leg
 - [ ] Implement SDP parsing (extract media lines, codecs, connection info)
 - [ ] Implement SDP rewriting (replace endpoint IPs/ports with proxy addresses)

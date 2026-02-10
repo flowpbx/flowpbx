@@ -17,6 +17,8 @@ type Config struct {
 	HTTPPort      int
 	SIPPort       int
 	SIPTLSPort    int
+	RTPPortMin    int
+	RTPPortMax    int
 	TLSCert       string
 	TLSKey        string
 	LogLevel      string
@@ -30,6 +32,8 @@ const (
 	defaultHTTPPort   = 8080
 	defaultSIPPort    = 5060
 	defaultSIPTLSPort = 5061
+	defaultRTPPortMin = 10000
+	defaultRTPPortMax = 20000
 	defaultLogLevel   = "info"
 )
 
@@ -47,6 +51,8 @@ func Load() (*Config, error) {
 	fs.IntVar(&cfg.HTTPPort, "http-port", defaultHTTPPort, "HTTP server listen port")
 	fs.IntVar(&cfg.SIPPort, "sip-port", defaultSIPPort, "SIP UDP/TCP listen port")
 	fs.IntVar(&cfg.SIPTLSPort, "sip-tls-port", defaultSIPTLSPort, "SIP TLS listen port")
+	fs.IntVar(&cfg.RTPPortMin, "rtp-port-min", defaultRTPPortMin, "minimum UDP port for RTP media relay")
+	fs.IntVar(&cfg.RTPPortMax, "rtp-port-max", defaultRTPPortMax, "maximum UDP port for RTP media relay")
 	fs.StringVar(&cfg.TLSCert, "tls-cert", "", "path to TLS certificate file")
 	fs.StringVar(&cfg.TLSKey, "tls-key", "", "path to TLS private key file")
 	fs.StringVar(&cfg.LogLevel, "log-level", defaultLogLevel, "log level (debug, info, warn, error)")
@@ -84,6 +90,8 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 		"http-port":      envPrefix + "HTTP_PORT",
 		"sip-port":       envPrefix + "SIP_PORT",
 		"sip-tls-port":   envPrefix + "SIP_TLS_PORT",
+		"rtp-port-min":   envPrefix + "RTP_PORT_MIN",
+		"rtp-port-max":   envPrefix + "RTP_PORT_MAX",
 		"tls-cert":       envPrefix + "TLS_CERT",
 		"tls-key":        envPrefix + "TLS_KEY",
 		"log-level":      envPrefix + "LOG_LEVEL",
@@ -114,6 +122,14 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 			if v, err := strconv.Atoi(val); err == nil {
 				cfg.SIPTLSPort = v
 			}
+		case "rtp-port-min":
+			if v, err := strconv.Atoi(val); err == nil {
+				cfg.RTPPortMin = v
+			}
+		case "rtp-port-max":
+			if v, err := strconv.Atoi(val); err == nil {
+				cfg.RTPPortMax = v
+			}
 		case "tls-cert":
 			cfg.TLSCert = val
 		case "tls-key":
@@ -138,6 +154,16 @@ func (c *Config) validate() error {
 	}
 	if c.SIPTLSPort < 1 || c.SIPTLSPort > 65535 {
 		return fmt.Errorf("sip-tls-port must be between 1 and 65535, got %d", c.SIPTLSPort)
+	}
+	if c.RTPPortMin < 1024 || c.RTPPortMin > 65534 {
+		return fmt.Errorf("rtp-port-min must be between 1024 and 65534, got %d", c.RTPPortMin)
+	}
+	if c.RTPPortMax < c.RTPPortMin+2 || c.RTPPortMax > 65535 {
+		return fmt.Errorf("rtp-port-max must be between rtp-port-min+2 and 65535, got %d", c.RTPPortMax)
+	}
+	// RTP ports must be even (RTP uses even ports, RTCP uses the next odd port).
+	if c.RTPPortMin%2 != 0 {
+		return fmt.Errorf("rtp-port-min must be even, got %d", c.RTPPortMin)
 	}
 	validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
 	if !validLevels[strings.ToLower(c.LogLevel)] {

@@ -97,4 +97,10 @@ type SIPActions interface {
 	// delay (wait before ringing) and timeout (how long to ring). Returns
 	// a RingResult indicating whether any external number answered.
 	RingFollowMe(ctx context.Context, callCtx *CallContext, numbers []models.FollowMeNumber, callerIDName string, callerIDNum string) (*RingResult, error)
+
+	// RingFollowMeSimultaneous rings all external follow-me numbers at
+	// the same time via outbound trunks. The first number to answer wins;
+	// all other legs are cancelled. Returns a RingResult indicating
+	// whether any external number answered.
+	RingFollowMeSimultaneous(ctx context.Context, callCtx *CallContext, numbers []models.FollowMeNumber, callerIDName string, callerIDNum string) (*RingResult, error)
 }

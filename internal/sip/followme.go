@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/emiago/sipgo"
@@ -575,5 +576,357 @@ func (a *FlowSIPActions) handleFollowMeTrunkAuth(
 				reason:     res.Reason,
 			}
 		}
+	}
+}
+
+// followMeLegResult carries the outcome of one simultaneous follow-me leg.
+type followMeLegResult struct {
+	number string
+	result *outboundResult
+	trunk  *models.Trunk
+	bridge *MediaBridge
+	err    error
+}
+
+// RingFollowMeSimultaneous rings all external follow-me numbers simultaneously
+// via outbound trunks. All numbers are dialled at once; the first to answer
+// wins and all other legs are cancelled. Each leg gets its own media bridge
+// allocation; only the winning leg's bridge is completed.
+func (a *FlowSIPActions) RingFollowMeSimultaneous(ctx context.Context, callCtx *flow.CallContext, numbers []models.FollowMeNumber, callerIDName string, callerIDNum string) (*flow.RingResult, error) {
+	if callCtx.Request == nil || callCtx.Transaction == nil {
+		return nil, fmt.Errorf("call context has no sip request or transaction")
+	}
+
+	if len(numbers) == 0 {
+		return &flow.RingResult{Answered: false}, nil
+	}
+
+	if a.outboundRouter == nil {
+		a.logger.Warn("follow-me cannot ring external numbers: no outbound router configured",
+			"call_id", callCtx.CallID,
+		)
+		return &flow.RingResult{Answered: false}, nil
+	}
+
+	callID := callCtx.CallID
+	req := callCtx.Request
+	tx := callCtx.Transaction
+
+	a.logger.Info("follow-me simultaneous ring starting",
+		"call_id", callID,
+		"numbers", len(numbers),
+	)
+
+	// Select candidate trunks for outbound dialling.
+	trunks, err := a.outboundRouter.SelectTrunks(ctx)
+	if err != nil {
+		a.logger.Warn("follow-me no trunks available",
+			"call_id", callID,
+			"error", err,
+		)
+		return &flow.RingResult{Answered: false}, nil
+	}
+
+	// Determine the maximum ring timeout across all numbers.
+	maxTimeout := 30
+	for _, n := range numbers {
+		if n.Timeout > maxTimeout {
+			maxTimeout = n.Timeout
+		}
+	}
+
+	// Create a cancellable context for all legs. When one answers, cancel the rest.
+	ringCtx, cancelRing := context.WithTimeout(ctx, time.Duration(maxTimeout)*time.Second)
+
+	// Register as pending so the CANCEL handler can abort all legs.
+	a.pendingMgr.Add(&PendingCall{
+		CallID:     callID,
+		CallerTx:   tx,
+		CallerReq:  req,
+		CancelFork: cancelRing,
+	})
+
+	// Launch all legs in parallel.
+	resultCh := make(chan followMeLegResult, len(numbers))
+	var wg sync.WaitGroup
+
+	for _, fmNum := range numbers {
+		wg.Add(1)
+		go func(num models.FollowMeNumber) {
+			defer wg.Done()
+			a.ringFollowMeSimultaneousLeg(ringCtx, callCtx, trunks, num, callerIDName, callerIDNum, resultCh)
+		}(fmNum)
+	}
+
+	// Close result channel when all legs finish.
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	// Collect results. First answer wins.
+	var winner *followMeLegResult
+	var losers []followMeLegResult
+
+	for lr := range resultCh {
+		if lr.err != nil {
+			a.logger.Warn("follow-me simultaneous leg failed",
+				"call_id", callID,
+				"number", lr.number,
+				"error", lr.err,
+			)
+			if lr.bridge != nil {
+				lr.bridge.Release()
+			}
+			continue
+		}
+
+		if lr.result != nil && lr.result.answered && winner == nil {
+			winner = &lr
+			a.logger.Info("follow-me simultaneous leg answered",
+				"call_id", callID,
+				"number", lr.number,
+			)
+			// Cancel all other legs.
+			cancelRing()
+		} else {
+			losers = append(losers, lr)
+		}
+	}
+
+	// Clean up losing legs.
+	for _, loser := range losers {
+		if loser.result != nil && loser.result.answered && loser.result.tx != nil {
+			loser.result.tx.Terminate()
+		}
+		if loser.bridge != nil {
+			loser.bridge.Release()
+		}
+	}
+
+	// Remove from pending calls.
+	pc := a.pendingMgr.Remove(callID)
+	cancelRing()
+
+	// If pending call was cancelled by the CANCEL handler, clean up.
+	if pc == nil {
+		if winner != nil && winner.result.tx != nil {
+			winner.result.tx.Terminate()
+		}
+		if winner != nil && winner.bridge != nil {
+			winner.bridge.Release()
+		}
+		return &flow.RingResult{}, fmt.Errorf("call cancelled during follow-me ringing")
+	}
+
+	// No number answered.
+	if winner == nil {
+		a.logger.Info("follow-me simultaneous ring all numbers exhausted",
+			"call_id", callID,
+		)
+		return &flow.RingResult{Answered: false}, nil
+	}
+
+	// Winner answered — complete media bridging.
+	selectedTrunk := winner.trunk
+	outResult := winner.result
+	bridge := winner.bridge
+
+	a.logger.Info("follow-me simultaneous completing media bridge",
+		"call_id", callID,
+		"number", winner.number,
+		"trunk", selectedTrunk.Name,
+	)
+
+	// Send ACK to the trunk for its 200 OK.
+	ackReq := buildACKFor2xx(outResult.req, outResult.res)
+	if err := a.forker.Client().WriteRequest(ackReq); err != nil {
+		a.logger.Error("failed to send ack to trunk for follow-me simultaneous",
+			"call_id", callID,
+			"error", err,
+		)
+		outResult.tx.Terminate()
+		if bridge != nil {
+			bridge.Release()
+		}
+		return nil, fmt.Errorf("sending ack to trunk: %w", err)
+	}
+
+	// Complete media bridge with trunk's SDP.
+	var mediaSession *media.MediaSession
+	okBody := outResult.res.Body()
+	if bridge != nil && len(outResult.res.Body()) > 0 {
+		rewrittenForCaller, err := bridge.CompleteMediaBridge(outResult.res.Body())
+		if err != nil {
+			a.logger.Error("failed to complete media bridge for follow-me simultaneous",
+				"call_id", callID,
+				"error", err,
+			)
+		} else {
+			okBody = rewrittenForCaller
+			mediaSession = bridge.Session()
+		}
+	}
+
+	// Forward the 200 OK to the caller.
+	okResponse := sip.NewResponseFromRequest(req, 200, "OK", okBody)
+	if len(okBody) > 0 {
+		okResponse.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+	}
+
+	if err := tx.Respond(okResponse); err != nil {
+		a.logger.Error("failed to relay 200 ok to caller for follow-me simultaneous",
+			"call_id", callID,
+			"error", err,
+		)
+		outResult.tx.Terminate()
+		if mediaSession != nil {
+			mediaSession.Release()
+		}
+		return nil, fmt.Errorf("relaying 200 ok: %w", err)
+	}
+
+	// Track the active call as a dialog.
+	dialog := &Dialog{
+		CallID:       callID,
+		Direction:    CallTypeInbound,
+		TrunkID:      selectedTrunk.ID,
+		CallerIDName: callCtx.CallerIDName,
+		CallerIDNum:  callCtx.CallerIDNum,
+		CalledNum:    winner.number,
+		StartTime:    callCtx.StartTime,
+		CallerTx:     tx,
+		CallerReq:    req,
+		CalleeTx:     outResult.tx,
+		CalleeReq:    outResult.req,
+		CalleeRes:    outResult.res,
+		Media:        mediaSession,
+		Caller:       CallLeg{},
+		Callee: CallLeg{
+			ContactURI: fmt.Sprintf("sip:%s:%d", selectedTrunk.Host, selectedTrunk.Port),
+		},
+	}
+
+	// Extract dialog tags.
+	if from := req.From(); from != nil {
+		if tag, ok := from.Params.Get("tag"); ok {
+			dialog.Caller.FromTag = tag
+		}
+	}
+	if to := outResult.res.To(); to != nil {
+		if tag, ok := to.Params.Get("tag"); ok {
+			dialog.Callee.ToTag = tag
+		}
+	}
+	if contact := outResult.res.Contact(); contact != nil {
+		uri := contact.Address.Clone()
+		dialog.Callee.RemoteTarget = uri
+	}
+
+	a.dialogMgr.CreateDialog(dialog)
+	a.updateCDROnAnswer(callID)
+
+	a.logger.Info("follow-me simultaneous dialog established",
+		"call_id", callID,
+		"number", winner.number,
+		"trunk", selectedTrunk.Name,
+		"trunk_id", selectedTrunk.ID,
+		"media_bridged", mediaSession != nil,
+	)
+
+	return &flow.RingResult{Answered: true}, nil
+}
+
+// ringFollowMeSimultaneousLeg attempts to ring a single external number for
+// a simultaneous follow-me ring. Each leg allocates its own media bridge and
+// tries trunks in priority order. The result is sent to resultCh.
+func (a *FlowSIPActions) ringFollowMeSimultaneousLeg(
+	ctx context.Context,
+	callCtx *flow.CallContext,
+	trunks []models.Trunk,
+	fmNum models.FollowMeNumber,
+	callerIDName string,
+	callerIDNum string,
+	resultCh chan<- followMeLegResult,
+) {
+	callID := callCtx.CallID
+	req := callCtx.Request
+
+	// Apply per-number ring timeout. Default to 30s if unset.
+	ringTimeout := fmNum.Timeout
+	if ringTimeout <= 0 {
+		ringTimeout = 30
+	}
+
+	legCtx, legCancel := context.WithTimeout(ctx, time.Duration(ringTimeout)*time.Second)
+	defer legCancel()
+
+	a.logger.Info("follow-me simultaneous leg starting",
+		"call_id", callID,
+		"number", fmNum.Number,
+		"timeout", ringTimeout,
+	)
+
+	// Allocate a media bridge for this leg.
+	var bridge *MediaBridge
+	var trunkSDP []byte
+	if len(req.Body()) > 0 && a.sessionMgr != nil {
+		var err error
+		bridge, trunkSDP, err = AllocateMediaBridge(a.sessionMgr, req.Body(), callID+"_fm_"+fmNum.Number, a.proxyIP, a.logger)
+		if err != nil {
+			resultCh <- followMeLegResult{number: fmNum.Number, err: fmt.Errorf("allocating media bridge: %w", err)}
+			return
+		}
+	}
+
+	// Try each trunk in priority order.
+	var outResult *outboundResult
+	var selectedTrunk *models.Trunk
+	for i := range trunks {
+		if legCtx.Err() != nil {
+			break
+		}
+
+		trunk := &trunks[i]
+
+		// Enforce max_channels.
+		if trunk.MaxChannels > 0 {
+			active := a.dialogMgr.ActiveCallCountForTrunk(trunk.ID)
+			if active >= trunk.MaxChannels {
+				continue
+			}
+		}
+
+		outResult = a.sendFollowMeInvite(legCtx, req, callCtx.Transaction, trunk, fmNum.Number, callID, trunkSDP, callerIDName, callerIDNum)
+
+		if legCtx.Err() != nil {
+			break
+		}
+
+		if outResult.answered {
+			selectedTrunk = trunk
+			break
+		}
+
+		// Callee-level failures: don't retry on another trunk.
+		if outResult.err == nil && isCalleeFailure(outResult.statusCode) {
+			break
+		}
+	}
+
+	if outResult == nil || outResult.err != nil || !outResult.answered {
+		resultCh <- followMeLegResult{
+			number: fmNum.Number,
+			bridge: bridge,
+			err:    fmt.Errorf("no trunk answered for %s", fmNum.Number),
+		}
+		return
+	}
+
+	resultCh <- followMeLegResult{
+		number: fmNum.Number,
+		result: outResult,
+		trunk:  selectedTrunk,
+		bridge: bridge,
 	}
 }

@@ -70,6 +70,10 @@ func (m *mockVoicemailSIPActions) RingFollowMe(_ context.Context, _ *flow.CallCo
 	return &flow.RingResult{Answered: false}, nil
 }
 
+func (m *mockVoicemailSIPActions) RingFollowMeSimultaneous(_ context.Context, _ *flow.CallContext, _ []models.FollowMeNumber, _ string, _ string) (*flow.RingResult, error) {
+	return &flow.RingResult{Answered: false}, nil
+}
+
 // mockVoicemailMessageRepo implements database.VoicemailMessageRepository
 // for testing. It stores created messages in memory.
 type mockVoicemailMessageRepo struct {

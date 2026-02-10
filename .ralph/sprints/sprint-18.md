@@ -18,7 +18,7 @@
 - [x] Add storage usage monitoring (total recordings size)
 - [x] Create recording browser API with playback stream and download
 - [x] Implement follow-me: sequential ring — ring registered devices → after timeout → ring external numbers via trunk
-- [ ] Implement follow-me: simultaneous ring option (ring all at once)
+- [x] Implement follow-me: simultaneous ring option (ring all at once)
 - [x] Implement external number dialling via outbound trunk for follow-me legs
 - [ ] Implement confirmation prompt on external legs ("Press 1 to accept this call") to prevent voicemail pickup
 - [ ] Implement per-destination ring timeout in follow-me config

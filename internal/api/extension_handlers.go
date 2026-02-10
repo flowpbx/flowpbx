@@ -22,6 +22,7 @@ type extensionRequest struct {
 	DND              *bool           `json:"dnd"`
 	FollowMeEnabled  *bool           `json:"follow_me_enabled"`
 	FollowMeNumbers  json.RawMessage `json:"follow_me_numbers"`
+	FollowMeStrategy string          `json:"follow_me_strategy"`
 	RecordingMode    string          `json:"recording_mode"`
 	MaxRegistrations *int            `json:"max_registrations"`
 }
@@ -38,6 +39,7 @@ type extensionResponse struct {
 	DND              bool            `json:"dnd"`
 	FollowMeEnabled  bool            `json:"follow_me_enabled"`
 	FollowMeNumbers  json.RawMessage `json:"follow_me_numbers"`
+	FollowMeStrategy string          `json:"follow_me_strategy"`
 	RecordingMode    string          `json:"recording_mode"`
 	MaxRegistrations int             `json:"max_registrations"`
 	CreatedAt        string          `json:"created_at"`
@@ -46,6 +48,10 @@ type extensionResponse struct {
 
 // toExtensionResponse converts a models.Extension to the API response.
 func toExtensionResponse(e *models.Extension) extensionResponse {
+	strategy := e.FollowMeStrategy
+	if strategy == "" {
+		strategy = "sequential"
+	}
 	resp := extensionResponse{
 		ID:               e.ID,
 		Extension:        e.Extension,
@@ -55,6 +61,7 @@ func toExtensionResponse(e *models.Extension) extensionResponse {
 		RingTimeout:      e.RingTimeout,
 		DND:              e.DND,
 		FollowMeEnabled:  e.FollowMeEnabled,
+		FollowMeStrategy: strategy,
 		RecordingMode:    e.RecordingMode,
 		MaxRegistrations: e.MaxRegistrations,
 		CreatedAt:        e.CreatedAt.Format(time.RFC3339),
@@ -123,6 +130,7 @@ func (s *Server) handleCreateExtension(w http.ResponseWriter, r *http.Request) {
 		DND:              false,
 		FollowMeEnabled:  false,
 		FollowMeNumbers:  "",
+		FollowMeStrategy: "sequential",
 		RecordingMode:    "off",
 		MaxRegistrations: 5,
 	}
@@ -139,6 +147,9 @@ func (s *Server) handleCreateExtension(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.FollowMeNumbers != nil {
 		ext.FollowMeNumbers = string(req.FollowMeNumbers)
+	}
+	if req.FollowMeStrategy != "" {
+		ext.FollowMeStrategy = req.FollowMeStrategy
 	}
 	if req.RecordingMode != "" {
 		ext.RecordingMode = req.RecordingMode
@@ -250,6 +261,9 @@ func (s *Server) handleUpdateExtension(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.FollowMeNumbers != nil {
 		existing.FollowMeNumbers = string(req.FollowMeNumbers)
+	}
+	if req.FollowMeStrategy != "" {
+		existing.FollowMeStrategy = req.FollowMeStrategy
 	}
 	if req.RecordingMode != "" {
 		existing.RecordingMode = req.RecordingMode
@@ -404,6 +418,9 @@ func validateExtensionRequest(req extensionRequest, isCreate bool) string {
 		if err := json.Unmarshal(req.FollowMeNumbers, &arr); err != nil {
 			return "follow_me_numbers must be a valid JSON array"
 		}
+	}
+	if req.FollowMeStrategy != "" && req.FollowMeStrategy != "sequential" && req.FollowMeStrategy != "simultaneous" {
+		return "follow_me_strategy must be \"sequential\" or \"simultaneous\""
 	}
 	return ""
 }

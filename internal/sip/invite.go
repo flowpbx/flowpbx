@@ -1260,7 +1260,10 @@ func (h *InviteHandler) respondError(req *sip.Request, tx sip.ServerTransaction,
 }
 
 // tryFollowMe checks if the target extension has follow-me enabled and
-// attempts to ring external numbers sequentially via outbound trunk.
+// attempts to ring external numbers via outbound trunk. The extension's
+// follow_me_strategy determines the ringing behaviour: "simultaneous" rings
+// all numbers at once (first to answer wins), while the default "sequential"
+// rings each number in order.
 // Returns true if follow-me was attempted (regardless of whether a number
 // answered), meaning the caller should not send a failure response.
 // Returns false if follow-me is not enabled/configured.
@@ -1282,10 +1285,16 @@ func (h *InviteHandler) tryFollowMe(
 		return false
 	}
 
+	strategy := ext.FollowMeStrategy
+	if strategy == "" {
+		strategy = "sequential"
+	}
+
 	h.logger.Info("attempting follow-me for extension",
 		"call_id", callID,
 		"extension", ext.Extension,
 		"follow_me_numbers", len(numbers),
+		"strategy", strategy,
 	)
 
 	// Build a flow CallContext for the follow-me ring.
@@ -1300,11 +1309,20 @@ func (h *InviteHandler) tryFollowMe(
 		tx,
 	)
 
-	result, err := h.flowActions.RingFollowMe(ctx, callCtx, numbers, callerIDName, callerIDNum)
+	var result *flow.RingResult
+	var err error
+
+	if strategy == "simultaneous" {
+		result, err = h.flowActions.RingFollowMeSimultaneous(ctx, callCtx, numbers, callerIDName, callerIDNum)
+	} else {
+		result, err = h.flowActions.RingFollowMe(ctx, callCtx, numbers, callerIDName, callerIDNum)
+	}
+
 	if err != nil {
 		h.logger.Error("follow-me failed",
 			"call_id", callID,
 			"extension", ext.Extension,
+			"strategy", strategy,
 			"error", err,
 		)
 		// Follow-me was attempted but failed — still return true because
@@ -1317,6 +1335,7 @@ func (h *InviteHandler) tryFollowMe(
 		h.logger.Info("follow-me answered",
 			"call_id", callID,
 			"extension", ext.Extension,
+			"strategy", strategy,
 		)
 		return true
 	}
@@ -1325,6 +1344,7 @@ func (h *InviteHandler) tryFollowMe(
 	h.logger.Info("follow-me no answer on any external number",
 		"call_id", callID,
 		"extension", ext.Extension,
+		"strategy", strategy,
 	)
 	return false
 }

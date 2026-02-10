@@ -25,6 +25,7 @@ type Extension struct {
 	DND              bool
 	FollowMeEnabled  bool
 	FollowMeNumbers  string // JSON
+	FollowMeStrategy string // "sequential" or "simultaneous"
 	RecordingMode    string
 	MaxRegistrations int
 	CreatedAt        time.Time

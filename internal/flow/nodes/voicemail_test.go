@@ -157,11 +157,20 @@ func makeVoicemailNode(entityID int64) flow.Node {
 func TestVoicemailRecordAndStore(t *testing.T) {
 	dataDir := t.TempDir()
 
+	// Create a custom greeting at the standard path.
+	greetDir := filepath.Join(dataDir, "greetings")
+	if err := os.MkdirAll(greetDir, 0750); err != nil {
+		t.Fatalf("failed to create greetings dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(greetDir, "box_1.wav"), []byte("fake-wav"), 0640); err != nil {
+		t.Fatalf("failed to write greeting file: %v", err)
+	}
+
 	box := &models.VoicemailBox{
 		ID:                 1,
 		Name:               "Sales Voicemail",
 		MailboxNumber:      "100",
-		GreetingFile:       "/audio/sales_greeting.wav",
+		GreetingType:       "custom",
 		MaxMessageDuration: 60,
 	}
 
@@ -251,11 +260,21 @@ func TestVoicemailDefaultGreeting(t *testing.T) {
 func TestVoicemailCustomGreeting(t *testing.T) {
 	dataDir := t.TempDir()
 
+	// Create the greeting file at the standard path.
+	greetDir := filepath.Join(dataDir, "greetings")
+	if err := os.MkdirAll(greetDir, 0750); err != nil {
+		t.Fatalf("failed to create greetings dir: %v", err)
+	}
+	greetingPath := filepath.Join(greetDir, "box_3.wav")
+	if err := os.WriteFile(greetingPath, []byte("fake-wav"), 0640); err != nil {
+		t.Fatalf("failed to write greeting file: %v", err)
+	}
+
 	box := &models.VoicemailBox{
 		ID:                 3,
 		Name:               "Custom Greeting Box",
 		MailboxNumber:      "300",
-		GreetingFile:       "/greetings/box_3.wav",
+		GreetingType:       "custom",
 		MaxMessageDuration: 60,
 	}
 
@@ -269,8 +288,36 @@ func TestVoicemailCustomGreeting(t *testing.T) {
 	h := newTestVoicemailHandler(box, sipActions, msgRepo, extRepo, dataDir)
 
 	greeting := h.resolveGreeting(box)
-	if greeting != "/greetings/box_3.wav" {
-		t.Errorf("expected custom greeting %q, got %q", "/greetings/box_3.wav", greeting)
+	if greeting != greetingPath {
+		t.Errorf("expected custom greeting %q, got %q", greetingPath, greeting)
+	}
+}
+
+func TestVoicemailCustomGreetingFallback(t *testing.T) {
+	dataDir := t.TempDir()
+
+	// Do NOT create the greeting file — test fallback to default.
+	box := &models.VoicemailBox{
+		ID:                 3,
+		Name:               "Missing Greeting Box",
+		MailboxNumber:      "300",
+		GreetingType:       "custom",
+		MaxMessageDuration: 60,
+	}
+
+	sipActions := &mockVoicemailSIPActions{
+		recordResult: &flow.RecordResult{DurationSecs: 5},
+	}
+
+	msgRepo := &mockVoicemailMessageRepo{}
+	extRepo := &mockExtensionRepo{extensions: map[int64]*models.Extension{}}
+
+	h := newTestVoicemailHandler(box, sipActions, msgRepo, extRepo, dataDir)
+
+	greeting := h.resolveGreeting(box)
+	expected := filepath.Join(dataDir, defaultGreetingFile)
+	if greeting != expected {
+		t.Errorf("expected fallback to default greeting %q, got %q", expected, greeting)
 	}
 }
 
@@ -281,7 +328,6 @@ func TestVoicemailDefaultMaxDuration(t *testing.T) {
 		ID:                 4,
 		Name:               "No Duration Set",
 		MailboxNumber:      "400",
-		GreetingFile:       "/audio/greeting.wav",
 		MaxMessageDuration: 0, // Should use default (120).
 	}
 
@@ -312,7 +358,6 @@ func TestVoicemailMWINotification(t *testing.T) {
 		ID:                 5,
 		Name:               "MWI Box",
 		MailboxNumber:      "500",
-		GreetingFile:       "/audio/greeting.wav",
 		MaxMessageDuration: 60,
 		NotifyExtensionID:  &extID,
 	}
@@ -379,7 +424,6 @@ func TestVoicemailNoMWIWhenNoExtensionLinked(t *testing.T) {
 		ID:                 6,
 		Name:               "No MWI Box",
 		MailboxNumber:      "600",
-		GreetingFile:       "/audio/greeting.wav",
 		MaxMessageDuration: 60,
 		NotifyExtensionID:  nil, // No linked extension.
 	}
@@ -433,7 +477,6 @@ func TestVoicemailRecordingError(t *testing.T) {
 		ID:                 7,
 		Name:               "Error Box",
 		MailboxNumber:      "700",
-		GreetingFile:       "/audio/greeting.wav",
 		MaxMessageDuration: 60,
 	}
 
@@ -468,7 +511,6 @@ func TestVoicemailFilePathContainsBoxID(t *testing.T) {
 		ID:                 42,
 		Name:               "Path Test Box",
 		MailboxNumber:      "4200",
-		GreetingFile:       "/audio/greeting.wav",
 		MaxMessageDuration: 60,
 	}
 

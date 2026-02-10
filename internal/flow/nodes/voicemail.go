@@ -11,6 +11,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
 	"github.com/flowpbx/flowpbx/internal/flow"
+	"github.com/flowpbx/flowpbx/internal/prompts"
 )
 
 // defaultMaxMessageDuration is the default maximum voicemail recording length
@@ -146,11 +147,19 @@ func (h *VoicemailHandler) Execute(ctx context.Context, callCtx *flow.CallContex
 }
 
 // resolveGreeting returns the greeting file path for the voicemail box.
-// Custom greetings take precedence; the default system greeting is used
-// when no custom greeting is configured.
+// When the greeting type is "custom", the handler checks for a greeting file
+// at the standard path $DATA_DIR/greetings/box_{id}.wav. If that file exists,
+// it is used. Otherwise, the default system greeting is played.
 func (h *VoicemailHandler) resolveGreeting(box *models.VoicemailBox) string {
-	if box.GreetingFile != "" {
-		return box.GreetingFile
+	if box.GreetingType == "custom" {
+		greetingPath := prompts.GreetingPath(h.dataDir, box.ID)
+		if _, err := os.Stat(greetingPath); err == nil {
+			return greetingPath
+		}
+		h.logger.Warn("custom greeting file not found, falling back to default",
+			"mailbox_id", box.ID,
+			"expected_path", greetingPath,
+		)
 	}
 	return filepath.Join(h.dataDir, defaultGreetingFile)
 }

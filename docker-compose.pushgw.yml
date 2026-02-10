@@ -1,0 +1,43 @@
+services:
+  pushgw:
+    build:
+      context: .
+      dockerfile: cmd/pushgw/Dockerfile
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Override via .env file or docker-compose environment.
+      PUSHGW_LOG_LEVEL: "info"
+    command:
+      - "--http-port=8081"
+      - "--db-dsn=postgres://pushgw:pushgw@postgres:5432/pushgw?sslmode=disable"
+      - "--fcm-credentials=/secrets/fcm-service-account.json"
+      - "--apns-key-file=/secrets/apns-auth-key.p8"
+      - "--apns-key-id=${APNS_KEY_ID:-}"
+      - "--apns-team-id=${APNS_TEAM_ID:-}"
+      - "--apns-bundle-id=${APNS_BUNDLE_ID:-}"
+      - "--log-level=${PUSHGW_LOG_LEVEL:-info}"
+    volumes:
+      - ./secrets:/secrets:ro
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: pushgw
+      POSTGRES_PASSWORD: pushgw
+      POSTGRES_DB: pushgw
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "pushgw"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:

@@ -1,0 +1,23 @@
+# Build artifacts
+build/
+
+# Data & runtime state
+data/
+
+# Frontend dev dependencies
+web/node_modules/
+
+# IDE / editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+
+# Sprint & project management
+.ralph/
+
+# macOS
+.DS_Store

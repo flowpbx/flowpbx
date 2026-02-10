@@ -18,7 +18,7 @@
 - [x] Implement `POST /v1/license/activate` — activate new installation (generate instance_id)
 - [x] Implement `GET /v1/license/status` — check license status
 - [x] Implement rate limiting per license key
-- [ ] Containerize push gateway for deployment
+- [x] Containerize push gateway for deployment
 
 ### PBX ↔ Push Gateway Integration
 - [ ] Create `internal/push/client.go` — push gateway HTTP client

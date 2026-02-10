@@ -6,6 +6,7 @@ export { listVoicemailBoxes, getVoicemailBox, createVoicemailBox, updateVoicemai
 export { listInboundNumbers, getInboundNumber, createInboundNumber, updateInboundNumber, deleteInboundNumber } from './inbound_numbers'
 export { listCDRs, getCDR, buildExportURL } from './cdrs'
 export { listPrompts, uploadPrompt, deletePrompt, promptAudioURL } from './prompts'
+export { getSettings, updateSettings } from './settings'
 export type {
   ApiEnvelope,
   PaginatedResponse,
@@ -28,3 +29,4 @@ export type {
   AudioPrompt,
   CDR,
 } from './types'
+export type { SMTPSettings, SystemSettings, SMTPSettingsRequest, SystemSettingsRequest } from './settings'

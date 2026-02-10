@@ -285,8 +285,8 @@ func (s *Server) routes() {
 			r.Delete("/{id}", s.handleDeletePrompt)
 		})
 
-		r.Get("/settings", s.handleNotImplemented)
-		r.Put("/settings", s.handleNotImplemented)
+		r.Get("/settings", s.handleGetSettings)
+		r.Put("/settings", s.handleUpdateSettings)
 
 		r.Route("/system", func(r chi.Router) {
 			r.Get("/status", s.handleNotImplemented)

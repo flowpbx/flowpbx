@@ -55,6 +55,7 @@ type InviteHandler struct {
 	trunkRegistrar *TrunkRegistrar
 	auth           *Authenticator
 	router         *CallRouter
+	forker         *Forker
 	logger         *slog.Logger
 }
 
@@ -65,6 +66,7 @@ func NewInviteHandler(
 	inboundNumbers database.InboundNumberRepository,
 	trunkRegistrar *TrunkRegistrar,
 	auth *Authenticator,
+	forker *Forker,
 	logger *slog.Logger,
 ) *InviteHandler {
 	router := NewCallRouter(extensions, registrations, logger)
@@ -75,6 +77,7 @@ func NewInviteHandler(
 		trunkRegistrar: trunkRegistrar,
 		auth:           auth,
 		router:         router,
+		forker:         forker,
 		logger:         logger.With("subsystem", "invite"),
 	}
 }
@@ -191,16 +194,70 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		}
 	}
 
-	h.logger.Info("internal call routed, ready to fork",
+	h.logger.Info("internal call routed, forking to contacts",
 		"call_id", callID,
 		"target", route.TargetExtension.Extension,
 		"contacts", len(route.Contacts),
 	)
 
-	// TODO: Fork INVITE to all contacts in route.Contacts (multi-device ringing),
-	// handle 180/183 relay, 200 OK from first answering device, cancel other forks.
-	// This will be implemented in subsequent sprint tasks.
-	h.respondError(req, tx, 501, "Not Implemented")
+	// Fork INVITE to all registered contacts (multi-device ringing).
+	result := h.forker.Fork(ctx, req, tx, route.Contacts, ic.CallerExtension, callID)
+
+	if result.Error != nil {
+		h.logger.Error("fork failed",
+			"call_id", callID,
+			"error", result.Error,
+		)
+		h.respondError(req, tx, 500, "Internal Server Error")
+		return
+	}
+
+	if result.AllBusy {
+		h.logger.Info("all devices busy",
+			"call_id", callID,
+			"target", route.TargetExtension.Extension,
+		)
+		h.respondError(req, tx, 486, "Busy Here")
+		return
+	}
+
+	if !result.Answered {
+		h.logger.Info("no device answered",
+			"call_id", callID,
+			"target", route.TargetExtension.Extension,
+		)
+		// 480 Temporarily Unavailable — no device picked up.
+		h.respondError(req, tx, 480, "Temporarily Unavailable")
+		return
+	}
+
+	// A device answered — relay the 200 OK to the caller.
+	h.logger.Info("call answered, relaying 200 ok",
+		"call_id", callID,
+		"target", route.TargetExtension.Extension,
+		"contact", result.AnsweringContact.ContactURI,
+	)
+
+	// Forward the 200 OK from the callee back to the caller.
+	// Copy the SDP body so the caller can set up media.
+	okResponse := sip.NewResponseFromRequest(req, 200, "OK", result.AnswerResponse.Body())
+	if ct := result.AnswerResponse.ContentType(); ct != nil {
+		okResponse.AppendHeader(sip.NewHeader("Content-Type", ct.Value()))
+	}
+
+	if err := tx.Respond(okResponse); err != nil {
+		h.logger.Error("failed to relay 200 ok to caller",
+			"call_id", callID,
+			"error", err,
+		)
+		// Clean up the answering leg since the caller won't get the 200 OK.
+		result.AnsweringTx.Terminate()
+		return
+	}
+
+	// TODO: Track the active call (dialog state), set up media bridging,
+	// and handle BYE/CANCEL teardown. These will be implemented in subsequent
+	// sprint tasks (dialog.go, media bridging, BYE/CANCEL handling).
 }
 
 // classifyCall determines whether the INVITE is internal, inbound, or outbound.

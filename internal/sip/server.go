@@ -22,6 +22,7 @@ type Server struct {
 	registrar      *Registrar
 	trunkRegistrar *TrunkRegistrar
 	inviteHandler  *InviteHandler
+	forker         *Forker
 	auth           *Authenticator
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
@@ -55,7 +56,15 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 	auth := NewAuthenticator(extensions, logger)
 	registrar := NewRegistrar(extensions, registrations, auth, logger)
 	trunkRegistrar := NewTrunkRegistrar(ua, logger)
-	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunkRegistrar, auth, logger)
+
+	forker, err := NewForker(ua, logger)
+	if err != nil {
+		srv.Close()
+		ua.Close()
+		return nil, fmt.Errorf("creating invite forker: %w", err)
+	}
+
+	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunkRegistrar, auth, forker, logger)
 
 	s := &Server{
 		cfg:            cfg,
@@ -64,6 +73,7 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 		registrar:      registrar,
 		trunkRegistrar: trunkRegistrar,
 		inviteHandler:  inviteHandler,
+		forker:         forker,
 		auth:           auth,
 		logger:         logger,
 	}
@@ -155,6 +165,9 @@ func (s *Server) Stop() {
 		s.cancel()
 	}
 	s.wg.Wait()
+	if s.forker != nil {
+		s.forker.Close()
+	}
 	s.srv.Close()
 	s.ua.Close()
 	s.logger.Info("sip server stopped")

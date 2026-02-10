@@ -11,7 +11,7 @@
 - [x] Create `internal/sip/invite.go` — INVITE handler: identify call type (internal vs inbound vs outbound)
 - [x] Implement internal call routing: look up target extension → find all active registrations
 - [x] Send `100 Trying` immediately on receiving INVITE
-- [ ] Implement multi-device ringing: fork INVITE to all registered contacts for target extension
+- [x] Implement multi-device ringing: fork INVITE to all registered contacts for target extension
 - [ ] Implement `180 Ringing` and `183 Session Progress` relay (early media)
 - [ ] Implement call answer: `200 OK` from first answering device → ACK → cancel other forks
 - [ ] Create `internal/sip/dialog.go` — dialog/session state management (track active calls)

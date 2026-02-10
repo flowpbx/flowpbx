@@ -307,6 +307,68 @@ func (s *Server) handleDeleteExtension(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// registrationResponse is the JSON response for a single active registration.
+type registrationResponse struct {
+	ID           int64  `json:"id"`
+	ExtensionID  int64  `json:"extension_id"`
+	ContactURI   string `json:"contact_uri"`
+	Transport    string `json:"transport"`
+	UserAgent    string `json:"user_agent"`
+	SourceIP     string `json:"source_ip"`
+	SourcePort   int    `json:"source_port"`
+	Expires      string `json:"expires"`
+	RegisteredAt string `json:"registered_at"`
+}
+
+// handleListExtensionRegistrations returns active SIP registrations for an extension.
+func (s *Server) handleListExtensionRegistrations(w http.ResponseWriter, r *http.Request) {
+	id, err := parseExtensionID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid extension id")
+		return
+	}
+
+	// Verify the extension exists.
+	ext, err := s.extensions.GetByID(r.Context(), id)
+	if err != nil {
+		slog.Error("list registrations: failed to query extension", "error", err, "extension_id", id)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if ext == nil {
+		writeError(w, http.StatusNotFound, "extension not found")
+		return
+	}
+
+	regs, err := s.registrations.GetByExtensionID(r.Context(), id)
+	if err != nil {
+		slog.Error("list registrations: failed to query", "error", err, "extension_id", id)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	items := make([]registrationResponse, len(regs))
+	for i, reg := range regs {
+		extID := int64(0)
+		if reg.ExtensionID != nil {
+			extID = *reg.ExtensionID
+		}
+		items[i] = registrationResponse{
+			ID:           reg.ID,
+			ExtensionID:  extID,
+			ContactURI:   reg.ContactURI,
+			Transport:    reg.Transport,
+			UserAgent:    reg.UserAgent,
+			SourceIP:     reg.SourceIP,
+			SourcePort:   reg.SourcePort,
+			Expires:      reg.Expires.Format(time.RFC3339),
+			RegisteredAt: reg.RegisteredAt.Format(time.RFC3339),
+		}
+	}
+
+	writeJSON(w, http.StatusOK, items)
+}
+
 // parseExtensionID extracts and parses the extension ID from the URL parameter.
 func parseExtensionID(r *http.Request) (int64, error) {
 	return strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)

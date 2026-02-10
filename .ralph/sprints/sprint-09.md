@@ -18,5 +18,5 @@
 - [x] Implement max_channels enforcement per trunk (reject if at limit)
 - [x] Create inbound numbers CRUD API: `GET/POST/PUT/DELETE /api/v1/numbers`
 - [x] Create extensions CRUD API: `GET/POST/PUT/DELETE /api/v1/extensions`
-- [ ] Implement `GET /api/v1/extensions/:id/registrations` — list active registrations for extension
+- [x] Implement `GET /api/v1/extensions/:id/registrations` — list active registrations for extension
 - [ ] Add inbound numbers CRUD page to admin UI

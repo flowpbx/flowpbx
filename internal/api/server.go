@@ -87,6 +87,7 @@ type Server struct {
 	extensions     database.ExtensionRepository
 	trunks         database.TrunkRepository
 	inboundNumbers database.InboundNumberRepository
+	registrations  database.RegistrationRepository
 	trunkStatus    TrunkStatusProvider
 	trunkTester    TrunkTester
 	trunkLifecycle TrunkLifecycleManager
@@ -106,6 +107,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		extensions:     database.NewExtensionRepository(db),
 		trunks:         database.NewTrunkRepository(db),
 		inboundNumbers: database.NewInboundNumberRepository(db),
+		registrations:  database.NewRegistrationRepository(db),
 		trunkStatus:    trunkStatus,
 		trunkTester:    trunkTester,
 		trunkLifecycle: trunkLifecycle,
@@ -156,7 +158,7 @@ func (s *Server) routes() {
 				r.Get("/", s.handleGetExtension)
 				r.Put("/", s.handleUpdateExtension)
 				r.Delete("/", s.handleDeleteExtension)
-				r.Get("/registrations", s.handleNotImplemented)
+				r.Get("/registrations", s.handleListExtensionRegistrations)
 			})
 		})
 

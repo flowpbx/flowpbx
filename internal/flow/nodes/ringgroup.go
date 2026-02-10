@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
@@ -13,14 +15,19 @@ import (
 
 // RingGroupHandler handles the Ring Group node type. It resolves the ring
 // group entity, loads all member extensions, and rings them using the
-// ring_all strategy — all members are rung simultaneously, and the first
-// device to answer wins. The handler follows either the "answered" or
-// "no_answer" output edge based on the result.
+// configured strategy (ring_all, round_robin, etc.). The handler follows
+// either the "answered" or "no_answer" output edge based on the result.
 type RingGroupHandler struct {
 	engine     *flow.Engine
 	sip        flow.SIPActions
 	extensions database.ExtensionRepository
 	logger     *slog.Logger
+
+	// rrCounters tracks round-robin state per ring group ID. Each entry
+	// is an *atomic.Uint64 counter that advances on each call. The
+	// starting member index is counter % len(members). State resets on
+	// process restart, which is standard PBX behavior.
+	rrCounters sync.Map
 }
 
 // NewRingGroupHandler creates a new RingGroupHandler.
@@ -34,7 +41,7 @@ func NewRingGroupHandler(engine *flow.Engine, sip flow.SIPActions, extensions da
 }
 
 // Execute resolves the ring group entity, loads member extensions, applies
-// the ring_all strategy, and returns "answered" or "no_answer".
+// the configured ring strategy, and returns "answered" or "no_answer".
 func (h *RingGroupHandler) Execute(ctx context.Context, callCtx *flow.CallContext, node flow.Node) (string, error) {
 	h.logger.Debug("ring group node executing",
 		"call_id", callCtx.CallID,
@@ -134,12 +141,111 @@ func (h *RingGroupHandler) Execute(ctx context.Context, callCtx *flow.CallContex
 	// Apply caller ID mode before ringing.
 	h.applyCallerIDMode(callCtx, rg)
 
-	// Ring all members simultaneously.
+	// Dispatch to the appropriate strategy.
+	switch rg.Strategy {
+	case "round_robin":
+		return h.executeRoundRobin(ctx, callCtx, node, rg, members, ringTimeout)
+	default:
+		// ring_all is the default strategy (also used for unrecognized values).
+		return h.executeRingAll(ctx, callCtx, node, rg, members, ringTimeout)
+	}
+}
+
+// executeRingAll rings all members simultaneously. The first device to answer
+// wins; all other forks are cancelled.
+func (h *RingGroupHandler) executeRingAll(ctx context.Context, callCtx *flow.CallContext, node flow.Node, rg *models.RingGroup, members []*models.Extension, ringTimeout int) (string, error) {
 	result, err := h.sip.RingGroup(ctx, callCtx, members, ringTimeout)
 	if err != nil {
 		return "", fmt.Errorf("ringing group %s: %w", rg.Name, err)
 	}
 
+	return h.evaluateResult(callCtx, node, rg, result)
+}
+
+// executeRoundRobin rings members one at a time, starting from the next
+// member in rotation. Each member gets the full ring timeout. The counter
+// advances on each call so that the starting member rotates.
+func (h *RingGroupHandler) executeRoundRobin(ctx context.Context, callCtx *flow.CallContext, node flow.Node, rg *models.RingGroup, members []*models.Extension, ringTimeout int) (string, error) {
+	// Load or create the round-robin counter for this ring group.
+	val, _ := h.rrCounters.LoadOrStore(rg.ID, &atomic.Uint64{})
+	counter := val.(*atomic.Uint64)
+
+	// Advance the counter and determine the starting index.
+	seq := counter.Add(1) - 1
+	n := uint64(len(members))
+	startIdx := int(seq % n)
+
+	h.logger.Debug("round_robin starting member",
+		"call_id", callCtx.CallID,
+		"ring_group", rg.Name,
+		"start_index", startIdx,
+		"sequence", seq,
+	)
+
+	// Ring each member in order, wrapping around from startIdx.
+	for i := 0; i < len(members); i++ {
+		idx := (startIdx + i) % len(members)
+		member := members[idx]
+
+		h.logger.Debug("round_robin ringing member",
+			"call_id", callCtx.CallID,
+			"ring_group", rg.Name,
+			"extension", member.Extension,
+			"member_index", idx,
+		)
+
+		result, err := h.sip.RingExtension(ctx, callCtx, member, ringTimeout)
+		if err != nil {
+			h.logger.Error("round_robin ring extension failed",
+				"call_id", callCtx.CallID,
+				"ring_group", rg.Name,
+				"extension", member.Extension,
+				"error", err,
+			)
+			continue
+		}
+
+		if result.Answered {
+			h.logger.Info("ring group answered",
+				"call_id", callCtx.CallID,
+				"node_id", node.ID,
+				"ring_group", rg.Name,
+				"answered_by", member.Extension,
+				"strategy", "round_robin",
+			)
+			return "answered", nil
+		}
+
+		// If the member was busy or had DND, move to next member immediately.
+		if result.AllBusy || result.DND || result.NoRegistrations {
+			h.logger.Debug("round_robin member unavailable, trying next",
+				"call_id", callCtx.CallID,
+				"ring_group", rg.Name,
+				"extension", member.Extension,
+				"busy", result.AllBusy,
+				"dnd", result.DND,
+				"no_registrations", result.NoRegistrations,
+			)
+			continue
+		}
+
+		// Timed out — try next member.
+	}
+
+	h.logger.Info("ring group not answered",
+		"call_id", callCtx.CallID,
+		"node_id", node.ID,
+		"ring_group", rg.Name,
+		"reason", "all_members_tried",
+		"strategy", "round_robin",
+	)
+
+	return "no_answer", nil
+}
+
+// evaluateResult maps a RingResult to the appropriate output edge and logs
+// the outcome. Used by ring_all and other simultaneous-ring strategies.
+func (h *RingGroupHandler) evaluateResult(callCtx *flow.CallContext, node flow.Node, rg *models.RingGroup, result *flow.RingResult) (string, error) {
 	if result.Answered {
 		h.logger.Info("ring group answered",
 			"call_id", callCtx.CallID,
@@ -149,7 +255,6 @@ func (h *RingGroupHandler) Execute(ctx context.Context, callCtx *flow.CallContex
 		return "answered", nil
 	}
 
-	// Log the specific reason for no answer.
 	reason := "timeout"
 	if result.AllBusy {
 		reason = "busy"

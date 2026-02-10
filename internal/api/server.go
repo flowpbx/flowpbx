@@ -48,33 +48,43 @@ type TrunkTester interface {
 	SendOptions(ctx context.Context, trunk models.Trunk) error
 }
 
+// TrunkLifecycleManager handles starting and stopping trunk registration
+// or health checks in response to configuration changes (enable/disable,
+// create, delete).
+type TrunkLifecycleManager interface {
+	StartTrunk(ctx context.Context, trunk models.Trunk) error
+	StopTrunk(trunkID int64)
+}
+
 // Server holds HTTP handler dependencies and the chi router.
 type Server struct {
-	router       *chi.Mux
-	db           *database.DB
-	cfg          *config.Config
-	sessions     *middleware.SessionStore
-	adminUsers   database.AdminUserRepository
-	systemConfig database.SystemConfigRepository
-	trunks       database.TrunkRepository
-	trunkStatus  TrunkStatusProvider
-	trunkTester  TrunkTester
-	encryptor    *database.Encryptor
+	router         *chi.Mux
+	db             *database.DB
+	cfg            *config.Config
+	sessions       *middleware.SessionStore
+	adminUsers     database.AdminUserRepository
+	systemConfig   database.SystemConfigRepository
+	trunks         database.TrunkRepository
+	trunkStatus    TrunkStatusProvider
+	trunkTester    TrunkTester
+	trunkLifecycle TrunkLifecycleManager
+	encryptor      *database.Encryptor
 }
 
 // NewServer creates the HTTP handler with all routes mounted.
-func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, trunkTester TrunkTester, enc *database.Encryptor) *Server {
+func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, trunkTester TrunkTester, trunkLifecycle TrunkLifecycleManager, enc *database.Encryptor) *Server {
 	s := &Server{
-		router:       chi.NewRouter(),
-		db:           db,
-		cfg:          cfg,
-		sessions:     sessions,
-		adminUsers:   database.NewAdminUserRepository(db),
-		systemConfig: sysConfig,
-		trunks:       database.NewTrunkRepository(db),
-		trunkStatus:  trunkStatus,
-		trunkTester:  trunkTester,
-		encryptor:    enc,
+		router:         chi.NewRouter(),
+		db:             db,
+		cfg:            cfg,
+		sessions:       sessions,
+		adminUsers:     database.NewAdminUserRepository(db),
+		systemConfig:   sysConfig,
+		trunks:         database.NewTrunkRepository(db),
+		trunkStatus:    trunkStatus,
+		trunkTester:    trunkTester,
+		trunkLifecycle: trunkLifecycle,
+		encryptor:      enc,
 	}
 
 	s.routes()

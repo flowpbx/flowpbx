@@ -94,8 +94,12 @@ func main() {
 	// Create adapter for trunk testing so the API can trigger one-shot SIP tests.
 	trunkTester := &trunkTesterAdapter{registrar: sipSrv.TrunkRegistrar()}
 
+	// Create adapter for trunk lifecycle so the API can start/stop registration
+	// when trunks are created, updated (enabled/disabled), or deleted.
+	trunkLifecycle := &trunkLifecycleAdapter{registrar: sipSrv.TrunkRegistrar(), enc: enc}
+
 	// HTTP server using the api package.
-	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, trunkTester, enc)
+	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, trunkTester, trunkLifecycle, enc)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
@@ -258,4 +262,35 @@ func (a *trunkTesterAdapter) TestRegister(ctx context.Context, trunk models.Trun
 
 func (a *trunkTesterAdapter) SendOptions(ctx context.Context, trunk models.Trunk) error {
 	return a.registrar.SendOptions(ctx, trunk)
+}
+
+// trunkLifecycleAdapter bridges the SIP trunk registrar with the API's
+// TrunkLifecycleManager interface for starting/stopping trunk registration
+// on config changes.
+type trunkLifecycleAdapter struct {
+	registrar *sipserver.TrunkRegistrar
+	enc       *database.Encryptor
+}
+
+func (a *trunkLifecycleAdapter) StartTrunk(ctx context.Context, trunk models.Trunk) error {
+	switch trunk.Type {
+	case "register":
+		// Decrypt password before starting registration.
+		if trunk.Password != "" && a.enc != nil {
+			decrypted, err := a.enc.Decrypt(trunk.Password)
+			if err != nil {
+				return fmt.Errorf("decrypting trunk password: %w", err)
+			}
+			trunk.Password = decrypted
+		}
+		return a.registrar.StartTrunk(ctx, trunk)
+	case "ip":
+		return a.registrar.StartHealthCheck(ctx, trunk)
+	default:
+		return fmt.Errorf("unknown trunk type %q", trunk.Type)
+	}
+}
+
+func (a *trunkLifecycleAdapter) StopTrunk(trunkID int64) {
+	a.registrar.StopTrunk(trunkID)
 }

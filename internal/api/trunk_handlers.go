@@ -229,6 +229,17 @@ func (s *Server) handleCreateTrunk(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("trunk created", "trunk_id", created.ID, "name", created.Name, "type", created.Type)
 
+	// Start registration / health check if trunk is enabled.
+	if created.Enabled && s.trunkLifecycle != nil {
+		if err := s.trunkLifecycle.StartTrunk(r.Context(), *created); err != nil {
+			slog.Error("create trunk: failed to start trunk registration",
+				"error", err, "trunk_id", created.ID, "name", created.Name)
+		} else {
+			slog.Info("trunk created and registration started",
+				"trunk_id", created.ID, "name", created.Name)
+		}
+	}
+
 	writeJSON(w, http.StatusCreated, toTrunkResponse(created))
 }
 
@@ -302,6 +313,9 @@ func (s *Server) handleUpdateTrunk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "trunk not found")
 		return
 	}
+
+	// Capture previous enabled state to detect lifecycle changes.
+	prevEnabled := existing.Enabled
 
 	var req trunkRequest
 	if errMsg := readJSON(r, &req); errMsg != "" {
@@ -386,6 +400,35 @@ func (s *Server) handleUpdateTrunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle enable/disable lifecycle changes.
+	if s.trunkLifecycle != nil {
+		wasEnabled := prevEnabled
+		nowEnabled := updated.Enabled
+
+		if wasEnabled && !nowEnabled {
+			// Trunk was disabled — stop registration / health check.
+			s.trunkLifecycle.StopTrunk(id)
+			slog.Info("trunk disabled, registration stopped", "trunk_id", id, "name", updated.Name)
+		} else if !wasEnabled && nowEnabled {
+			// Trunk was enabled — start registration / health check.
+			if err := s.trunkLifecycle.StartTrunk(r.Context(), *updated); err != nil {
+				slog.Error("update trunk: failed to start trunk after enable",
+					"error", err, "trunk_id", id, "name", updated.Name)
+			} else {
+				slog.Info("trunk enabled, registration started", "trunk_id", id, "name", updated.Name)
+			}
+		} else if nowEnabled {
+			// Trunk is still enabled but config may have changed — restart.
+			s.trunkLifecycle.StopTrunk(id)
+			if err := s.trunkLifecycle.StartTrunk(r.Context(), *updated); err != nil {
+				slog.Error("update trunk: failed to restart trunk after config change",
+					"error", err, "trunk_id", id, "name", updated.Name)
+			} else {
+				slog.Info("trunk config changed, registration restarted", "trunk_id", id, "name", updated.Name)
+			}
+		}
+	}
+
 	slog.Info("trunk updated", "trunk_id", id, "name", updated.Name)
 
 	writeJSON(w, http.StatusOK, toTrunkResponse(updated))
@@ -414,6 +457,11 @@ func (s *Server) handleDeleteTrunk(w http.ResponseWriter, r *http.Request) {
 		slog.Error("delete trunk: failed to delete", "error", err, "trunk_id", id)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
+	}
+
+	// Stop registration / health check if running.
+	if s.trunkLifecycle != nil {
+		s.trunkLifecycle.StopTrunk(id)
 	}
 
 	slog.Info("trunk deleted", "trunk_id", id, "name", existing.Name)

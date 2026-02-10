@@ -1,8 +1,9 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { listTimeSwitches, createTimeSwitch, updateTimeSwitch, deleteTimeSwitch, ApiError } from '../api'
-import type { TimeSwitch, TimeSwitchRequest, TimeSwitchRule } from '../api'
+import type { TimeSwitch, TimeSwitchRequest } from '../api'
 import DataTable, { type Column } from '../components/DataTable'
 import { TextInput, SelectField } from '../components/FormFields'
+import TimeSwitchRuleEditor from '../components/TimeSwitchRuleEditor'
 
 const TIMEZONES = [
   { group: 'Australia', zones: ['Australia/Sydney', 'Australia/Melbourne', 'Australia/Brisbane', 'Australia/Perth', 'Australia/Adelaide'] },
@@ -12,15 +13,6 @@ const TIMEZONES = [
   { group: 'Americas', zones: ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles'] },
   { group: 'Other', zones: ['UTC'] },
 ]
-
-const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
-const DAY_LABELS: Record<string, string> = {
-  mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun',
-}
-
-function emptyRule(): TimeSwitchRule {
-  return { label: '', days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:30', end: '17:00', dest_node: '' }
-}
 
 export default function TimeSwitches() {
   const [switches, setSwitches] = useState<TimeSwitch[]>([])
@@ -36,7 +28,7 @@ export default function TimeSwitches() {
     return {
       name: '',
       timezone: 'Australia/Sydney',
-      rules: [emptyRule()],
+      rules: [{ label: '', days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:30', end: '17:00', dest_node: '' }],
       default_dest: '',
     }
   }
@@ -106,37 +98,6 @@ export default function TimeSwitches() {
     } catch (err) {
       alert(err instanceof ApiError ? err.message : 'unable to delete time switch')
     }
-  }
-
-  function updateRule(index: number, patch: Partial<TimeSwitchRule>) {
-    setForm((prev) => {
-      const rules = prev.rules.map((rule, i) => (i === index ? { ...rule, ...patch } : rule))
-      return { ...prev, rules }
-    })
-  }
-
-  function toggleDay(ruleIndex: number, day: string) {
-    setForm((prev) => {
-      const rules = prev.rules.map((rule, i) => {
-        if (i !== ruleIndex) return rule
-        const days = rule.days.includes(day)
-          ? rule.days.filter((d) => d !== day)
-          : [...rule.days, day]
-        return { ...rule, days }
-      })
-      return { ...prev, rules }
-    })
-  }
-
-  function addRule() {
-    setForm((prev) => ({ ...prev, rules: [...prev.rules, emptyRule()] }))
-  }
-
-  function removeRule(index: number) {
-    setForm((prev) => ({
-      ...prev,
-      rules: prev.rules.filter((_, i) => i !== index),
-    }))
   }
 
   const columns: Column<TimeSwitch>[] = [
@@ -240,113 +201,10 @@ export default function TimeSwitches() {
             />
           </div>
 
-          {/* Rules Editor */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Rules
-              <span className="font-normal text-gray-400 ml-1">(evaluated top to bottom, first match wins)</span>
-            </label>
-
-            <div className="space-y-3">
-              {form.rules.map((rule, idx) => (
-                <div
-                  key={idx}
-                  className="border border-gray-200 rounded-md bg-white p-3 space-y-3"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded bg-gray-100 text-xs font-medium text-gray-500">
-                        {idx + 1}
-                      </span>
-                      <input
-                        type="text"
-                        value={rule.label}
-                        onChange={(e) => updateRule(idx, { label: e.currentTarget.value })}
-                        placeholder="Rule label"
-                        className="block w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      />
-                    </div>
-                    {form.rules.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeRule(idx)}
-                        className="flex-shrink-0 text-gray-400 hover:text-red-500 transition-colors p-0.5"
-                        title="Remove rule"
-                      >
-                        <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Day chips */}
-                  <div className="flex flex-wrap gap-1.5">
-                    {ALL_DAYS.map((day) => {
-                      const active = rule.days.includes(day)
-                      return (
-                        <button
-                          key={day}
-                          type="button"
-                          onClick={() => toggleDay(idx, day)}
-                          className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                            active
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                          }`}
-                        >
-                          {DAY_LABELS[day]}
-                        </button>
-                      )
-                    })}
-                  </div>
-
-                  {/* Time range + destination */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-0.5">Start</label>
-                      <input
-                        type="time"
-                        value={rule.start}
-                        onChange={(e) => updateRule(idx, { start: e.currentTarget.value })}
-                        className="block w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-0.5">End</label>
-                      <input
-                        type="time"
-                        value={rule.end}
-                        onChange={(e) => updateRule(idx, { end: e.currentTarget.value })}
-                        className="block w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-0.5">Destination</label>
-                      <input
-                        type="text"
-                        value={rule.dest_node}
-                        onChange={(e) => updateRule(idx, { dest_node: e.currentTarget.value })}
-                        placeholder="Node ID"
-                        className="block w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <button
-              type="button"
-              onClick={addRule}
-              className="mt-2 inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 transition-colors"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-              </svg>
-              Add Rule
-            </button>
-          </div>
+          <TimeSwitchRuleEditor
+            rules={form.rules}
+            onChange={(rules) => setForm({ ...form, rules })}
+          />
 
           <div className="pt-4 border-t border-gray-100">
             <button

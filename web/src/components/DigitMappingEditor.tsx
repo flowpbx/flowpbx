@@ -47,7 +47,6 @@ export default function DigitMappingEditor({ options, onChange }: Props) {
               {row.map((digit) => (
                 <DigitRow
                   key={digit}
-                  digit={digit}
                   label={digit}
                   value={options[digit] ?? ''}
                   onChange={(v) => onChange(digit, v)}
@@ -80,12 +79,10 @@ export default function DigitMappingEditor({ options, onChange }: Props) {
 
 /** Single keypad digit row — compact with inline input. */
 function DigitRow({
-  digit,
   label,
   value,
   onChange,
 }: {
-  digit: string
   label: string
   value: string
   onChange: (value: string) => void

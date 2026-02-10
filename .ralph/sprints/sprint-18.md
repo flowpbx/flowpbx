@@ -8,7 +8,7 @@
 
 ## Tasks
 
-- [ ] Create `internal/media/recorder.go` — fork RTP stream to WAV writer (separate goroutine, non-blocking)
+- [x] Create `internal/media/recorder.go` — fork RTP stream to WAV writer (separate goroutine, non-blocking)
 - [ ] Implement per-extension recording config: always / off / on_demand
 - [ ] Implement per-trunk recording config
 - [ ] Implement global recording policy setting

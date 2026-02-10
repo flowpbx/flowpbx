@@ -184,10 +184,33 @@ func (f *Forker) Fork(
 			continue
 
 		case res.StatusCode == 180 || res.StatusCode == 183:
-			// Relay the first 180/183 back to the caller.
+			// Relay provisional responses back to the caller.
+			//
+			// 180 Ringing: relayed once so the caller's phone generates local ringback.
+			// 183 Session Progress: may carry an SDP body for early media (remote
+			// ringback tones or call progress announcements). The SDP body must be
+			// copied so the caller can set up the media path before the call is answered.
+			//
+			// Only the first provisional is relayed to avoid confusing the caller UA
+			// with multiple provisional SDP offers.
 			if !ringingRelayed {
 				ringingRelayed = true
-				ringing := sip.NewResponseFromRequest(incomingReq, res.StatusCode, res.Reason, nil)
+
+				// Include the SDP body for 183 early media; 180 typically has no body.
+				var body []byte
+				if res.StatusCode == 183 && len(res.Body()) > 0 {
+					body = res.Body()
+				}
+
+				ringing := sip.NewResponseFromRequest(incomingReq, res.StatusCode, res.Reason, body)
+
+				// Copy Content-Type when relaying an SDP body.
+				if body != nil {
+					if ct := res.ContentType(); ct != nil {
+						ringing.AppendHeader(sip.NewHeader("Content-Type", ct.Value()))
+					}
+				}
+
 				if err := callerTx.Respond(ringing); err != nil {
 					f.logger.Error("failed to relay ringing to caller",
 						"call_id", callID,
@@ -197,6 +220,7 @@ func (f *Forker) Fork(
 					f.logger.Info("relayed ringing to caller",
 						"call_id", callID,
 						"status", res.StatusCode,
+						"has_sdp", body != nil,
 					)
 				}
 			}

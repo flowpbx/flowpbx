@@ -1051,7 +1051,11 @@ func (a *FlowSIPActions) JoinConference(ctx context.Context, callCtx *flow.CallC
 	}
 
 	// Add participant to the conference room via ConferenceManager.
-	joinResult, err := a.conferenceMgr.Join(ctx, bridge.ID, bridge.Name, bridge.MaxMembers, bridge.AnnounceJoins, bridge.Record, callID, callerRemote, payloadType)
+	joinOpts := &media.JoinOpts{
+		CallerIDName: callCtx.CallerIDName,
+		CallerIDNum:  callCtx.CallerIDNum,
+	}
+	joinResult, err := a.conferenceMgr.Join(ctx, bridge.ID, bridge.Name, bridge.MaxMembers, bridge.AnnounceJoins, bridge.Record, callID, callerRemote, payloadType, joinOpts)
 	if err != nil {
 		return fmt.Errorf("joining conference room: %w", err)
 	}

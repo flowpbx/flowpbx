@@ -26,17 +26,24 @@ type ConferenceRoom struct {
 	// is active and retained after the room is destroyed.
 	RecordingFile string
 
+	// participants tracks metadata for each active participant, keyed by
+	// participant ID (call ID). Protected by the ConferenceManager mutex.
+	participants map[string]*ConferenceParticipant
+
 	// done is closed when the room is empty and should be removed.
 	done chan struct{}
 }
 
 // ConferenceParticipant holds information about a participant in a conference room.
 type ConferenceParticipant struct {
-	ID          string // call ID
-	BridgeID    int64
-	PayloadType int
-	Port        int // local RTP port allocated for this participant
-	Muted       bool
+	ID           string // call ID
+	BridgeID     int64
+	CallerIDName string    // display name from SIP From header
+	CallerIDNum  string    // user part of the SIP From URI
+	JoinedAt     time.Time // when the participant joined the conference
+	PayloadType  int
+	Port         int // local RTP port allocated for this participant
+	Muted        bool
 }
 
 // ConferenceManager manages active conference rooms, mapping bridge IDs to
@@ -87,13 +94,19 @@ const conferenceJoinToneDurationMs = 200
 // A shorter tone distinguishes leave from join.
 const conferenceLeaveToneDurationMs = 100
 
+// JoinOpts holds optional metadata for a participant joining a conference.
+type JoinOpts struct {
+	CallerIDName string
+	CallerIDNum  string
+}
+
 // Join adds a participant to a conference room. If the room does not exist,
 // it is created and the mixer is started. When record is true, the mixed
 // audio is captured to a WAV file under the recordings directory. Returns
 // the allocated RTP socket pair for SDP rewriting.
 //
 // The caller must call Leave when the participant exits the conference.
-func (cm *ConferenceManager) Join(ctx context.Context, bridgeID int64, bridgeName string, maxMembers int, announceJoins bool, record bool, participantID string, remote *net.UDPAddr, payloadType int) (*JoinResult, error) {
+func (cm *ConferenceManager) Join(ctx context.Context, bridgeID int64, bridgeName string, maxMembers int, announceJoins bool, record bool, participantID string, remote *net.UDPAddr, payloadType int, opts *JoinOpts) (*JoinResult, error) {
 	cm.mu.Lock()
 
 	room, exists := cm.rooms[bridgeID]
@@ -105,6 +118,7 @@ func (cm *ConferenceManager) Join(ctx context.Context, bridgeID int64, bridgeNam
 			Mixer:         mixer,
 			MaxMembers:    maxMembers,
 			AnnounceJoins: announceJoins,
+			participants:  make(map[string]*ConferenceParticipant),
 			done:          make(chan struct{}),
 		}
 
@@ -154,10 +168,31 @@ func (cm *ConferenceManager) Join(ctx context.Context, bridgeID int64, bridgeNam
 		return nil, fmt.Errorf("adding participant to conference %q: %w", bridgeName, err)
 	}
 
+	// Track participant metadata in the room's registry.
+	var callerName, callerNum string
+	if opts != nil {
+		callerName = opts.CallerIDName
+		callerNum = opts.CallerIDNum
+	}
+
+	cm.mu.Lock()
+	room.participants[participantID] = &ConferenceParticipant{
+		ID:           participantID,
+		BridgeID:     bridgeID,
+		CallerIDName: callerName,
+		CallerIDNum:  callerNum,
+		JoinedAt:     time.Now(),
+		PayloadType:  payloadType,
+		Port:         socket.Ports.RTP,
+	}
+	cm.mu.Unlock()
+
 	cm.logger.Info("participant joined conference",
 		"bridge_id", bridgeID,
 		"bridge_name", bridgeName,
 		"participant_id", participantID,
+		"caller_name", callerName,
+		"caller_num", callerNum,
 		"rtp_port", socket.Ports.RTP,
 		"participants", room.Mixer.ParticipantCount(),
 	)
@@ -188,6 +223,11 @@ func (cm *ConferenceManager) Leave(bridgeID int64, participantID string) error {
 	if err := room.Mixer.RemoveParticipant(participantID); err != nil {
 		return fmt.Errorf("removing participant from conference: %w", err)
 	}
+
+	// Remove participant from the room's metadata registry.
+	cm.mu.Lock()
+	delete(room.participants, participantID)
+	cm.mu.Unlock()
 
 	remaining := room.Mixer.ParticipantCount()
 
@@ -287,29 +327,30 @@ func (cm *ConferenceManager) ActiveRooms() int {
 }
 
 // Participants returns the list of participants in a conference room.
+// The returned list includes tracked metadata (join time, caller info) and
+// live mute state from the mixer.
 func (cm *ConferenceManager) Participants(bridgeID int64) ([]ConferenceParticipant, error) {
 	cm.mu.Lock()
 	room, exists := cm.rooms[bridgeID]
-	cm.mu.Unlock()
-
 	if !exists {
+		cm.mu.Unlock()
 		return nil, nil
 	}
 
-	ids := room.Mixer.ParticipantIDs()
-	result := make([]ConferenceParticipant, 0, len(ids))
-	for _, id := range ids {
-		p := room.Mixer.GetParticipant(id)
-		if p == nil {
-			continue
+	// Copy participant metadata while holding the lock.
+	result := make([]ConferenceParticipant, 0, len(room.participants))
+	for _, p := range room.participants {
+		cp := *p
+		result = append(result, cp)
+	}
+	cm.mu.Unlock()
+
+	// Enrich with live mute state from the mixer (mixer has its own locking).
+	for i := range result {
+		mp := room.Mixer.GetParticipant(result[i].ID)
+		if mp != nil {
+			result[i].Muted = mp.IsMuted()
 		}
-		result = append(result, ConferenceParticipant{
-			ID:          id,
-			BridgeID:    bridgeID,
-			PayloadType: p.payloadType,
-			Port:        p.Socket.Ports.RTP,
-			Muted:       p.IsMuted(),
-		})
 	}
 
 	return result, nil

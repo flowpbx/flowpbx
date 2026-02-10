@@ -71,6 +71,8 @@ type VoicemailMessageRepository interface {
 	ListByMailbox(ctx context.Context, mailboxID int64) ([]models.VoicemailMessage, error)
 	MarkRead(ctx context.Context, id int64) error
 	Delete(ctx context.Context, id int64) error
+	DeleteExpiredByRetention(ctx context.Context) ([]string, error)
+	CountByMailbox(ctx context.Context, mailboxID int64) (int64, error)
 }
 
 // RingGroupRepository manages ring groups.

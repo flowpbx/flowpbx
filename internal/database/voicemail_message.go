@@ -92,6 +92,60 @@ func (r *voicemailMessageRepo) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
+// DeleteExpiredByRetention deletes voicemail messages that exceed their box's
+// retention_days setting. Returns the file paths of deleted messages so callers
+// can remove the WAV files from disk.
+func (r *voicemailMessageRepo) DeleteExpiredByRetention(ctx context.Context) ([]string, error) {
+	// First, select the file paths of messages to be deleted.
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT vm.file_path FROM voicemail_messages vm
+		 JOIN voicemail_boxes vb ON vm.mailbox_id = vb.id
+		 WHERE vb.retention_days > 0
+		 AND vm.timestamp < datetime('now', '-' || vb.retention_days || ' days')`)
+	if err != nil {
+		return nil, fmt.Errorf("querying expired voicemail messages: %w", err)
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scanning expired voicemail file path: %w", err)
+		}
+		paths = append(paths, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating expired voicemail rows: %w", err)
+	}
+
+	// Delete the expired messages.
+	_, err = r.db.ExecContext(ctx,
+		`DELETE FROM voicemail_messages WHERE id IN (
+		   SELECT vm.id FROM voicemail_messages vm
+		   JOIN voicemail_boxes vb ON vm.mailbox_id = vb.id
+		   WHERE vb.retention_days > 0
+		   AND vm.timestamp < datetime('now', '-' || vb.retention_days || ' days')
+		 )`)
+	if err != nil {
+		return nil, fmt.Errorf("deleting expired voicemail messages: %w", err)
+	}
+
+	return paths, nil
+}
+
+// CountByMailbox returns the number of messages in a given mailbox.
+func (r *voicemailMessageRepo) CountByMailbox(ctx context.Context, mailboxID int64) (int64, error) {
+	var count int64
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM voicemail_messages WHERE mailbox_id = ?`, mailboxID,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("counting voicemail messages: %w", err)
+	}
+	return count, nil
+}
+
 func (r *voicemailMessageRepo) scanOne(row *sql.Row) (*models.VoicemailMessage, error) {
 	var m models.VoicemailMessage
 	err := row.Scan(&m.ID, &m.MailboxID, &m.CallerIDName, &m.CallerIDNum,

@@ -18,6 +18,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/email"
 	"github.com/flowpbx/flowpbx/internal/prompts"
 	sipserver "github.com/flowpbx/flowpbx/internal/sip"
+	"github.com/flowpbx/flowpbx/internal/voicemail"
 )
 
 func main() {
@@ -95,6 +96,9 @@ func main() {
 	// Session store for admin auth.
 	sessions := middleware.NewSessionStore()
 	middleware.StartCleanupTicker(appCtx, sessions, 15*time.Minute)
+
+	// Voicemail retention cleanup: delete messages older than per-box retention_days.
+	voicemail.StartCleanupTicker(appCtx, db, 1*time.Hour)
 
 	// Create adapter for trunk status so the API can query SIP trunk state.
 	trunkStatus := &trunkStatusAdapter{registrar: sipSrv.TrunkRegistrar()}

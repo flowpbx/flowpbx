@@ -111,6 +111,20 @@ func (m *mockVoicemailMessageRepo) Delete(_ context.Context, id int64) error {
 	return nil
 }
 
+func (m *mockVoicemailMessageRepo) DeleteExpiredByRetention(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockVoicemailMessageRepo) CountByMailbox(_ context.Context, mailboxID int64) (int64, error) {
+	var count int64
+	for _, msg := range m.messages {
+		if msg.MailboxID == mailboxID {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // mockExtensionRepo implements database.ExtensionRepository for testing.
 type mockExtensionRepo struct {
 	extensions map[int64]*models.Extension

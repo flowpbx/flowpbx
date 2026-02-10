@@ -16,7 +16,7 @@
 - [x] Store voicemail box greetings at `$DATA_DIR/greetings/box_{id}.wav`
 - [x] Implement MWI: send SIP NOTIFY to extension linked via `notify_extension_id` on new message
 - [x] Implement email notification with WAV attachment via SMTP (per-box `email_notify` + `email_address` settings)
-- [ ] Implement auto-delete of messages older than `retention_days` (per-box setting, cleanup goroutine)
+- [x] Implement auto-delete of messages older than `retention_days` (per-box setting, cleanup goroutine)
 - [ ] Implement max_messages limit per box (reject recording if at limit)
 - [x] Create voicemail box CRUD API: `GET/POST/PUT/DELETE /api/v1/voicemail-boxes`
 - [ ] Create voicemail message API: `GET /api/v1/voicemail-boxes/:id/messages`, `DELETE .../messages/:msg_id`, `PUT .../messages/:msg_id/read`, `GET .../messages/:msg_id/audio`

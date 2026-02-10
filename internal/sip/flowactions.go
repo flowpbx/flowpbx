@@ -19,17 +19,18 @@ import (
 // FlowSIPActions implements flow.SIPActions, bridging the flow engine's node
 // handlers to the SIP stack's call routing and forking infrastructure.
 type FlowSIPActions struct {
-	extensions    database.ExtensionRepository
-	registrations database.RegistrationRepository
-	forker        *Forker
-	dialogMgr     *DialogManager
-	pendingMgr    *PendingCallManager
-	sessionMgr    *media.SessionManager
-	dtmfMgr       *media.CallDTMFManager
-	conferenceMgr *media.ConferenceManager
-	cdrs          database.CDRRepository
-	proxyIP       string
-	logger        *slog.Logger
+	extensions     database.ExtensionRepository
+	registrations  database.RegistrationRepository
+	forker         *Forker
+	outboundRouter *OutboundRouter
+	dialogMgr      *DialogManager
+	pendingMgr     *PendingCallManager
+	sessionMgr     *media.SessionManager
+	dtmfMgr        *media.CallDTMFManager
+	conferenceMgr  *media.ConferenceManager
+	cdrs           database.CDRRepository
+	proxyIP        string
+	logger         *slog.Logger
 }
 
 // NewFlowSIPActions creates a new SIP actions adapter for the flow engine.
@@ -37,6 +38,7 @@ func NewFlowSIPActions(
 	extensions database.ExtensionRepository,
 	registrations database.RegistrationRepository,
 	forker *Forker,
+	outboundRouter *OutboundRouter,
 	dialogMgr *DialogManager,
 	pendingMgr *PendingCallManager,
 	sessionMgr *media.SessionManager,
@@ -47,17 +49,18 @@ func NewFlowSIPActions(
 	logger *slog.Logger,
 ) *FlowSIPActions {
 	return &FlowSIPActions{
-		extensions:    extensions,
-		registrations: registrations,
-		forker:        forker,
-		dialogMgr:     dialogMgr,
-		pendingMgr:    pendingMgr,
-		sessionMgr:    sessionMgr,
-		dtmfMgr:       dtmfMgr,
-		conferenceMgr: conferenceMgr,
-		cdrs:          cdrs,
-		proxyIP:       proxyIP,
-		logger:        logger.With("subsystem", "flow_sip_actions"),
+		extensions:     extensions,
+		registrations:  registrations,
+		forker:         forker,
+		outboundRouter: outboundRouter,
+		dialogMgr:      dialogMgr,
+		pendingMgr:     pendingMgr,
+		sessionMgr:     sessionMgr,
+		dtmfMgr:        dtmfMgr,
+		conferenceMgr:  conferenceMgr,
+		cdrs:           cdrs,
+		proxyIP:        proxyIP,
+		logger:         logger.With("subsystem", "flow_sip_actions"),
 	}
 }
 

@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // SystemConfig represents a key-value configuration entry.
 type SystemConfig struct {
@@ -26,6 +29,26 @@ type Extension struct {
 	MaxRegistrations int
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+}
+
+// FollowMeNumber represents an external number in a follow-me sequence.
+type FollowMeNumber struct {
+	Number  string `json:"number"`
+	Delay   int    `json:"delay"`   // seconds to wait before ringing this number
+	Timeout int    `json:"timeout"` // seconds to ring this number before giving up
+}
+
+// ParseFollowMeNumbers parses the JSON follow_me_numbers field from an Extension.
+// Returns nil if the input is empty or invalid.
+func ParseFollowMeNumbers(jsonStr string) []FollowMeNumber {
+	if jsonStr == "" {
+		return nil
+	}
+	var numbers []FollowMeNumber
+	if err := json.Unmarshal([]byte(jsonStr), &numbers); err != nil {
+		return nil
+	}
+	return numbers
 }
 
 // Trunk represents a SIP trunk configuration.

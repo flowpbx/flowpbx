@@ -17,9 +17,9 @@
 - [x] Implement recording retention policy: auto-delete recordings older than configurable days
 - [x] Add storage usage monitoring (total recordings size)
 - [x] Create recording browser API with playback stream and download
-- [ ] Implement follow-me: sequential ring — ring registered devices → after timeout → ring external numbers via trunk
+- [x] Implement follow-me: sequential ring — ring registered devices → after timeout → ring external numbers via trunk
 - [ ] Implement follow-me: simultaneous ring option (ring all at once)
-- [ ] Implement external number dialling via outbound trunk for follow-me legs
+- [x] Implement external number dialling via outbound trunk for follow-me legs
 - [ ] Implement confirmation prompt on external legs ("Press 1 to accept this call") to prevent voicemail pickup
 - [ ] Implement per-destination ring timeout in follow-me config
 - [ ] Add follow-me config UI per extension (enable/disable, add external numbers with delay/timeout)

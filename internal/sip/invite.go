@@ -67,6 +67,7 @@ type InviteHandler struct {
 	cdrs           database.CDRRepository
 	systemConfig   database.SystemConfigRepository
 	flowEngine     *flow.Engine
+	flowActions    *FlowSIPActions
 	proxyIP        string
 	dataDir        string
 	logger         *slog.Logger
@@ -88,6 +89,7 @@ func NewInviteHandler(
 	cdrs database.CDRRepository,
 	sysConfig database.SystemConfigRepository,
 	flowEngine *flow.Engine,
+	flowActions *FlowSIPActions,
 	proxyIP string,
 	dataDir string,
 	logger *slog.Logger,
@@ -109,6 +111,7 @@ func NewInviteHandler(
 		cdrs:           cdrs,
 		systemConfig:   sysConfig,
 		flowEngine:     flowEngine,
+		flowActions:    flowActions,
 		proxyIP:        proxyIP,
 		dataDir:        dataDir,
 		logger:         logger.With("subsystem", "invite"),
@@ -210,6 +213,10 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 				"call_id", callID,
 				"target", ic.TargetExtension.Extension,
 			)
+			// Try follow-me if enabled (no registered devices at all).
+			if h.tryFollowMe(ctx, req, tx, ic.TargetExtension, callID, ic.CallerIDName, ic.CallerIDNum) {
+				return
+			}
 			h.respondErrorWithCDR(req, tx, 480, "Temporarily Unavailable", callID)
 			return
 		case ErrExtensionNotFound:
@@ -333,6 +340,12 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		if bridge != nil {
 			bridge.Release()
 		}
+
+		// Check if follow-me is enabled and try external numbers.
+		if h.tryFollowMe(ctx, req, tx, route.TargetExtension, callID, ic.CallerIDName, ic.CallerIDNum) {
+			return
+		}
+
 		// 480 Temporarily Unavailable — no device picked up within ring timeout.
 		h.respondErrorWithCDR(req, tx, 480, "Temporarily Unavailable", callID)
 		return
@@ -587,6 +600,10 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 				"call_id", callID,
 				"target", ic.TargetExtension.Extension,
 			)
+			// Try follow-me if enabled (no registered devices at all).
+			if h.tryFollowMe(ctx, req, tx, ic.TargetExtension, callID, ic.CallerIDName, ic.CallerIDNum) {
+				return
+			}
 			h.respondErrorWithCDR(req, tx, 480, "Temporarily Unavailable", callID)
 			return
 		case ErrExtensionNotFound:
@@ -700,6 +717,12 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 		if bridge != nil {
 			bridge.Release()
 		}
+
+		// Check if follow-me is enabled and try external numbers.
+		if h.tryFollowMe(ctx, req, tx, route.TargetExtension, callID, ic.CallerIDName, ic.CallerIDNum) {
+			return
+		}
+
 		h.respondErrorWithCDR(req, tx, 480, "Temporarily Unavailable", callID)
 		return
 	}
@@ -1234,4 +1257,74 @@ func (h *InviteHandler) respondError(req *sip.Request, tx sip.ServerTransaction,
 			"error", err,
 		)
 	}
+}
+
+// tryFollowMe checks if the target extension has follow-me enabled and
+// attempts to ring external numbers sequentially via outbound trunk.
+// Returns true if follow-me was attempted (regardless of whether a number
+// answered), meaning the caller should not send a failure response.
+// Returns false if follow-me is not enabled/configured.
+func (h *InviteHandler) tryFollowMe(
+	ctx context.Context,
+	req *sip.Request,
+	tx sip.ServerTransaction,
+	ext *models.Extension,
+	callID string,
+	callerIDName string,
+	callerIDNum string,
+) bool {
+	if ext == nil || !ext.FollowMeEnabled || h.flowActions == nil {
+		return false
+	}
+
+	numbers := models.ParseFollowMeNumbers(ext.FollowMeNumbers)
+	if len(numbers) == 0 {
+		return false
+	}
+
+	h.logger.Info("attempting follow-me for extension",
+		"call_id", callID,
+		"extension", ext.Extension,
+		"follow_me_numbers", len(numbers),
+	)
+
+	// Build a flow CallContext for the follow-me ring.
+	callCtx := flow.NewCallContext(
+		callID,
+		callerIDName,
+		callerIDNum,
+		ext.Extension,
+		nil,
+		0,
+		req,
+		tx,
+	)
+
+	result, err := h.flowActions.RingFollowMe(ctx, callCtx, numbers, callerIDName, callerIDNum)
+	if err != nil {
+		h.logger.Error("follow-me failed",
+			"call_id", callID,
+			"extension", ext.Extension,
+			"error", err,
+		)
+		// Follow-me was attempted but failed — still return true because
+		// the pending call state may have been altered.
+		h.respondErrorWithCDR(req, tx, 480, "Temporarily Unavailable", callID)
+		return true
+	}
+
+	if result.Answered {
+		h.logger.Info("follow-me answered",
+			"call_id", callID,
+			"extension", ext.Extension,
+		)
+		return true
+	}
+
+	// Follow-me was attempted but no number answered.
+	h.logger.Info("follow-me no answer on any external number",
+		"call_id", callID,
+		"extension", ext.Extension,
+	)
+	return false
 }

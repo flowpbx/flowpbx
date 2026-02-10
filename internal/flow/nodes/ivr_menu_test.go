@@ -61,6 +61,10 @@ func (m *mockSIPActions) JoinConference(_ context.Context, _ *flow.CallContext, 
 	return nil
 }
 
+func (m *mockSIPActions) RingFollowMe(_ context.Context, _ *flow.CallContext, _ []models.FollowMeNumber, _ string, _ string) (*flow.RingResult, error) {
+	return &flow.RingResult{Answered: false}, nil
+}
+
 func newTestIVRHandler(menu *models.IVRMenu, sip *mockSIPActions) *IVRMenuHandler {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	resolver := &mockEntityResolver{entity: menu}

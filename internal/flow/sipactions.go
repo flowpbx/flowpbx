@@ -91,4 +91,10 @@ type SIPActions interface {
 	// kicked, or context cancellation). PIN verification is handled
 	// internally if the bridge requires one.
 	JoinConference(ctx context.Context, callCtx *CallContext, bridge *models.ConferenceBridge) error
+
+	// RingFollowMe rings external follow-me numbers sequentially via an
+	// outbound trunk. Each number is tried in order with its configured
+	// delay (wait before ringing) and timeout (how long to ring). Returns
+	// a RingResult indicating whether any external number answered.
+	RingFollowMe(ctx context.Context, callCtx *CallContext, numbers []models.FollowMeNumber, callerIDName string, callerIDNum string) (*RingResult, error)
 }

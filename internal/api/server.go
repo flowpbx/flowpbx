@@ -4,10 +4,11 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/flowpbx/flowpbx/internal/api/middleware"
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chimw "github.com/go-chi/chi/v5/middleware"
 )
 
 // Server holds HTTP handler dependencies and the chi router.
@@ -39,9 +40,10 @@ func (s *Server) routes() {
 	r := s.router
 
 	// Global middleware stack.
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Recoverer)
+	r.Use(chimw.RequestID)
+	r.Use(chimw.RealIP)
+	r.Use(middleware.StructuredLogger)
+	r.Use(chimw.Recoverer)
 
 	// API routes under /api/v1.
 	r.Route("/api/v1", func(r chi.Router) {

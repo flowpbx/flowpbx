@@ -10,7 +10,7 @@
 
 - [x] Create `internal/api/server.go` — chi router setup, mount all route groups
 - [x] Create auth middleware (session-based, secure cookie + CSRF token)
-- [ ] Create logging middleware (request ID, method, path, status, duration)
+- [x] Create logging middleware (request ID, method, path, status, duration)
 - [ ] Create recovery middleware (panic recovery, log stack trace)
 - [ ] Create CORS middleware (configurable origins)
 - [ ] Implement Argon2id password hashing utility

@@ -25,6 +25,7 @@ var defaultPrompts = []prompt{
 	{"ivr_invalid_option.wav", 1500},
 	{"ivr_timeout.wav", 1500},
 	{"transfer_accept.wav", 2000},
+	{"followme_confirm.wav", 2000},
 }
 
 func main() {

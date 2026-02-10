@@ -30,6 +30,7 @@ type FlowSIPActions struct {
 	conferenceMgr  *media.ConferenceManager
 	cdrs           database.CDRRepository
 	proxyIP        string
+	dataDir        string
 	logger         *slog.Logger
 }
 
@@ -46,6 +47,7 @@ func NewFlowSIPActions(
 	conferenceMgr *media.ConferenceManager,
 	cdrs database.CDRRepository,
 	proxyIP string,
+	dataDir string,
 	logger *slog.Logger,
 ) *FlowSIPActions {
 	return &FlowSIPActions{
@@ -60,6 +62,7 @@ func NewFlowSIPActions(
 		conferenceMgr:  conferenceMgr,
 		cdrs:           cdrs,
 		proxyIP:        proxyIP,
+		dataDir:        dataDir,
 		logger:         logger.With("subsystem", "flow_sip_actions"),
 	}
 }

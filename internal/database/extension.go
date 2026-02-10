@@ -23,11 +23,11 @@ func (r *extensionRepo) Create(ctx context.Context, ext *models.Extension) error
 	result, err := r.db.ExecContext(ctx,
 		`INSERT INTO extensions (extension, name, email, sip_username, sip_password,
 		 ring_timeout, dnd, follow_me_enabled, follow_me_numbers, follow_me_strategy,
-		 recording_mode, max_registrations, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		 follow_me_confirm, recording_mode, max_registrations, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		ext.Extension, ext.Name, ext.Email, ext.SIPUsername, ext.SIPPassword,
 		ext.RingTimeout, ext.DND, ext.FollowMeEnabled, ext.FollowMeNumbers,
-		ext.FollowMeStrategy, ext.RecordingMode, ext.MaxRegistrations,
+		ext.FollowMeStrategy, ext.FollowMeConfirm, ext.RecordingMode, ext.MaxRegistrations,
 	)
 	if err != nil {
 		return fmt.Errorf("inserting extension: %w", err)
@@ -46,7 +46,7 @@ func (r *extensionRepo) GetByID(ctx context.Context, id int64) (*models.Extensio
 	return r.scanOne(r.db.QueryRowContext(ctx,
 		`SELECT id, extension, name, email, sip_username, sip_password,
 		 ring_timeout, dnd, follow_me_enabled, follow_me_numbers, follow_me_strategy,
-		 recording_mode, max_registrations, created_at, updated_at
+		 follow_me_confirm, recording_mode, max_registrations, created_at, updated_at
 		 FROM extensions WHERE id = ?`, id,
 	))
 }
@@ -56,7 +56,7 @@ func (r *extensionRepo) GetByExtension(ctx context.Context, ext string) (*models
 	return r.scanOne(r.db.QueryRowContext(ctx,
 		`SELECT id, extension, name, email, sip_username, sip_password,
 		 ring_timeout, dnd, follow_me_enabled, follow_me_numbers, follow_me_strategy,
-		 recording_mode, max_registrations, created_at, updated_at
+		 follow_me_confirm, recording_mode, max_registrations, created_at, updated_at
 		 FROM extensions WHERE extension = ?`, ext,
 	))
 }
@@ -66,7 +66,7 @@ func (r *extensionRepo) GetBySIPUsername(ctx context.Context, username string) (
 	return r.scanOne(r.db.QueryRowContext(ctx,
 		`SELECT id, extension, name, email, sip_username, sip_password,
 		 ring_timeout, dnd, follow_me_enabled, follow_me_numbers, follow_me_strategy,
-		 recording_mode, max_registrations, created_at, updated_at
+		 follow_me_confirm, recording_mode, max_registrations, created_at, updated_at
 		 FROM extensions WHERE sip_username = ?`, username,
 	))
 }
@@ -76,7 +76,7 @@ func (r *extensionRepo) List(ctx context.Context) ([]models.Extension, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, extension, name, email, sip_username, sip_password,
 		 ring_timeout, dnd, follow_me_enabled, follow_me_numbers, follow_me_strategy,
-		 recording_mode, max_registrations, created_at, updated_at
+		 follow_me_confirm, recording_mode, max_registrations, created_at, updated_at
 		 FROM extensions ORDER BY extension`)
 	if err != nil {
 		return nil, fmt.Errorf("querying extensions: %w", err)
@@ -88,8 +88,8 @@ func (r *extensionRepo) List(ctx context.Context) ([]models.Extension, error) {
 		var e models.Extension
 		if err := rows.Scan(&e.ID, &e.Extension, &e.Name, &e.Email, &e.SIPUsername,
 			&e.SIPPassword, &e.RingTimeout, &e.DND, &e.FollowMeEnabled,
-			&e.FollowMeNumbers, &e.FollowMeStrategy, &e.RecordingMode,
-			&e.MaxRegistrations, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			&e.FollowMeNumbers, &e.FollowMeStrategy, &e.FollowMeConfirm,
+			&e.RecordingMode, &e.MaxRegistrations, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning extension row: %w", err)
 		}
 		exts = append(exts, e)
@@ -102,12 +102,13 @@ func (r *extensionRepo) Update(ctx context.Context, ext *models.Extension) error
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE extensions SET extension = ?, name = ?, email = ?, sip_username = ?,
 		 sip_password = ?, ring_timeout = ?, dnd = ?, follow_me_enabled = ?,
-		 follow_me_numbers = ?, follow_me_strategy = ?, recording_mode = ?,
-		 max_registrations = ?, updated_at = datetime('now')
+		 follow_me_numbers = ?, follow_me_strategy = ?, follow_me_confirm = ?,
+		 recording_mode = ?, max_registrations = ?, updated_at = datetime('now')
 		 WHERE id = ?`,
 		ext.Extension, ext.Name, ext.Email, ext.SIPUsername, ext.SIPPassword,
 		ext.RingTimeout, ext.DND, ext.FollowMeEnabled, ext.FollowMeNumbers,
-		ext.FollowMeStrategy, ext.RecordingMode, ext.MaxRegistrations, ext.ID,
+		ext.FollowMeStrategy, ext.FollowMeConfirm, ext.RecordingMode,
+		ext.MaxRegistrations, ext.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("updating extension: %w", err)
@@ -128,8 +129,8 @@ func (r *extensionRepo) scanOne(row *sql.Row) (*models.Extension, error) {
 	var e models.Extension
 	err := row.Scan(&e.ID, &e.Extension, &e.Name, &e.Email, &e.SIPUsername,
 		&e.SIPPassword, &e.RingTimeout, &e.DND, &e.FollowMeEnabled,
-		&e.FollowMeNumbers, &e.FollowMeStrategy, &e.RecordingMode,
-		&e.MaxRegistrations, &e.CreatedAt, &e.UpdatedAt)
+		&e.FollowMeNumbers, &e.FollowMeStrategy, &e.FollowMeConfirm,
+		&e.RecordingMode, &e.MaxRegistrations, &e.CreatedAt, &e.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

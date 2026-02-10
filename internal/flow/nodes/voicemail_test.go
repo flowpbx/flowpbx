@@ -66,11 +66,11 @@ func (m *mockVoicemailSIPActions) JoinConference(_ context.Context, _ *flow.Call
 	return nil
 }
 
-func (m *mockVoicemailSIPActions) RingFollowMe(_ context.Context, _ *flow.CallContext, _ []models.FollowMeNumber, _ string, _ string) (*flow.RingResult, error) {
+func (m *mockVoicemailSIPActions) RingFollowMe(_ context.Context, _ *flow.CallContext, _ []models.FollowMeNumber, _ string, _ string, _ bool) (*flow.RingResult, error) {
 	return &flow.RingResult{Answered: false}, nil
 }
 
-func (m *mockVoicemailSIPActions) RingFollowMeSimultaneous(_ context.Context, _ *flow.CallContext, _ []models.FollowMeNumber, _ string, _ string) (*flow.RingResult, error) {
+func (m *mockVoicemailSIPActions) RingFollowMeSimultaneous(_ context.Context, _ *flow.CallContext, _ []models.FollowMeNumber, _ string, _ string, _ bool) (*flow.RingResult, error) {
 	return &flow.RingResult{Answered: false}, nil
 }
 

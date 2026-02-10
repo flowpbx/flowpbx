@@ -22,4 +22,5 @@ var SystemPrompts = []string{
 	"ivr_invalid_option.wav",
 	"ivr_timeout.wav",
 	"transfer_accept.wav",
+	"followme_confirm.wav",
 }

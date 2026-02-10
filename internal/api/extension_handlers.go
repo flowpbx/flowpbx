@@ -23,6 +23,7 @@ type extensionRequest struct {
 	FollowMeEnabled  *bool           `json:"follow_me_enabled"`
 	FollowMeNumbers  json.RawMessage `json:"follow_me_numbers"`
 	FollowMeStrategy string          `json:"follow_me_strategy"`
+	FollowMeConfirm  *bool           `json:"follow_me_confirm"`
 	RecordingMode    string          `json:"recording_mode"`
 	MaxRegistrations *int            `json:"max_registrations"`
 }
@@ -40,6 +41,7 @@ type extensionResponse struct {
 	FollowMeEnabled  bool            `json:"follow_me_enabled"`
 	FollowMeNumbers  json.RawMessage `json:"follow_me_numbers"`
 	FollowMeStrategy string          `json:"follow_me_strategy"`
+	FollowMeConfirm  bool            `json:"follow_me_confirm"`
 	RecordingMode    string          `json:"recording_mode"`
 	MaxRegistrations int             `json:"max_registrations"`
 	CreatedAt        string          `json:"created_at"`
@@ -62,6 +64,7 @@ func toExtensionResponse(e *models.Extension) extensionResponse {
 		DND:              e.DND,
 		FollowMeEnabled:  e.FollowMeEnabled,
 		FollowMeStrategy: strategy,
+		FollowMeConfirm:  e.FollowMeConfirm,
 		RecordingMode:    e.RecordingMode,
 		MaxRegistrations: e.MaxRegistrations,
 		CreatedAt:        e.CreatedAt.Format(time.RFC3339),
@@ -150,6 +153,9 @@ func (s *Server) handleCreateExtension(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.FollowMeStrategy != "" {
 		ext.FollowMeStrategy = req.FollowMeStrategy
+	}
+	if req.FollowMeConfirm != nil {
+		ext.FollowMeConfirm = *req.FollowMeConfirm
 	}
 	if req.RecordingMode != "" {
 		ext.RecordingMode = req.RecordingMode
@@ -264,6 +270,9 @@ func (s *Server) handleUpdateExtension(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.FollowMeStrategy != "" {
 		existing.FollowMeStrategy = req.FollowMeStrategy
+	}
+	if req.FollowMeConfirm != nil {
+		existing.FollowMeConfirm = *req.FollowMeConfirm
 	}
 	if req.RecordingMode != "" {
 		existing.RecordingMode = req.RecordingMode

@@ -1290,11 +1290,14 @@ func (h *InviteHandler) tryFollowMe(
 		strategy = "sequential"
 	}
 
+	confirm := ext.FollowMeConfirm
+
 	h.logger.Info("attempting follow-me for extension",
 		"call_id", callID,
 		"extension", ext.Extension,
 		"follow_me_numbers", len(numbers),
 		"strategy", strategy,
+		"confirm", confirm,
 	)
 
 	// Build a flow CallContext for the follow-me ring.
@@ -1313,9 +1316,9 @@ func (h *InviteHandler) tryFollowMe(
 	var err error
 
 	if strategy == "simultaneous" {
-		result, err = h.flowActions.RingFollowMeSimultaneous(ctx, callCtx, numbers, callerIDName, callerIDNum)
+		result, err = h.flowActions.RingFollowMeSimultaneous(ctx, callCtx, numbers, callerIDName, callerIDNum, confirm)
 	} else {
-		result, err = h.flowActions.RingFollowMe(ctx, callCtx, numbers, callerIDName, callerIDNum)
+		result, err = h.flowActions.RingFollowMe(ctx, callCtx, numbers, callerIDName, callerIDNum, confirm)
 	}
 
 	if err != nil {

@@ -94,13 +94,15 @@ type SIPActions interface {
 
 	// RingFollowMe rings external follow-me numbers sequentially via an
 	// outbound trunk. Each number is tried in order with its configured
-	// delay (wait before ringing) and timeout (how long to ring). Returns
-	// a RingResult indicating whether any external number answered.
-	RingFollowMe(ctx context.Context, callCtx *CallContext, numbers []models.FollowMeNumber, callerIDName string, callerIDNum string) (*RingResult, error)
+	// delay (wait before ringing) and timeout (how long to ring). When
+	// confirm is true, answered legs must press "1" before being bridged.
+	// Returns a RingResult indicating whether any external number answered.
+	RingFollowMe(ctx context.Context, callCtx *CallContext, numbers []models.FollowMeNumber, callerIDName string, callerIDNum string, confirm bool) (*RingResult, error)
 
 	// RingFollowMeSimultaneous rings all external follow-me numbers at
 	// the same time via outbound trunks. The first number to answer wins;
-	// all other legs are cancelled. Returns a RingResult indicating
+	// all other legs are cancelled. When confirm is true, the winning leg
+	// must press "1" before being bridged. Returns a RingResult indicating
 	// whether any external number answered.
-	RingFollowMeSimultaneous(ctx context.Context, callCtx *CallContext, numbers []models.FollowMeNumber, callerIDName string, callerIDNum string) (*RingResult, error)
+	RingFollowMeSimultaneous(ctx context.Context, callCtx *CallContext, numbers []models.FollowMeNumber, callerIDName string, callerIDNum string, confirm bool) (*RingResult, error)
 }

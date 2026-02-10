@@ -26,6 +26,7 @@ type Extension struct {
 	FollowMeEnabled  bool
 	FollowMeNumbers  string // JSON
 	FollowMeStrategy string // "sequential" or "simultaneous"
+	FollowMeConfirm  bool   // require "Press 1 to accept" on external legs
 	RecordingMode    string
 	MaxRegistrations int
 	CreatedAt        time.Time

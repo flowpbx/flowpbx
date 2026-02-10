@@ -3,6 +3,8 @@ package sip
 import (
 	"context"
 	"fmt"
+	"net"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,10 +17,17 @@ import (
 	"github.com/icholy/digest"
 )
 
+// confirmTimeout is the maximum time to wait for DTMF confirmation on an
+// external follow-me leg after playing the prompt.
+const confirmTimeout = 10 * time.Second
+
 // RingFollowMe rings external follow-me numbers sequentially via an outbound
 // trunk. Each number is tried in order with its configured delay and timeout.
 // If any number answers, the call is bridged and a dialog is created.
-func (a *FlowSIPActions) RingFollowMe(ctx context.Context, callCtx *flow.CallContext, numbers []models.FollowMeNumber, callerIDName string, callerIDNum string) (*flow.RingResult, error) {
+// When confirm is true, answered external legs are prompted with "Press 1 to
+// accept this call" before bridging; legs that fail confirmation are hung up
+// and treated as unanswered so the next number is tried.
+func (a *FlowSIPActions) RingFollowMe(ctx context.Context, callCtx *flow.CallContext, numbers []models.FollowMeNumber, callerIDName string, callerIDNum string, confirm bool) (*flow.RingResult, error) {
 	if callCtx.Request == nil || callCtx.Transaction == nil {
 		return nil, fmt.Errorf("call context has no sip request or transaction")
 	}
@@ -39,6 +48,7 @@ func (a *FlowSIPActions) RingFollowMe(ctx context.Context, callCtx *flow.CallCon
 	a.logger.Info("follow-me sequential ring starting",
 		"call_id", callID,
 		"numbers", len(numbers),
+		"confirm", confirm,
 	)
 
 	// Select candidate trunks for outbound dialling.
@@ -82,7 +92,7 @@ func (a *FlowSIPActions) RingFollowMe(ctx context.Context, callCtx *flow.CallCon
 		}
 
 		// Try to ring this external number via available trunks.
-		result, err := a.ringExternalNumber(ctx, callCtx, trunks, fmNum.Number, ringTimeout, callerIDName, callerIDNum)
+		result, err := a.ringExternalNumber(ctx, callCtx, trunks, fmNum.Number, ringTimeout, callerIDName, callerIDNum, confirm)
 		if err != nil {
 			a.logger.Warn("follow-me external number failed",
 				"call_id", callID,
@@ -114,7 +124,8 @@ func (a *FlowSIPActions) RingFollowMe(ctx context.Context, callCtx *flow.CallCon
 
 // ringExternalNumber attempts to ring a single external number via the provided
 // trunks with failover. If the number answers, it completes the media bridge,
-// sends 200 OK to the caller, and creates a dialog.
+// sends 200 OK to the caller, and creates a dialog. When confirm is true, the
+// answering party must press 1 before the call is bridged to the caller.
 func (a *FlowSIPActions) ringExternalNumber(
 	ctx context.Context,
 	callCtx *flow.CallContext,
@@ -123,6 +134,7 @@ func (a *FlowSIPActions) ringExternalNumber(
 	ringTimeout int,
 	callerIDName string,
 	callerIDNum string,
+	confirm bool,
 ) (*flow.RingResult, error) {
 	callID := callCtx.CallID
 	req := callCtx.Request
@@ -233,6 +245,27 @@ func (a *FlowSIPActions) ringExternalNumber(
 		return nil, fmt.Errorf("sending ack to trunk: %w", err)
 	}
 
+	// If confirmation is required, play the prompt and collect DTMF before
+	// bridging to the original caller. This prevents voicemail systems from
+	// silently consuming the call.
+	if confirm && bridge != nil {
+		confirmed := a.confirmExternalLeg(ctx, outResult, bridge, callID, number)
+		if !confirmed {
+			a.logger.Info("follow-me confirmation rejected, sending bye",
+				"call_id", callID,
+				"number", number,
+			)
+			a.sendFollowMeBYE(outResult.req, outResult.res)
+			outResult.tx.Terminate()
+			bridge.Release()
+			return &flow.RingResult{Answered: false}, nil
+		}
+		a.logger.Info("follow-me confirmation accepted",
+			"call_id", callID,
+			"number", number,
+		)
+	}
+
 	// Complete media bridge with trunk's SDP.
 	var mediaSession *media.MediaSession
 	okBody := outResult.res.Body()
@@ -316,6 +349,166 @@ func (a *FlowSIPActions) ringExternalNumber(
 	)
 
 	return &flow.RingResult{Answered: true}, nil
+}
+
+// confirmExternalLeg plays the confirmation prompt ("Press 1 to accept this
+// call") to an answered external leg and waits for DTMF digit "1". The media
+// bridge must be allocated but not yet completed (relay not started), so we
+// can use the callee-leg socket directly for playback and DTMF collection.
+//
+// Returns true if the callee pressed "1" within the timeout, false otherwise.
+func (a *FlowSIPActions) confirmExternalLeg(
+	ctx context.Context,
+	outResult *outboundResult,
+	bridge *MediaBridge,
+	callID string,
+	number string,
+) bool {
+	// Parse the callee's SDP to find their RTP address.
+	if len(outResult.res.Body()) == 0 {
+		a.logger.Warn("follow-me confirm: no sdp body in 200 ok",
+			"call_id", callID,
+			"number", number,
+		)
+		return false
+	}
+
+	calleeSDP, err := media.ParseSDP(outResult.res.Body())
+	if err != nil {
+		a.logger.Warn("follow-me confirm: failed to parse callee sdp",
+			"call_id", callID,
+			"number", number,
+			"error", err,
+		)
+		return false
+	}
+
+	calleeAudio := calleeSDP.AudioMedia()
+	if calleeAudio == nil {
+		a.logger.Warn("follow-me confirm: no audio media in callee sdp",
+			"call_id", callID,
+			"number", number,
+		)
+		return false
+	}
+
+	calleeIP := calleeSDP.ConnectionAddress(calleeAudio)
+	if calleeIP == "" {
+		a.logger.Warn("follow-me confirm: no connection address in callee sdp",
+			"call_id", callID,
+			"number", number,
+		)
+		return false
+	}
+
+	calleeRemote := &net.UDPAddr{
+		IP:   net.ParseIP(calleeIP),
+		Port: calleeAudio.Port,
+	}
+
+	// Use the callee-leg socket from the bridge for playback and DTMF collection.
+	session := bridge.Session()
+	if session == nil {
+		a.logger.Warn("follow-me confirm: no media session available",
+			"call_id", callID,
+			"number", number,
+		)
+		return false
+	}
+
+	conn := session.Session().CalleeLeg.RTPConn
+
+	// Create a context with confirmation timeout.
+	confirmCtx, confirmCancel := context.WithTimeout(ctx, confirmTimeout)
+	defer confirmCancel()
+
+	// Start DTMF collector on the callee-leg socket concurrently.
+	collector := media.NewDTMFCollector(conn, a.logger)
+	go collector.Run(confirmCtx)
+
+	// Play the confirmation prompt to the external leg.
+	promptPath := filepath.Join(a.dataDir, "prompts", "system", "followme_confirm.wav")
+	player := media.NewPlayer(conn, calleeRemote, a.logger)
+	if _, err := player.PlayFile(confirmCtx, promptPath); err != nil {
+		a.logger.Warn("follow-me confirm: failed to play prompt",
+			"call_id", callID,
+			"number", number,
+			"error", err,
+		)
+		// Continue to wait for DTMF even if prompt playback fails.
+	}
+
+	// Wait for DTMF digit "1" or timeout.
+	for {
+		select {
+		case <-confirmCtx.Done():
+			a.logger.Info("follow-me confirm: timed out waiting for digit",
+				"call_id", callID,
+				"number", number,
+			)
+			return false
+		case digit, ok := <-collector.Digits:
+			if !ok {
+				return false
+			}
+			if digit == "1" {
+				return true
+			}
+			a.logger.Debug("follow-me confirm: wrong digit received",
+				"call_id", callID,
+				"number", number,
+				"digit", digit,
+			)
+			// Wrong digit — reject immediately.
+			return false
+		}
+	}
+}
+
+// sendFollowMeBYE sends a BYE to an answered external follow-me leg that
+// failed confirmation. The BYE is constructed as an in-dialog request using
+// the INVITE request and 200 OK response.
+func (a *FlowSIPActions) sendFollowMeBYE(inviteReq *sip.Request, inviteRes *sip.Response) {
+	// Request-URI: Contact from the callee's 200 OK, or original INVITE recipient.
+	recipient := &inviteReq.Recipient
+	if contact := inviteRes.Contact(); contact != nil {
+		recipient = &contact.Address
+	}
+
+	bye := sip.NewRequest(sip.BYE, *recipient.Clone())
+
+	// From: same as the original INVITE.
+	if h := inviteReq.From(); h != nil {
+		bye.AppendHeader(sip.HeaderClone(h))
+	}
+
+	// To: from the response (includes remote tag).
+	if h := inviteRes.To(); h != nil {
+		bye.AppendHeader(sip.HeaderClone(h))
+	}
+
+	// Call-ID: same as the dialog.
+	if h := inviteReq.CallID(); h != nil {
+		bye.AppendHeader(sip.HeaderClone(h))
+	}
+
+	// CSeq: new sequence number.
+	cseq := &sip.CSeqHeader{
+		SeqNo:      2,
+		MethodName: sip.BYE,
+	}
+	bye.AppendHeader(cseq)
+
+	maxFwd := sip.MaxForwardsHeader(70)
+	bye.AppendHeader(&maxFwd)
+
+	bye.SetTransport(inviteReq.Transport())
+
+	if err := a.forker.Client().WriteRequest(bye); err != nil {
+		a.logger.Error("failed to send bye for follow-me confirm rejection",
+			"error", err,
+		)
+	}
 }
 
 // sendFollowMeInvite builds and sends an INVITE to a trunk for a follow-me
@@ -592,7 +785,9 @@ type followMeLegResult struct {
 // via outbound trunks. All numbers are dialled at once; the first to answer
 // wins and all other legs are cancelled. Each leg gets its own media bridge
 // allocation; only the winning leg's bridge is completed.
-func (a *FlowSIPActions) RingFollowMeSimultaneous(ctx context.Context, callCtx *flow.CallContext, numbers []models.FollowMeNumber, callerIDName string, callerIDNum string) (*flow.RingResult, error) {
+// When confirm is true, the winning leg must pass a "Press 1" confirmation
+// before being bridged to the caller.
+func (a *FlowSIPActions) RingFollowMeSimultaneous(ctx context.Context, callCtx *flow.CallContext, numbers []models.FollowMeNumber, callerIDName string, callerIDNum string, confirm bool) (*flow.RingResult, error) {
 	if callCtx.Request == nil || callCtx.Transaction == nil {
 		return nil, fmt.Errorf("call context has no sip request or transaction")
 	}
@@ -615,6 +810,7 @@ func (a *FlowSIPActions) RingFollowMeSimultaneous(ctx context.Context, callCtx *
 	a.logger.Info("follow-me simultaneous ring starting",
 		"call_id", callID,
 		"numbers", len(numbers),
+		"confirm", confirm,
 	)
 
 	// Select candidate trunks for outbound dialling.
@@ -750,6 +946,25 @@ func (a *FlowSIPActions) RingFollowMeSimultaneous(ctx context.Context, callCtx *
 			bridge.Release()
 		}
 		return nil, fmt.Errorf("sending ack to trunk: %w", err)
+	}
+
+	// If confirmation is required, play prompt and collect DTMF from winner.
+	if confirm && bridge != nil {
+		confirmed := a.confirmExternalLeg(ctx, outResult, bridge, callID, winner.number)
+		if !confirmed {
+			a.logger.Info("follow-me simultaneous confirmation rejected, sending bye",
+				"call_id", callID,
+				"number", winner.number,
+			)
+			a.sendFollowMeBYE(outResult.req, outResult.res)
+			outResult.tx.Terminate()
+			bridge.Release()
+			return &flow.RingResult{Answered: false}, nil
+		}
+		a.logger.Info("follow-me simultaneous confirmation accepted",
+			"call_id", callID,
+			"number", winner.number,
+		)
 	}
 
 	// Complete media bridge with trunk's SDP.

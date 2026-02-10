@@ -283,6 +283,284 @@ func (a *FlowSIPActions) RingExtension(ctx context.Context, callCtx *flow.CallCo
 	return &flow.RingResult{Answered: true}, nil
 }
 
+// RingGroup rings multiple extensions simultaneously (ring_all strategy).
+// It gathers all active registrations across the provided extensions, checks
+// DND and busy status, then forks INVITE to all available contacts at once.
+func (a *FlowSIPActions) RingGroup(ctx context.Context, callCtx *flow.CallContext, extensions []*models.Extension, ringTimeout int) (*flow.RingResult, error) {
+	if callCtx.Request == nil || callCtx.Transaction == nil {
+		return nil, fmt.Errorf("call context has no sip request or transaction")
+	}
+
+	if len(extensions) == 0 {
+		return &flow.RingResult{NoRegistrations: true}, nil
+	}
+
+	callID := callCtx.CallID
+	now := time.Now()
+
+	// Gather active registrations from all non-DND, non-busy extensions.
+	var allContacts []models.Registration
+	dndCount := 0
+	busyCount := 0
+
+	for _, ext := range extensions {
+		if ext.DND {
+			dndCount++
+			a.logger.Debug("ring group member has dnd enabled",
+				"call_id", callID,
+				"extension", ext.Extension,
+			)
+			continue
+		}
+
+		regs, err := a.registrations.GetByExtensionID(ctx, ext.ID)
+		if err != nil {
+			a.logger.Error("failed to get registrations for ring group member",
+				"call_id", callID,
+				"extension", ext.Extension,
+				"error", err,
+			)
+			continue
+		}
+
+		// Filter expired registrations.
+		active := make([]models.Registration, 0, len(regs))
+		for _, reg := range regs {
+			if reg.Expires.After(now) {
+				active = append(active, reg)
+			}
+		}
+
+		if len(active) == 0 {
+			continue
+		}
+
+		// Check if all devices for this extension are busy.
+		if a.dialogMgr != nil {
+			activeCalls := a.dialogMgr.ActiveCallCountForExtension(ext.ID)
+			if activeCalls > 0 && activeCalls >= len(active) {
+				busyCount++
+				a.logger.Debug("ring group member is busy",
+					"call_id", callID,
+					"extension", ext.Extension,
+				)
+				continue
+			}
+		}
+
+		allContacts = append(allContacts, active...)
+	}
+
+	if len(allContacts) == 0 {
+		if busyCount > 0 {
+			return &flow.RingResult{AllBusy: true}, nil
+		}
+		return &flow.RingResult{NoRegistrations: true}, nil
+	}
+
+	req := callCtx.Request
+	tx := callCtx.Transaction
+
+	a.logger.Info("ringing group via flow",
+		"call_id", callID,
+		"members", len(extensions),
+		"contacts", len(allContacts),
+		"ring_timeout", ringTimeout,
+	)
+
+	// Allocate media bridge for RTP proxying.
+	var bridge *MediaBridge
+	var calleeSDP []byte
+	if len(req.Body()) > 0 && a.sessionMgr != nil {
+		var err error
+		bridge, calleeSDP, err = AllocateMediaBridge(a.sessionMgr, req.Body(), callID, a.proxyIP, a.logger)
+		if err != nil {
+			a.logger.Error("failed to allocate media bridge for ring group",
+				"call_id", callID,
+				"error", err,
+			)
+			return nil, fmt.Errorf("allocating media bridge: %w", err)
+		}
+	}
+
+	// Set ring timeout.
+	ringDuration := time.Duration(ringTimeout) * time.Second
+	forkCtx, cancelFork := context.WithTimeout(ctx, ringDuration)
+
+	// Register as pending so the CANCEL handler can find it.
+	a.pendingMgr.Add(&PendingCall{
+		CallID:     callID,
+		CallerTx:   tx,
+		CallerReq:  req,
+		CancelFork: cancelFork,
+		Bridge:     bridge,
+	})
+
+	// Fork INVITE to all registered contacts across all member extensions.
+	result := a.forker.Fork(forkCtx, req, tx, allContacts, nil, callID, calleeSDP)
+
+	// Remove from pending calls.
+	pc := a.pendingMgr.Remove(callID)
+	cancelFork()
+
+	if pc == nil {
+		a.logger.Info("ring group completed but call was already cancelled",
+			"call_id", callID,
+		)
+		if result.Answered && result.AnsweringTx != nil {
+			result.AnsweringTx.Terminate()
+		}
+		return &flow.RingResult{}, fmt.Errorf("call cancelled during ringing")
+	}
+
+	if result.Error != nil {
+		if bridge != nil {
+			bridge.Release()
+		}
+		return nil, fmt.Errorf("forking to ring group: %w", result.Error)
+	}
+
+	if result.AllBusy {
+		if bridge != nil {
+			bridge.Release()
+		}
+		return &flow.RingResult{AllBusy: true}, nil
+	}
+
+	if !result.Answered {
+		if bridge != nil {
+			bridge.Release()
+		}
+		return &flow.RingResult{Answered: false}, nil
+	}
+
+	// A device answered — complete media bridging and relay the 200 OK.
+	a.logger.Info("ring group member answered via flow",
+		"call_id", callID,
+		"contact", result.AnsweringContact.ContactURI,
+	)
+
+	// Send ACK to the answering callee device.
+	ackReq := buildACKFor2xx(result.AnsweringLeg.req, result.AnswerResponse)
+	if err := a.forker.Client().WriteRequest(ackReq); err != nil {
+		a.logger.Error("failed to send ack to callee via ring group",
+			"call_id", callID,
+			"contact", result.AnsweringContact.ContactURI,
+			"error", err,
+		)
+		result.AnsweringTx.Terminate()
+		if bridge != nil {
+			bridge.Release()
+		}
+		return nil, fmt.Errorf("sending ack to callee: %w", err)
+	}
+
+	// Complete media bridge with callee's SDP.
+	var mediaSession *media.MediaSession
+	okBody := result.AnswerResponse.Body()
+	if bridge != nil && len(result.AnswerResponse.Body()) > 0 {
+		rewrittenForCaller, err := bridge.CompleteMediaBridge(result.AnswerResponse.Body())
+		if err != nil {
+			a.logger.Error("failed to complete media bridge via ring group",
+				"call_id", callID,
+				"error", err,
+			)
+		} else {
+			okBody = rewrittenForCaller
+			mediaSession = bridge.Session()
+		}
+	}
+
+	// Forward the 200 OK to the caller.
+	okResponse := sip.NewResponseFromRequest(req, 200, "OK", okBody)
+	if len(okBody) > 0 {
+		okResponse.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+	}
+
+	if err := tx.Respond(okResponse); err != nil {
+		a.logger.Error("failed to relay 200 ok to caller via ring group",
+			"call_id", callID,
+			"error", err,
+		)
+		result.AnsweringTx.Terminate()
+		if mediaSession != nil {
+			mediaSession.Release()
+		}
+		return nil, fmt.Errorf("relaying 200 ok: %w", err)
+	}
+
+	// Determine which extension answered based on registration.
+	var answeredExt *models.Extension
+	if result.AnsweringContact != nil && result.AnsweringContact.ExtensionID != nil {
+		for _, ext := range extensions {
+			if ext.ID == *result.AnsweringContact.ExtensionID {
+				answeredExt = ext
+				break
+			}
+		}
+	}
+
+	calledNum := ""
+	if answeredExt != nil {
+		calledNum = answeredExt.Extension
+	}
+
+	// Track the active call as a dialog.
+	dialog := &Dialog{
+		CallID:       callID,
+		Direction:    CallTypeInbound,
+		TrunkID:      callCtx.TrunkID,
+		CallerIDName: callCtx.CallerIDName,
+		CallerIDNum:  callCtx.CallerIDNum,
+		CalledNum:    calledNum,
+		StartTime:    callCtx.StartTime,
+		CallerTx:     tx,
+		CallerReq:    req,
+		CalleeTx:     result.AnsweringTx,
+		CalleeReq:    result.AnsweringLeg.req,
+		CalleeRes:    result.AnswerResponse,
+		Media:        mediaSession,
+		Caller:       CallLeg{},
+		Callee: CallLeg{
+			Extension:    answeredExt,
+			Registration: result.AnsweringContact,
+			ContactURI:   result.AnsweringContact.ContactURI,
+		},
+	}
+
+	// Extract dialog tags.
+	if from := req.From(); from != nil {
+		if tag, ok := from.Params.Get("tag"); ok {
+			dialog.Caller.FromTag = tag
+		}
+	}
+	if to := result.AnswerResponse.To(); to != nil {
+		if tag, ok := to.Params.Get("tag"); ok {
+			dialog.Callee.ToTag = tag
+		}
+	}
+
+	// Extract callee remote target from Contact header in 200 OK.
+	if contact := result.AnswerResponse.Contact(); contact != nil {
+		uri := contact.Address.Clone()
+		dialog.Callee.RemoteTarget = uri
+	}
+
+	a.dialogMgr.CreateDialog(dialog)
+
+	// Update CDR with answer time.
+	a.updateCDROnAnswer(callID)
+
+	a.logger.Info("ring group call dialog established",
+		"call_id", callID,
+		"answered_by", calledNum,
+		"active_calls", a.dialogMgr.ActiveCallCount(),
+		"media_bridged", mediaSession != nil,
+	)
+
+	return &flow.RingResult{Answered: true}, nil
+}
+
 // updateCDROnAnswer updates the CDR with the answer time.
 func (a *FlowSIPActions) updateCDROnAnswer(callID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -33,4 +33,10 @@ type SIPActions interface {
 	// seconds for an answer, and manages media bridging and dialog creation.
 	// The callCtx provides the inbound call's SIP request and transaction.
 	RingExtension(ctx context.Context, callCtx *CallContext, ext *models.Extension, ringTimeout int) (*RingResult, error)
+
+	// RingGroup rings multiple extensions simultaneously (ring_all strategy).
+	// It gathers all active registrations from the provided extensions,
+	// forks INVITE to all of them, and returns the result. The first device
+	// to answer wins; all other forks are cancelled.
+	RingGroup(ctx context.Context, callCtx *CallContext, extensions []*models.Extension, ringTimeout int) (*RingResult, error)
 }

@@ -10,7 +10,7 @@
 
 - [x] Initialize Go module (`github.com/flowpbx/flowpbx`)
 - [x] Create directory structure: `cmd/flowpbx/`, `cmd/pushgw/`, `internal/config/`, `internal/database/`, `internal/api/`, `internal/sip/`, `internal/media/`, `internal/flow/`, `internal/voicemail/`, `internal/recording/`, `internal/push/`, `internal/license/`, `internal/pushgw/`
-- [ ] Create `cmd/flowpbx/main.go` entry point (boots HTTP server, placeholder SIP init)
+- [x] Create `cmd/flowpbx/main.go` entry point (boots HTTP server, placeholder SIP init)
 - [ ] Create `cmd/pushgw/main.go` entry point (boots push gateway HTTP server)
 - [ ] Create Makefile with targets: `build`, `dev`, `test`, `lint`, `ui-build`, `release`
 - [ ] Set up cross-compilation in Makefile for linux/amd64 and linux/arm64

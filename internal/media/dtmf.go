@@ -1,8 +1,11 @@
 package media
 
 import (
+	"errors"
 	"log/slog"
 	"net"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -56,6 +59,119 @@ func DTMFEventName(event uint8) string {
 		return string(rune('A' + event - 12))
 	default:
 		return "?"
+	}
+}
+
+// SIP INFO DTMF fallback
+//
+// Some endpoints send DTMF digits via SIP INFO instead of RFC 2833 in-band
+// telephone-event. Two body formats are common:
+//
+//  1. Content-Type: application/dtmf-relay
+//     Signal=5\r\nDuration=160\r\n
+//
+//  2. Content-Type: application/dtmf
+//     5
+
+// DTMFInfo represents a DTMF digit received via SIP INFO request.
+type DTMFInfo struct {
+	Signal   string // The DTMF digit: "0"-"9", "*", "#", "A"-"D"
+	Duration int    // Duration in milliseconds (0 if not specified)
+}
+
+// ErrInvalidDTMFInfo is returned when a SIP INFO body cannot be parsed as DTMF.
+var ErrInvalidDTMFInfo = errors.New("invalid dtmf info body")
+
+// validDTMFSignals is the set of valid DTMF signal characters.
+var validDTMFSignals = map[string]bool{
+	"0": true, "1": true, "2": true, "3": true, "4": true,
+	"5": true, "6": true, "7": true, "8": true, "9": true,
+	"*": true, "#": true,
+	"A": true, "B": true, "C": true, "D": true,
+}
+
+// ParseDTMFInfoRelay parses a SIP INFO body with Content-Type application/dtmf-relay.
+// The expected format is:
+//
+//	Signal=<digit>\r\nDuration=<ms>\r\n
+//
+// Signal is required. Duration defaults to 0 if missing or unparseable.
+func ParseDTMFInfoRelay(body []byte) (*DTMFInfo, error) {
+	text := strings.TrimSpace(string(body))
+	if text == "" {
+		return nil, ErrInvalidDTMFInfo
+	}
+
+	info := &DTMFInfo{}
+	foundSignal := false
+
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+
+		switch strings.ToLower(key) {
+		case "signal":
+			sig := strings.ToUpper(value)
+			if !validDTMFSignals[sig] {
+				return nil, ErrInvalidDTMFInfo
+			}
+			info.Signal = sig
+			foundSignal = true
+		case "duration":
+			d, err := strconv.Atoi(value)
+			if err == nil && d >= 0 {
+				info.Duration = d
+			}
+		}
+	}
+
+	if !foundSignal {
+		return nil, ErrInvalidDTMFInfo
+	}
+	return info, nil
+}
+
+// ParseDTMFInfoBody parses a SIP INFO body with Content-Type application/dtmf.
+// The body should contain a single DTMF digit character.
+func ParseDTMFInfoBody(body []byte) (*DTMFInfo, error) {
+	sig := strings.TrimSpace(string(body))
+	sig = strings.ToUpper(sig)
+	if !validDTMFSignals[sig] {
+		return nil, ErrInvalidDTMFInfo
+	}
+	return &DTMFInfo{Signal: sig}, nil
+}
+
+// ParseSIPInfoDTMF detects and parses DTMF from a SIP INFO request body based
+// on the Content-Type header. Supported content types:
+//   - application/dtmf-relay
+//   - application/dtmf
+//
+// Returns ErrInvalidDTMFInfo if the content type is unsupported or the body
+// cannot be parsed.
+func ParseSIPInfoDTMF(contentType string, body []byte) (*DTMFInfo, error) {
+	ct := strings.TrimSpace(strings.ToLower(contentType))
+	// Strip any parameters (e.g., charset).
+	if idx := strings.IndexByte(ct, ';'); idx >= 0 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+
+	switch ct {
+	case "application/dtmf-relay":
+		return ParseDTMFInfoRelay(body)
+	case "application/dtmf":
+		return ParseDTMFInfoBody(body)
+	default:
+		return nil, ErrInvalidDTMFInfo
 	}
 }
 

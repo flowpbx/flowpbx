@@ -1,6 +1,7 @@
 package media
 
 import (
+	"errors"
 	"log/slog"
 	"net"
 	"testing"
@@ -335,4 +336,219 @@ func TestAudioWithDTMFRelay(t *testing.T) {
 			t.Error("expected timeout (packet should be dropped), but received data")
 		}
 	})
+}
+
+func TestParseDTMFInfoRelay(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantErr  bool
+		signal   string
+		duration int
+	}{
+		{
+			"digit 5 with duration",
+			"Signal=5\r\nDuration=160\r\n",
+			false, "5", 160,
+		},
+		{
+			"digit 0 with duration",
+			"Signal=0\r\nDuration=250\r\n",
+			false, "0", 250,
+		},
+		{
+			"star",
+			"Signal=*\r\nDuration=100\r\n",
+			false, "*", 100,
+		},
+		{
+			"hash",
+			"Signal=#\r\nDuration=200\r\n",
+			false, "#", 200,
+		},
+		{
+			"letter A",
+			"Signal=A\r\nDuration=160\r\n",
+			false, "A", 160,
+		},
+		{
+			"letter D",
+			"Signal=D\r\nDuration=160\r\n",
+			false, "D", 160,
+		},
+		{
+			"lowercase signal normalized",
+			"Signal=a\r\nDuration=160\r\n",
+			false, "A", 160,
+		},
+		{
+			"signal only no duration",
+			"Signal=5\r\n",
+			false, "5", 0,
+		},
+		{
+			"LF line endings",
+			"Signal=3\nDuration=160\n",
+			false, "3", 160,
+		},
+		{
+			"extra whitespace",
+			"  Signal = 7 \r\n Duration = 300 \r\n",
+			false, "7", 300,
+		},
+		{
+			"empty body",
+			"",
+			true, "", 0,
+		},
+		{
+			"no signal field",
+			"Duration=160\r\n",
+			true, "", 0,
+		},
+		{
+			"invalid signal character",
+			"Signal=X\r\nDuration=160\r\n",
+			true, "", 0,
+		},
+		{
+			"invalid duration ignored",
+			"Signal=5\r\nDuration=abc\r\n",
+			false, "5", 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseDTMFInfoRelay([]byte(tt.body))
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got %+v", got)
+				}
+				if !errors.Is(err, ErrInvalidDTMFInfo) {
+					t.Errorf("expected ErrInvalidDTMFInfo, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Signal != tt.signal {
+				t.Errorf("Signal = %q, want %q", got.Signal, tt.signal)
+			}
+			if got.Duration != tt.duration {
+				t.Errorf("Duration = %d, want %d", got.Duration, tt.duration)
+			}
+		})
+	}
+}
+
+func TestParseDTMFInfoBody(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+		signal  string
+	}{
+		{"digit 5", "5", false, "5"},
+		{"digit 0", "0", false, "0"},
+		{"star", "*", false, "*"},
+		{"hash", "#", false, "#"},
+		{"letter A", "A", false, "A"},
+		{"lowercase b", "b", false, "B"},
+		{"with whitespace", " 3 ", false, "3"},
+		{"empty", "", true, ""},
+		{"invalid char", "X", true, ""},
+		{"multiple chars", "12", true, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseDTMFInfoBody([]byte(tt.body))
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Signal != tt.signal {
+				t.Errorf("Signal = %q, want %q", got.Signal, tt.signal)
+			}
+			if got.Duration != 0 {
+				t.Errorf("Duration = %d, want 0", got.Duration)
+			}
+		})
+	}
+}
+
+func TestParseSIPInfoDTMF(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		body        string
+		wantErr     bool
+		signal      string
+		duration    int
+	}{
+		{
+			"dtmf-relay content type",
+			"application/dtmf-relay",
+			"Signal=5\r\nDuration=160\r\n",
+			false, "5", 160,
+		},
+		{
+			"dtmf content type",
+			"application/dtmf",
+			"5",
+			false, "5", 0,
+		},
+		{
+			"dtmf-relay with charset param",
+			"application/dtmf-relay; charset=utf-8",
+			"Signal=9\r\nDuration=200\r\n",
+			false, "9", 200,
+		},
+		{
+			"uppercase content type",
+			"Application/DTMF-Relay",
+			"Signal=1\r\nDuration=160\r\n",
+			false, "1", 160,
+		},
+		{
+			"unsupported content type",
+			"application/sdp",
+			"v=0\r\n",
+			true, "", 0,
+		},
+		{
+			"empty content type",
+			"",
+			"5",
+			true, "", 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseSIPInfoDTMF(tt.contentType, []byte(tt.body))
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Signal != tt.signal {
+				t.Errorf("Signal = %q, want %q", got.Signal, tt.signal)
+			}
+			if got.Duration != tt.duration {
+				t.Errorf("Duration = %d, want %d", got.Duration, tt.duration)
+			}
+		})
+	}
 }

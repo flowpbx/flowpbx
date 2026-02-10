@@ -11,6 +11,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
+	"github.com/flowpbx/flowpbx/internal/media"
 )
 
 // Server wraps the sipgo SIP stack with FlowPBX-specific handlers.
@@ -71,6 +72,7 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 func (s *Server) registerHandlers() {
 	s.srv.OnRegister(s.registrar.HandleRegister)
 	s.srv.OnOptions(s.handleOptions)
+	s.srv.OnInfo(s.handleInfo)
 }
 
 // Start begins listening on configured transports. It blocks until the
@@ -169,9 +171,62 @@ func (s *Server) handleOptions(req *sip.Request, tx sip.ServerTransaction) {
 
 	res := sip.NewResponseFromRequest(req, 200, "OK", nil)
 	res.AppendHeader(sip.NewHeader("Accept", "application/sdp"))
-	res.AppendHeader(sip.NewHeader("Allow", "INVITE, ACK, CANCEL, BYE, REGISTER, OPTIONS"))
+	res.AppendHeader(sip.NewHeader("Allow", "INVITE, ACK, CANCEL, BYE, REGISTER, OPTIONS, INFO"))
 
 	if err := tx.Respond(res); err != nil {
 		s.logger.Error("failed to respond to options", "error", err)
+	}
+}
+
+// handleInfo processes SIP INFO requests. Currently detects DTMF digits
+// sent via SIP INFO as a fallback for endpoints that do not support
+// RFC 2833 telephone-event.
+func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
+	callID := ""
+	if cid := req.CallID(); cid != nil {
+		callID = cid.Value()
+	}
+
+	ct := req.ContentType()
+	if ct == nil {
+		s.logger.Debug("sip info without content-type, ignoring",
+			"call_id", callID,
+			"source", req.Source(),
+		)
+		res := sip.NewResponseFromRequest(req, 200, "OK", nil)
+		if err := tx.Respond(res); err != nil {
+			s.logger.Error("failed to respond to info", "error", err)
+		}
+		return
+	}
+
+	dtmfInfo, err := media.ParseSIPInfoDTMF(ct.Value(), req.Body())
+	if err != nil {
+		// Not a DTMF INFO — respond 200 OK but don't process further.
+		s.logger.Debug("sip info with unsupported content type",
+			"content_type", ct.Value(),
+			"call_id", callID,
+			"source", req.Source(),
+		)
+		res := sip.NewResponseFromRequest(req, 200, "OK", nil)
+		if err := tx.Respond(res); err != nil {
+			s.logger.Error("failed to respond to info", "error", err)
+		}
+		return
+	}
+
+	s.logger.Info("sip info dtmf received",
+		"signal", dtmfInfo.Signal,
+		"duration", dtmfInfo.Duration,
+		"call_id", callID,
+		"source", req.Source(),
+	)
+
+	// TODO: Route the DTMF event to the call's flow engine for IVR processing.
+	// This will be connected in Phase 1C when the IVR DTMF collection is implemented.
+
+	res := sip.NewResponseFromRequest(req, 200, "OK", nil)
+	if err := tx.Respond(res); err != nil {
+		s.logger.Error("failed to respond to info", "error", err)
 	}
 }

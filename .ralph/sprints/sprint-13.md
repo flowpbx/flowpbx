@@ -8,7 +8,7 @@
 
 ## Tasks
 
-- [ ] Create `internal/media/player.go` — audio prompt playback: read WAV file → packetize G.711 → send via RTP
+- [x] Create `internal/media/player.go` — audio prompt playback: read WAV file → packetize G.711 → send via RTP
 - [ ] Embed default system prompts in binary (WAV, G.711 format) via `//go:embed`
 - [ ] Extract default prompts to filesystem on first boot (`$DATA_DIR/prompts/system/`)
 - [ ] Create `internal/media/dtmf.go` — DTMF digit collection from RFC 2833 events during playback

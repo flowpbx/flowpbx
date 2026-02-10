@@ -407,6 +407,22 @@ type outboundResult struct {
 	err        error
 }
 
+// applyPrefixRules transforms a dialed number according to trunk prefix rules.
+// It strips the configured number of leading digits, then prepends the configured
+// prefix. For example, with PrefixStrip=1 and PrefixAdd="0044", dialing
+// "07700900000" becomes "00447700900000".
+func applyPrefixRules(number string, strip int, add string) string {
+	if strip > 0 && strip < len(number) {
+		number = number[strip:]
+	} else if strip >= len(number) {
+		number = ""
+	}
+	if add != "" {
+		number = add + number
+	}
+	return number
+}
+
 // sendOutboundInvite builds and sends an INVITE to the trunk for an outbound call.
 // It handles digest authentication challenges (401/407) and relays provisional
 // responses back to the caller.
@@ -419,8 +435,21 @@ func (h *InviteHandler) sendOutboundInvite(
 	callID string,
 	sdpBody []byte,
 ) *outboundResult {
+	// Apply trunk prefix manipulation rules to the dialed number.
+	dialedNumber := applyPrefixRules(ic.RequestURI, trunk.PrefixStrip, trunk.PrefixAdd)
+
+	if dialedNumber != ic.RequestURI {
+		h.logger.Debug("applied prefix rules to dialed number",
+			"call_id", callID,
+			"trunk", trunk.Name,
+			"original", ic.RequestURI,
+			"transformed", dialedNumber,
+			"prefix_strip", trunk.PrefixStrip,
+			"prefix_add", trunk.PrefixAdd,
+		)
+	}
+
 	// Build the INVITE Request-URI: sip:<dialed_number>@<trunk_host>:<trunk_port>
-	dialedNumber := ic.RequestURI
 	recipientStr := fmt.Sprintf("sip:%s@%s:%d", dialedNumber, trunk.Host, trunk.Port)
 	var recipient sip.Uri
 	if err := sip.ParseUri(recipientStr, &recipient); err != nil {

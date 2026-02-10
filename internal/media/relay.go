@@ -168,3 +168,11 @@ func StartPCMURelay(session *Session, callerRemote, calleeRemote *net.UDPAddr, l
 	relay.Start()
 	return relay
 }
+
+// StartOpusRelay creates and starts a relay for Opus (payload type 111)
+// passthrough between the two legs of the session.
+func StartOpusRelay(session *Session, callerRemote, calleeRemote *net.UDPAddr, logger *slog.Logger) *Relay {
+	relay := NewRelay(session, callerRemote, calleeRemote, []int{PayloadOpus}, logger)
+	relay.Start()
+	return relay
+}

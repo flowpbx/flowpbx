@@ -300,3 +300,106 @@ func TestPCMURelay(t *testing.T) {
 		}
 	})
 }
+
+func TestOpusRelay(t *testing.T) {
+	logger := slog.Default()
+
+	callerPair, callerLocalAddr := allocateTestPair(t)
+	defer callerPair.Close()
+	calleePair, calleeLocalAddr := allocateTestPair(t)
+	defer calleePair.Close()
+
+	callerPhone, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen caller phone: %v", err)
+	}
+	defer callerPhone.Close()
+
+	calleePhone, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen callee phone: %v", err)
+	}
+	defer calleePhone.Close()
+
+	callerPhoneAddr := callerPhone.LocalAddr().(*net.UDPAddr)
+	calleePhoneAddr := calleePhone.LocalAddr().(*net.UDPAddr)
+
+	session := &Session{
+		ID:        "test-session-opus",
+		CallID:    "test-call-opus",
+		CallerLeg: callerPair,
+		CalleeLeg: calleePair,
+		CreatedAt: time.Now(),
+		state:     SessionStateNew,
+	}
+
+	relay := StartOpusRelay(session, callerPhoneAddr, calleePhoneAddr, logger)
+	defer relay.Stop()
+
+	if session.State() != SessionStateActive {
+		t.Fatalf("expected session state Active, got %s", session.State())
+	}
+
+	t.Run("caller to callee Opus forwarded", func(t *testing.T) {
+		pkt := makeTestRTPPacket(PayloadOpus, []byte{0x48, 0xC0, 0x01, 0x02})
+
+		_, err := callerPhone.WriteToUDP(pkt, callerLocalAddr)
+		if err != nil {
+			t.Fatalf("write: %v", err)
+		}
+
+		calleePhone.SetReadDeadline(time.Now().Add(2 * time.Second))
+		buf := make([]byte, maxRTPPacket)
+		n, _, err := calleePhone.ReadFromUDP(buf)
+		if err != nil {
+			t.Fatalf("callee phone read: %v", err)
+		}
+
+		if n != len(pkt) {
+			t.Errorf("received %d bytes, want %d", n, len(pkt))
+		}
+		if rtpPayloadType(buf[:n]) != PayloadOpus {
+			t.Errorf("payload type = %d, want %d", rtpPayloadType(buf[:n]), PayloadOpus)
+		}
+	})
+
+	t.Run("callee to caller Opus forwarded", func(t *testing.T) {
+		pkt := makeTestRTPPacket(PayloadOpus, []byte{0x78, 0x01, 0x33})
+
+		_, err := calleePhone.WriteToUDP(pkt, calleeLocalAddr)
+		if err != nil {
+			t.Fatalf("write: %v", err)
+		}
+
+		callerPhone.SetReadDeadline(time.Now().Add(2 * time.Second))
+		buf := make([]byte, maxRTPPacket)
+		n, _, err := callerPhone.ReadFromUDP(buf)
+		if err != nil {
+			t.Fatalf("caller phone read: %v", err)
+		}
+
+		if n != len(pkt) {
+			t.Errorf("received %d bytes, want %d", n, len(pkt))
+		}
+		if rtpPayloadType(buf[:n]) != PayloadOpus {
+			t.Errorf("payload type = %d, want %d", rtpPayloadType(buf[:n]), PayloadOpus)
+		}
+	})
+
+	t.Run("non-Opus packet dropped", func(t *testing.T) {
+		// Send a PCMA packet — should be dropped by the Opus-only relay.
+		pkt := makeTestRTPPacket(PayloadPCMA, []byte{0x01, 0x02})
+
+		_, err := callerPhone.WriteToUDP(pkt, callerLocalAddr)
+		if err != nil {
+			t.Fatalf("write: %v", err)
+		}
+
+		calleePhone.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		buf := make([]byte, maxRTPPacket)
+		_, _, err = calleePhone.ReadFromUDP(buf)
+		if err == nil {
+			t.Error("expected timeout (packet should be dropped), but received data")
+		}
+	})
+}

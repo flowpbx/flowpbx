@@ -12,10 +12,11 @@ import (
 // It is created on-demand when the first participant joins and destroyed when
 // the last participant leaves.
 type ConferenceRoom struct {
-	BridgeID   int64
-	BridgeName string
-	Mixer      *Mixer
-	MaxMembers int
+	BridgeID      int64
+	BridgeName    string
+	Mixer         *Mixer
+	MaxMembers    int
+	AnnounceJoins bool
 
 	// done is closed when the room is empty and should be removed.
 	done chan struct{}
@@ -61,23 +62,38 @@ type JoinResult struct {
 	Port int
 }
 
+// conferenceJoinToneHz is the frequency (Hz) of the tone played when a
+// participant joins or leaves a conference with announce_joins enabled.
+const conferenceJoinToneHz = 440.0
+
+// conferenceJoinToneAmplitude is the amplitude (0.0–1.0) of the join/leave tone.
+const conferenceJoinToneAmplitude = 0.25
+
+// conferenceJoinToneDurationMs is the duration in milliseconds of the join tone.
+const conferenceJoinToneDurationMs = 200
+
+// conferenceLeaveToneDurationMs is the duration in milliseconds of the leave tone.
+// A shorter tone distinguishes leave from join.
+const conferenceLeaveToneDurationMs = 100
+
 // Join adds a participant to a conference room. If the room does not exist,
 // it is created and the mixer is started. Returns the allocated RTP socket pair
 // for SDP rewriting.
 //
 // The caller must call Leave when the participant exits the conference.
-func (cm *ConferenceManager) Join(ctx context.Context, bridgeID int64, bridgeName string, maxMembers int, participantID string, remote *net.UDPAddr, payloadType int) (*JoinResult, error) {
+func (cm *ConferenceManager) Join(ctx context.Context, bridgeID int64, bridgeName string, maxMembers int, announceJoins bool, participantID string, remote *net.UDPAddr, payloadType int) (*JoinResult, error) {
 	cm.mu.Lock()
 
 	room, exists := cm.rooms[bridgeID]
 	if !exists {
 		mixer := NewMixer(cm.proxy, cm.logger)
 		room = &ConferenceRoom{
-			BridgeID:   bridgeID,
-			BridgeName: bridgeName,
-			Mixer:      mixer,
-			MaxMembers: maxMembers,
-			done:       make(chan struct{}),
+			BridgeID:      bridgeID,
+			BridgeName:    bridgeName,
+			Mixer:         mixer,
+			MaxMembers:    maxMembers,
+			AnnounceJoins: announceJoins,
+			done:          make(chan struct{}),
 		}
 		cm.rooms[bridgeID] = room
 		mixer.Start(ctx)
@@ -86,6 +102,7 @@ func (cm *ConferenceManager) Join(ctx context.Context, bridgeID int64, bridgeNam
 			"bridge_id", bridgeID,
 			"bridge_name", bridgeName,
 			"max_members", maxMembers,
+			"announce_joins", announceJoins,
 		)
 	}
 
@@ -112,6 +129,11 @@ func (cm *ConferenceManager) Join(ctx context.Context, bridgeID int64, bridgeNam
 		"participants", room.Mixer.ParticipantCount(),
 	)
 
+	// Play join tone to all participants if announce_joins is enabled.
+	if room.AnnounceJoins {
+		room.Mixer.InjectTone(conferenceJoinToneHz, conferenceJoinToneAmplitude, conferenceJoinToneDurationMs)
+	}
+
 	return &JoinResult{
 		Room:   room,
 		Socket: socket,
@@ -134,12 +156,20 @@ func (cm *ConferenceManager) Leave(bridgeID int64, participantID string) error {
 		return fmt.Errorf("removing participant from conference: %w", err)
 	}
 
+	remaining := room.Mixer.ParticipantCount()
+
 	cm.logger.Info("participant left conference",
 		"bridge_id", bridgeID,
 		"bridge_name", room.BridgeName,
 		"participant_id", participantID,
-		"remaining", room.Mixer.ParticipantCount(),
+		"remaining", remaining,
 	)
+
+	// Play leave tone to remaining participants if announce_joins is enabled
+	// and the room is not empty.
+	if room.AnnounceJoins && remaining > 0 {
+		room.Mixer.InjectTone(conferenceJoinToneHz, conferenceJoinToneAmplitude, conferenceLeaveToneDurationMs)
+	}
 
 	// If room is empty, destroy it.
 	cm.mu.Lock()

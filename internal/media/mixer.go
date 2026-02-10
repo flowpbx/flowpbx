@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"net"
 	"os"
@@ -216,6 +217,12 @@ type Mixer struct {
 	participants map[string]*MixerParticipant
 	stopped      atomic.Bool
 	mixDone      chan struct{}
+
+	// toneMu guards toneFrames and tonePos. When toneFrames is non-nil,
+	// the mix loop adds the tone audio to every participant's output.
+	toneMu     sync.Mutex
+	toneFrames []int16 // pre-generated linear PCM tone samples
+	tonePos    int     // current read position in toneFrames
 }
 
 // NewMixer creates a new conference audio mixer backed by the given proxy
@@ -468,6 +475,11 @@ func (m *Mixer) mixCycle(readBuf, outPkt []byte) {
 		p.hasAudio = true
 	}
 
+	// Drain any active tone samples for this cycle. The tone is added to
+	// every participant's output so all hear the join/leave notification.
+	var toneBuf [samplesPerPacket]int16
+	hasTone := m.drainTone(toneBuf[:], samplesPerPacket) > 0
+
 	// Phase 2: For each participant, compute the N-1 mix (sum of all others)
 	// and send the mixed packet.
 	var mixBuf [samplesPerPacket]int32
@@ -489,6 +501,14 @@ func (m *Mixer) mixCycle(readBuf, outPkt []byte) {
 			hasInput = true
 			for i := 0; i < samplesPerPacket; i++ {
 				mixBuf[i] += int32(src.lastAudio[i])
+			}
+		}
+
+		// Mix in the tone if active.
+		if hasTone {
+			hasInput = true
+			for i := 0; i < samplesPerPacket; i++ {
+				mixBuf[i] += int32(toneBuf[i])
 			}
 		}
 
@@ -573,6 +593,76 @@ func (m *Mixer) Stats() MixerStats {
 		ParticipantCount: len(m.participants),
 		ParticipantIDs:   ids,
 	}
+}
+
+// InjectTone pre-generates a short beep and queues it to be mixed into
+// all participants' output during the next mix cycles. The tone is a
+// 440 Hz sine wave at the given amplitude (0.0–1.0) lasting durationMs.
+// It is safe to call from any goroutine; the mix loop drains the tone
+// buffer automatically.
+func (m *Mixer) InjectTone(frequencyHz float64, amplitude float64, durationMs int) {
+	samples := generateBeep(frequencyHz, amplitude, durationMs)
+
+	m.toneMu.Lock()
+	m.toneFrames = samples
+	m.tonePos = 0
+	m.toneMu.Unlock()
+
+	m.logger.Debug("tone injected into conference",
+		"frequency_hz", frequencyHz,
+		"duration_ms", durationMs,
+	)
+}
+
+// generateBeep creates linear PCM samples for a sine-wave tone at the
+// given frequency, amplitude (0.0–1.0 of int16 range), and duration.
+// Sample rate is 8000 Hz to match the G.711 conference clock.
+func generateBeep(frequencyHz float64, amplitude float64, durationMs int) []int16 {
+	const sampleRate = 8000
+	totalSamples := sampleRate * durationMs / 1000
+	samples := make([]int16, totalSamples)
+	peak := amplitude * 32767.0
+
+	for i := 0; i < totalSamples; i++ {
+		t := float64(i) / float64(sampleRate)
+		samples[i] = int16(peak * math.Sin(2.0*math.Pi*frequencyHz*t))
+	}
+
+	return samples
+}
+
+// drainTone copies up to n samples from the active tone buffer into dst,
+// returning the number of samples written. Advances the read position.
+// When the tone is fully drained, the buffer is cleared.
+func (m *Mixer) drainTone(dst []int16, n int) int {
+	m.toneMu.Lock()
+	defer m.toneMu.Unlock()
+
+	if m.toneFrames == nil {
+		return 0
+	}
+
+	remaining := len(m.toneFrames) - m.tonePos
+	if remaining <= 0 {
+		m.toneFrames = nil
+		m.tonePos = 0
+		return 0
+	}
+
+	count := n
+	if count > remaining {
+		count = remaining
+	}
+	copy(dst[:count], m.toneFrames[m.tonePos:m.tonePos+count])
+	m.tonePos += count
+
+	// Clear when fully consumed.
+	if m.tonePos >= len(m.toneFrames) {
+		m.toneFrames = nil
+		m.tonePos = 0
+	}
+
+	return count
 }
 
 // RTPTimestamp extracts the 32-bit RTP timestamp from a packet header.

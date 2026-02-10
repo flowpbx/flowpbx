@@ -12,8 +12,8 @@
 - [x] Implement conference room management: create room, join participant, leave, kick
 - [x] Implement PIN-protected conference entry (play prompt, collect digits, validate)
 - [x] Implement mute/unmute per participant
-- [ ] Implement mute_on_join option (join muted by default)
-- [ ] Implement announce_joins option (play tone or announcement on join/leave)
+- [x] Implement mute_on_join option (join muted by default)
+- [x] Implement announce_joins option (play tone or announcement on join/leave)
 - [ ] Enforce max_members limit per conference bridge
 - [ ] Implement conference recording (mix all participant audio → single WAV output)
 - [ ] Track active conference participants in memory

@@ -1,6 +1,8 @@
 package media
 
 import (
+	"context"
+	"encoding/binary"
 	"errors"
 	"log/slog"
 	"net"
@@ -550,5 +552,349 @@ func TestParseSIPInfoDTMF(t *testing.T) {
 				t.Errorf("Duration = %d, want %d", got.Duration, tt.duration)
 			}
 		})
+	}
+}
+
+// makeDTMFRTPPacket creates an RTP packet with an RFC 2833 telephone-event
+// payload. The timestamp is set to ts for deduplication testing.
+func makeDTMFRTPPacket(event uint8, end bool, volume uint8, duration uint16, ts uint32) []byte {
+	header := make([]byte, minRTPHeader)
+	header[0] = 0x80 // V=2
+	header[1] = byte(PayloadTelephoneEvent & 0x7F)
+	binary.BigEndian.PutUint16(header[2:4], 1)   // seq
+	binary.BigEndian.PutUint32(header[4:8], ts)  // timestamp
+	binary.BigEndian.PutUint32(header[8:12], 42) // SSRC
+
+	payload := make([]byte, dtmfPayloadSize)
+	payload[0] = event
+	payload[1] = volume & 0x3F
+	if end {
+		payload[1] |= 0x80
+	}
+	binary.BigEndian.PutUint16(payload[2:4], duration)
+
+	return append(header, payload...)
+}
+
+func TestDTMFCollector_SingleDigit(t *testing.T) {
+	logger := slog.Default()
+
+	// Create UDP pair: sender (simulating caller phone) → collector socket.
+	collectorConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen collector: %v", err)
+	}
+	defer collectorConn.Close()
+	collectorAddr := collectorConn.LocalAddr().(*net.UDPAddr)
+
+	sender, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen sender: %v", err)
+	}
+	defer sender.Close()
+
+	collector := NewDTMFCollector(collectorConn, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go collector.Run(ctx)
+
+	// Simulate pressing digit "5": send start packets, then end packet.
+	ts := uint32(1000)
+
+	// Start packets (E=false) — should not produce a digit.
+	for i := 0; i < 3; i++ {
+		pkt := makeDTMFRTPPacket(5, false, 10, uint16(160*(i+1)), ts)
+		if _, err := sender.WriteToUDP(pkt, collectorAddr); err != nil {
+			t.Fatalf("send start packet %d: %v", i, err)
+		}
+	}
+
+	// End packet (E=true) — should produce digit "5".
+	endPkt := makeDTMFRTPPacket(5, true, 10, 640, ts)
+	if _, err := sender.WriteToUDP(endPkt, collectorAddr); err != nil {
+		t.Fatalf("send end packet: %v", err)
+	}
+
+	select {
+	case digit := <-collector.Digits:
+		if digit != "5" {
+			t.Errorf("got digit %q, want %q", digit, "5")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for digit")
+	}
+}
+
+func TestDTMFCollector_MultipleDigits(t *testing.T) {
+	logger := slog.Default()
+
+	collectorConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen collector: %v", err)
+	}
+	defer collectorConn.Close()
+	collectorAddr := collectorConn.LocalAddr().(*net.UDPAddr)
+
+	sender, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen sender: %v", err)
+	}
+	defer sender.Close()
+
+	collector := NewDTMFCollector(collectorConn, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go collector.Run(ctx)
+
+	// Send three digits: 1, 2, 3 — each with a unique timestamp.
+	expected := []string{"1", "2", "3"}
+	for i, digit := range []uint8{1, 2, 3} {
+		ts := uint32(1000 + i*1000)
+		pkt := makeDTMFRTPPacket(digit, true, 10, 480, ts)
+		if _, err := sender.WriteToUDP(pkt, collectorAddr); err != nil {
+			t.Fatalf("send digit %d: %v", digit, err)
+		}
+	}
+
+	for i, want := range expected {
+		select {
+		case got := <-collector.Digits:
+			if got != want {
+				t.Errorf("digit %d: got %q, want %q", i, got, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for digit %d", i)
+		}
+	}
+}
+
+func TestDTMFCollector_DeduplicatesEndPackets(t *testing.T) {
+	logger := slog.Default()
+
+	collectorConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen collector: %v", err)
+	}
+	defer collectorConn.Close()
+	collectorAddr := collectorConn.LocalAddr().(*net.UDPAddr)
+
+	sender, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen sender: %v", err)
+	}
+	defer sender.Close()
+
+	collector := NewDTMFCollector(collectorConn, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go collector.Run(ctx)
+
+	// RFC 2833 retransmits End packets up to 3 times with the same
+	// event code and timestamp. The collector should emit only one digit.
+	ts := uint32(2000)
+	for i := 0; i < 3; i++ {
+		pkt := makeDTMFRTPPacket(9, true, 10, 480, ts)
+		if _, err := sender.WriteToUDP(pkt, collectorAddr); err != nil {
+			t.Fatalf("send retransmit %d: %v", i, err)
+		}
+	}
+
+	// Should get exactly one "9".
+	select {
+	case digit := <-collector.Digits:
+		if digit != "9" {
+			t.Errorf("got digit %q, want %q", digit, "9")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for digit")
+	}
+
+	// Verify no second digit arrives.
+	select {
+	case digit := <-collector.Digits:
+		t.Errorf("unexpected duplicate digit %q", digit)
+	case <-time.After(300 * time.Millisecond):
+		// Expected — no duplicates.
+	}
+}
+
+func TestDTMFCollector_IgnoresNonDTMFPackets(t *testing.T) {
+	logger := slog.Default()
+
+	collectorConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen collector: %v", err)
+	}
+	defer collectorConn.Close()
+	collectorAddr := collectorConn.LocalAddr().(*net.UDPAddr)
+
+	sender, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen sender: %v", err)
+	}
+	defer sender.Close()
+
+	collector := NewDTMFCollector(collectorConn, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go collector.Run(ctx)
+
+	// Send PCMA audio packets — should be ignored.
+	for i := 0; i < 5; i++ {
+		pkt := makeTestRTPPacket(PayloadPCMA, []byte{0xD5, 0xD5, 0xD5})
+		if _, err := sender.WriteToUDP(pkt, collectorAddr); err != nil {
+			t.Fatalf("send PCMA packet %d: %v", i, err)
+		}
+	}
+
+	// Then send a DTMF digit to prove the collector is still working.
+	dtmfPkt := makeDTMFRTPPacket(0, true, 10, 480, 5000)
+	if _, err := sender.WriteToUDP(dtmfPkt, collectorAddr); err != nil {
+		t.Fatalf("send DTMF packet: %v", err)
+	}
+
+	select {
+	case digit := <-collector.Digits:
+		if digit != "0" {
+			t.Errorf("got digit %q, want %q", digit, "0")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for digit")
+	}
+}
+
+func TestDTMFCollector_ContextCancellation(t *testing.T) {
+	logger := slog.Default()
+
+	collectorConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen collector: %v", err)
+	}
+	defer collectorConn.Close()
+
+	collector := NewDTMFCollector(collectorConn, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		collector.Run(ctx)
+		close(done)
+	}()
+
+	// Cancel context — collector should stop and close Digits channel.
+	cancel()
+
+	select {
+	case <-done:
+		// Collector stopped.
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not stop after context cancellation")
+	}
+
+	// Digits channel should be closed.
+	_, ok := <-collector.Digits
+	if ok {
+		t.Error("expected Digits channel to be closed")
+	}
+}
+
+func TestDTMFCollector_SpecialDigits(t *testing.T) {
+	logger := slog.Default()
+
+	collectorConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen collector: %v", err)
+	}
+	defer collectorConn.Close()
+	collectorAddr := collectorConn.LocalAddr().(*net.UDPAddr)
+
+	sender, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen sender: %v", err)
+	}
+	defer sender.Close()
+
+	collector := NewDTMFCollector(collectorConn, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go collector.Run(ctx)
+
+	// Send star (*), hash (#), and A.
+	digits := []struct {
+		event uint8
+		want  string
+	}{
+		{10, "*"},
+		{11, "#"},
+		{12, "A"},
+	}
+
+	for i, d := range digits {
+		ts := uint32(10000 + i*1000)
+		pkt := makeDTMFRTPPacket(d.event, true, 10, 480, ts)
+		if _, err := sender.WriteToUDP(pkt, collectorAddr); err != nil {
+			t.Fatalf("send %s: %v", d.want, err)
+		}
+	}
+
+	for _, d := range digits {
+		select {
+		case got := <-collector.Digits:
+			if got != d.want {
+				t.Errorf("got digit %q, want %q", got, d.want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for digit %q", d.want)
+		}
+	}
+}
+
+func TestDTMFCollector_SameDigitDifferentTimestamp(t *testing.T) {
+	logger := slog.Default()
+
+	collectorConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen collector: %v", err)
+	}
+	defer collectorConn.Close()
+	collectorAddr := collectorConn.LocalAddr().(*net.UDPAddr)
+
+	sender, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatalf("listen sender: %v", err)
+	}
+	defer sender.Close()
+
+	collector := NewDTMFCollector(collectorConn, logger)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go collector.Run(ctx)
+
+	// Pressing the same digit twice should emit it twice (different timestamps).
+	pkt1 := makeDTMFRTPPacket(5, true, 10, 480, 3000)
+	pkt2 := makeDTMFRTPPacket(5, true, 10, 480, 4000) // different ts
+
+	if _, err := sender.WriteToUDP(pkt1, collectorAddr); err != nil {
+		t.Fatalf("send first 5: %v", err)
+	}
+	if _, err := sender.WriteToUDP(pkt2, collectorAddr); err != nil {
+		t.Fatalf("send second 5: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		select {
+		case digit := <-collector.Digits:
+			if digit != "5" {
+				t.Errorf("press %d: got %q, want %q", i+1, digit, "5")
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for press %d", i+1)
+		}
 	}
 }

@@ -1,11 +1,14 @@
 package media
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -194,4 +197,125 @@ func StartAudioWithDTMFRelay(session *Session, callerRemote, calleeRemote *net.U
 	relay := NewRelay(session, callerRemote, calleeRemote, []int{audioPayloadType, PayloadTelephoneEvent}, logger)
 	relay.Start()
 	return relay
+}
+
+// DTMFCollector listens on a UDP connection for RFC 2833 telephone-event
+// RTP packets and delivers detected DTMF digits to a channel. It is
+// designed to run concurrently with audio playback (e.g., an IVR prompt)
+// so that digits pressed during playback are captured in real time.
+//
+// The collector deduplicates events by only emitting a digit when the
+// End (E) bit is set in the RFC 2833 payload. RFC 2833 senders transmit
+// multiple redundant packets per key press with increasing duration; the
+// End bit marks the final packet for that event.
+type DTMFCollector struct {
+	conn   *net.UDPConn
+	logger *slog.Logger
+
+	// Digits receives each detected DTMF digit as a single-character
+	// string ("0"-"9", "*", "#", "A"-"D"). The channel is closed when
+	// the collector stops.
+	Digits chan string
+}
+
+// collectorReadTimeout is the read deadline for the collector's UDP socket.
+// Short enough to allow prompt cancellation checks.
+const collectorReadTimeout = 50 * time.Millisecond
+
+// NewDTMFCollector creates a collector that reads RFC 2833 DTMF events
+// from the given UDP connection. The digits channel is buffered to avoid
+// blocking the read loop if the consumer is briefly slow.
+func NewDTMFCollector(conn *net.UDPConn, logger *slog.Logger) *DTMFCollector {
+	return &DTMFCollector{
+		conn:   conn,
+		logger: logger.With("subsystem", "dtmf-collector"),
+		Digits: make(chan string, 32),
+	}
+}
+
+// Run starts reading packets and emitting detected DTMF digits to the
+// Digits channel. It blocks until the context is cancelled, then closes
+// the Digits channel. Intended to be called as a goroutine:
+//
+//	go collector.Run(ctx)
+func (c *DTMFCollector) Run(ctx context.Context) {
+	defer close(c.Digits)
+
+	buf := make([]byte, maxRTPPacket)
+	// Track the last emitted event code to suppress duplicate End packets
+	// for the same key press. RFC 2833 senders retransmit the End packet
+	// up to 3 times with the same event code and timestamp.
+	var lastEvent uint8
+	var lastTS uint32
+	hadEvent := false
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		c.conn.SetReadDeadline(time.Now().Add(collectorReadTimeout))
+		n, _, err := c.conn.ReadFromUDP(buf)
+		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				continue
+			}
+			// Context cancelled or connection closed.
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			c.logger.Debug("dtmf collector read error", "error", err)
+			continue
+		}
+
+		pkt := buf[:n]
+
+		pt := rtpPayloadType(pkt)
+		if pt != PayloadTelephoneEvent {
+			continue
+		}
+
+		if n < minRTPHeader+dtmfPayloadSize {
+			continue
+		}
+
+		// Extract RTP timestamp for deduplication of retransmitted End packets.
+		ts := uint32(pkt[4])<<24 | uint32(pkt[5])<<16 | uint32(pkt[6])<<8 | uint32(pkt[7])
+
+		event := ParseDTMFEvent(pkt[minRTPHeader:])
+		if event == nil {
+			continue
+		}
+
+		if !event.End {
+			continue
+		}
+
+		// Deduplicate: RFC 2833 retransmits the End packet (same event
+		// code and timestamp). Only emit once per unique (event, timestamp).
+		if hadEvent && event.Event == lastEvent && ts == lastTS {
+			continue
+		}
+
+		lastEvent = event.Event
+		lastTS = ts
+		hadEvent = true
+
+		digit := DTMFEventName(event.Event)
+		c.logger.Debug("dtmf digit detected",
+			"digit", digit,
+			"event", event.Event,
+			"duration", event.Duration,
+		)
+
+		select {
+		case c.Digits <- digit:
+		case <-ctx.Done():
+			return
+		}
+	}
 }

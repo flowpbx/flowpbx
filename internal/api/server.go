@@ -101,6 +101,7 @@ type Server struct {
 	voicemailMessages database.VoicemailMessageRepository
 	ringGroups        database.RingGroupRepository
 	ivrMenus          database.IVRMenuRepository
+	timeSwitches      database.TimeSwitchRepository
 	encryptor         *database.Encryptor
 }
 
@@ -124,6 +125,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		voicemailMessages: database.NewVoicemailMessageRepository(db),
 		ringGroups:        database.NewRingGroupRepository(db),
 		ivrMenus:          database.NewIVRMenuRepository(db),
+		timeSwitches:      database.NewTimeSwitchRepository(db),
 		flowValidator:     flow.NewValidator(nil),
 		trunkStatus:       trunkStatus,
 		trunkTester:       trunkTester,
@@ -239,12 +241,12 @@ func (s *Server) routes() {
 		})
 
 		r.Route("/time-switches", func(r chi.Router) {
-			r.Get("/", s.handleNotImplemented)
-			r.Post("/", s.handleNotImplemented)
+			r.Get("/", s.handleListTimeSwitches)
+			r.Post("/", s.handleCreateTimeSwitch)
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", s.handleNotImplemented)
-				r.Put("/", s.handleNotImplemented)
-				r.Delete("/", s.handleNotImplemented)
+				r.Get("/", s.handleGetTimeSwitch)
+				r.Put("/", s.handleUpdateTimeSwitch)
+				r.Delete("/", s.handleDeleteTimeSwitch)
 			})
 		})
 

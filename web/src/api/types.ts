@@ -304,6 +304,34 @@ export interface IVRMenuRequest {
   options: Record<string, string>
 }
 
+/** Time switch rule entry within the rules JSON array. */
+export interface TimeSwitchRule {
+  label: string
+  days: string[]
+  start: string
+  end: string
+  dest_node: string
+}
+
+/** Time switch resource. */
+export interface TimeSwitch {
+  id: number
+  name: string
+  timezone: string
+  rules: TimeSwitchRule[]
+  default_dest: string
+  created_at: string
+  updated_at: string
+}
+
+/** Time switch create/update request. */
+export interface TimeSwitchRequest {
+  name: string
+  timezone?: string
+  rules: TimeSwitchRule[]
+  default_dest?: string
+}
+
 /** Call detail record resource. */
 export interface CDR {
   id: number

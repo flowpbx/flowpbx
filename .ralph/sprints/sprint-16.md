@@ -12,7 +12,7 @@
 - [x] Create IVR Menus CRUD page + API: `GET/POST/PUT/DELETE /api/v1/ivr-menus`
 - [x] Create IVR digit mapping editor UI (0-9, *, #, timeout, invalid)
 - [x] Create IVR audio prompt upload / select from library in UI
-- [ ] Create Time Switches CRUD page + API: `GET/POST/PUT/DELETE /api/v1/time-switches`
+- [x] Create Time Switches CRUD page + API: `GET/POST/PUT/DELETE /api/v1/time-switches`
 - [ ] Create time switch visual rule editor: day checkboxes + time range pickers
 - [ ] Create time switch weekly grid preview
 - [ ] Create time switch holiday/specific date override support

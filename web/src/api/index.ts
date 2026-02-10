@@ -10,6 +10,7 @@ export { getSettings, updateSettings } from './settings'
 export { listFlows, getFlow, createFlow, updateFlow, deleteFlow, publishFlow, validateFlow } from './flows'
 export { listRingGroups, getRingGroup, createRingGroup, updateRingGroup, deleteRingGroup } from './ring_groups'
 export { listIVRMenus, getIVRMenu, createIVRMenu, updateIVRMenu, deleteIVRMenu } from './ivr_menus'
+export { listTimeSwitches, getTimeSwitch, createTimeSwitch, updateTimeSwitch, deleteTimeSwitch } from './time_switches'
 export type {
   ApiEnvelope,
   PaginatedResponse,
@@ -34,6 +35,9 @@ export type {
   RingGroupRequest,
   IVRMenu,
   IVRMenuRequest,
+  TimeSwitch,
+  TimeSwitchRequest,
+  TimeSwitchRule,
   CDR,
   CallFlow,
   CallFlowRequest,

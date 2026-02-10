@@ -8,7 +8,7 @@
 
 ## Tasks
 
-- [ ] Initialize Vite + React 18 + TypeScript project in `web/`
+- [x] Initialize Vite + React 18 + TypeScript project in `web/`
 - [ ] Install and configure Tailwind CSS
 - [ ] Set up React Router with route definitions for all pages
 - [ ] Create API client module (`web/src/api/`) with auth handling, JSON envelope parsing

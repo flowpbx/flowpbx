@@ -9,7 +9,7 @@
 ## Tasks
 
 - [x] Create `internal/sip/invite.go` — INVITE handler: identify call type (internal vs inbound vs outbound)
-- [ ] Implement internal call routing: look up target extension → find all active registrations
+- [x] Implement internal call routing: look up target extension → find all active registrations
 - [ ] Send `100 Trying` immediately on receiving INVITE
 - [ ] Implement multi-device ringing: fork INVITE to all registered contacts for target extension
 - [ ] Implement `180 Ringing` and `183 Session Progress` relay (early media)

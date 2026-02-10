@@ -54,6 +54,7 @@ type InviteHandler struct {
 	inboundNumbers database.InboundNumberRepository
 	trunkRegistrar *TrunkRegistrar
 	auth           *Authenticator
+	router         *CallRouter
 	logger         *slog.Logger
 }
 
@@ -66,12 +67,14 @@ func NewInviteHandler(
 	auth *Authenticator,
 	logger *slog.Logger,
 ) *InviteHandler {
+	router := NewCallRouter(extensions, registrations, logger)
 	return &InviteHandler{
 		extensions:     extensions,
 		registrations:  registrations,
 		inboundNumbers: inboundNumbers,
 		trunkRegistrar: trunkRegistrar,
 		auth:           auth,
+		router:         router,
 		logger:         logger.With("subsystem", "invite"),
 	}
 }
@@ -124,16 +127,79 @@ func (h *InviteHandler) HandleInvite(req *sip.Request, tx sip.ServerTransaction)
 		return
 	}
 
-	// TODO: Dispatch to call routing based on call type.
-	// - Internal: fork INVITE to target extension's registered contacts
-	// - Inbound: look up flow from InboundNumber, walk graph
-	// - Outbound: match outbound route, send INVITE to trunk
-	//
-	// For now, respond 501 Not Implemented until call routing is wired.
-	h.logger.Warn("call routing not yet implemented",
+	// Dispatch to call routing based on call type.
+	switch ic.CallType {
+	case CallTypeInternal:
+		h.handleInternalCall(req, tx, ic, callID)
+	case CallTypeInbound:
+		// TODO: look up flow from InboundNumber, walk graph.
+		h.logger.Warn("inbound call routing not yet implemented",
+			"call_id", callID,
+		)
+		h.respondError(req, tx, 501, "Not Implemented")
+	case CallTypeOutbound:
+		// TODO: match outbound route, send INVITE to trunk.
+		h.logger.Warn("outbound call routing not yet implemented",
+			"call_id", callID,
+		)
+		h.respondError(req, tx, 501, "Not Implemented")
+	default:
+		h.logger.Error("unknown call type",
+			"call_id", callID,
+			"call_type", ic.CallType,
+		)
+		h.respondError(req, tx, 500, "Internal Server Error")
+	}
+}
+
+// handleInternalCall routes an extension-to-extension call by looking up
+// the target extension's active registrations via the CallRouter.
+func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransaction, ic *InviteContext, callID string) {
+	ctx := context.Background()
+
+	route, err := h.router.RouteInternalCall(ctx, ic)
+	if err != nil {
+		switch err {
+		case ErrDND:
+			h.logger.Info("internal call rejected: dnd enabled",
+				"call_id", callID,
+				"target", ic.TargetExtension.Extension,
+			)
+			h.respondError(req, tx, 486, "Busy Here")
+			return
+		case ErrNoRegistrations:
+			h.logger.Info("internal call failed: no registrations",
+				"call_id", callID,
+				"target", ic.TargetExtension.Extension,
+			)
+			h.respondError(req, tx, 480, "Temporarily Unavailable")
+			return
+		case ErrExtensionNotFound:
+			h.logger.Info("internal call failed: extension not found",
+				"call_id", callID,
+				"request_uri", ic.RequestURI,
+			)
+			h.respondError(req, tx, 404, "Not Found")
+			return
+		default:
+			h.logger.Error("internal call routing error",
+				"call_id", callID,
+				"error", err,
+			)
+			h.respondError(req, tx, 500, "Internal Server Error")
+			return
+		}
+	}
+
+	h.logger.Info("internal call routed, ready to fork",
 		"call_id", callID,
-		"call_type", ic.CallType,
+		"target", route.TargetExtension.Extension,
+		"contacts", len(route.Contacts),
 	)
+
+	// TODO: Fork INVITE to all contacts in route.Contacts (multi-device ringing),
+	// handle 180/183 relay, 200 OK from first answering device, cancel other forks.
+	// This will be implemented in subsequent sprint tasks.
 	h.respondError(req, tx, 501, "Not Implemented")
 }
 

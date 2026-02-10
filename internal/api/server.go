@@ -84,6 +84,7 @@ type Server struct {
 	sessions       *middleware.SessionStore
 	adminUsers     database.AdminUserRepository
 	systemConfig   database.SystemConfigRepository
+	extensions     database.ExtensionRepository
 	trunks         database.TrunkRepository
 	inboundNumbers database.InboundNumberRepository
 	trunkStatus    TrunkStatusProvider
@@ -102,6 +103,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		sessions:       sessions,
 		adminUsers:     database.NewAdminUserRepository(db),
 		systemConfig:   sysConfig,
+		extensions:     database.NewExtensionRepository(db),
 		trunks:         database.NewTrunkRepository(db),
 		inboundNumbers: database.NewInboundNumberRepository(db),
 		trunkStatus:    trunkStatus,
@@ -148,12 +150,12 @@ func (s *Server) routes() {
 		// Protected admin routes — auth middleware will be added in a
 		// subsequent sprint task when session middleware is implemented.
 		r.Route("/extensions", func(r chi.Router) {
-			r.Get("/", s.handleNotImplemented)
-			r.Post("/", s.handleNotImplemented)
+			r.Get("/", s.handleListExtensions)
+			r.Post("/", s.handleCreateExtension)
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", s.handleNotImplemented)
-				r.Put("/", s.handleNotImplemented)
-				r.Delete("/", s.handleNotImplemented)
+				r.Get("/", s.handleGetExtension)
+				r.Put("/", s.handleUpdateExtension)
+				r.Delete("/", s.handleDeleteExtension)
 				r.Get("/registrations", s.handleNotImplemented)
 			})
 		})

@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
+	"github.com/flowpbx/flowpbx/internal/database/models"
 	"github.com/flowpbx/flowpbx/internal/media"
 )
 
@@ -26,6 +28,7 @@ type Server struct {
 	auth           *Authenticator
 	dialogMgr      *DialogManager
 	sessionMgr     *media.SessionManager
+	cdrs           database.CDRRepository
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
 	logger         *slog.Logger
@@ -84,6 +87,7 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 	)
 
 	dialogMgr := NewDialogManager(logger)
+	cdrs := database.NewCDRRepository(db)
 	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunkRegistrar, auth, forker, dialogMgr, sessionMgr, proxyIP, logger)
 
 	s := &Server{
@@ -97,6 +101,7 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 		auth:           auth,
 		dialogMgr:      dialogMgr,
 		sessionMgr:     sessionMgr,
+		cdrs:           cdrs,
 		logger:         logger,
 	}
 
@@ -243,8 +248,8 @@ func (s *Server) handleACK(req *sip.Request, tx sip.ServerTransaction) {
 }
 
 // handleBYE processes incoming BYE requests to terminate an active call.
-// Full BYE handling (tearing down both legs, releasing media, updating CDR)
-// will be implemented in a subsequent sprint task.
+// It identifies which leg sent the BYE, tears down the other leg, releases
+// media resources, and creates a CDR record.
 func (s *Server) handleBYE(req *sip.Request, tx sip.ServerTransaction) {
 	callID := ""
 	if cid := req.CallID(); cid != nil {
@@ -270,7 +275,38 @@ func (s *Server) handleBYE(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 
-	// Release media resources before terminating the dialog.
+	// Acknowledge the BYE with 200 OK.
+	res := sip.NewResponseFromRequest(req, 200, "OK", nil)
+	if err := tx.Respond(res); err != nil {
+		s.logger.Error("failed to respond to bye", "error", err)
+	}
+
+	// Determine which leg sent the BYE and send BYE to the other leg.
+	fromTag := ""
+	if from := req.From(); from != nil {
+		if tag, ok := from.Params.Get("tag"); ok {
+			fromTag = tag
+		}
+	}
+
+	hangupCause := "normal_clearing"
+	callerHangup := fromTag == d.Caller.FromTag || fromTag == ""
+
+	if callerHangup {
+		s.logger.Debug("bye from caller, sending bye to callee",
+			"call_id", callID,
+		)
+		s.sendBYEToCallee(d)
+		hangupCause = "caller_bye"
+	} else {
+		s.logger.Debug("bye from callee, sending bye to caller",
+			"call_id", callID,
+		)
+		s.sendBYEToCaller(d)
+		hangupCause = "callee_bye"
+	}
+
+	// Release media resources.
 	if d.Media != nil {
 		d.Media.Release()
 		s.logger.Debug("media session released on bye",
@@ -278,16 +314,209 @@ func (s *Server) handleBYE(req *sip.Request, tx sip.ServerTransaction) {
 		)
 	}
 
-	// Acknowledge the BYE with 200 OK.
-	res := sip.NewResponseFromRequest(req, 200, "OK", nil)
-	if err := tx.Respond(res); err != nil {
-		s.logger.Error("failed to respond to bye", "error", err)
+	// Terminate the dialog.
+	terminated := s.dialogMgr.TerminateDialog(callID, hangupCause)
+	if terminated == nil {
+		return
 	}
 
-	// Terminate the dialog and record hangup cause.
-	s.dialogMgr.TerminateDialog(callID, "normal_clearing")
+	// Create CDR record.
+	s.createCDR(terminated)
+}
 
-	// TODO: Send BYE to the other leg, create CDR.
+// sendBYEToCallee sends a BYE request to the callee (answering device).
+// The BYE is constructed as an in-dialog request using the dialog parameters
+// from the original INVITE and 200 OK exchange.
+func (s *Server) sendBYEToCallee(d *Dialog) {
+	if d.CalleeReq == nil {
+		s.logger.Warn("cannot send bye to callee: no callee request stored",
+			"call_id", d.CallID,
+		)
+		return
+	}
+
+	byeReq := s.buildInDialogBYE(
+		d.CalleeReq,
+		d.CalleeRes,
+		d.Callee.RemoteTarget,
+	)
+
+	if err := s.forker.Client().WriteRequest(byeReq); err != nil {
+		s.logger.Error("failed to send bye to callee",
+			"call_id", d.CallID,
+			"error", err,
+		)
+	} else {
+		s.logger.Debug("bye sent to callee",
+			"call_id", d.CallID,
+		)
+	}
+}
+
+// sendBYEToCaller sends a BYE request to the caller (originating device).
+// The BYE is constructed as an in-dialog request using the dialog parameters
+// from the original INVITE.
+func (s *Server) sendBYEToCaller(d *Dialog) {
+	if d.CallerReq == nil {
+		s.logger.Warn("cannot send bye to caller: no caller request stored",
+			"call_id", d.CallID,
+		)
+		return
+	}
+
+	// For the caller leg, we build a BYE as a UAS sending to the UAC.
+	// The roles are reversed: the From/To are swapped relative to the original INVITE.
+	byeReq := s.buildReverseDialogBYE(d.CallerReq)
+
+	if err := s.forker.Client().WriteRequest(byeReq); err != nil {
+		s.logger.Error("failed to send bye to caller",
+			"call_id", d.CallID,
+			"error", err,
+		)
+	} else {
+		s.logger.Debug("bye sent to caller",
+			"call_id", d.CallID,
+		)
+	}
+}
+
+// buildInDialogBYE creates a BYE request within an established dialog on the
+// outbound (callee) leg. The Request-URI is the Contact from the callee's 200 OK
+// (remoteTarget), and dialog headers match the original INVITE/response exchange.
+func (s *Server) buildInDialogBYE(
+	inviteReq *sip.Request,
+	inviteResp *sip.Response,
+	remoteTarget *sip.Uri,
+) *sip.Request {
+	// Request-URI: Contact from the callee's 200 OK, or original INVITE recipient.
+	recipient := &inviteReq.Recipient
+	if remoteTarget != nil {
+		recipient = remoteTarget
+	}
+
+	bye := sip.NewRequest(sip.BYE, *recipient.Clone())
+	bye.SipVersion = inviteReq.SipVersion
+
+	// From: same as the original INVITE (our side of the dialog).
+	if h := inviteReq.From(); h != nil {
+		bye.AppendHeader(sip.HeaderClone(h))
+	}
+
+	// To: from the response (includes remote tag).
+	if inviteResp != nil {
+		if h := inviteResp.To(); h != nil {
+			bye.AppendHeader(sip.HeaderClone(h))
+		}
+	} else if h := inviteReq.To(); h != nil {
+		bye.AppendHeader(sip.HeaderClone(h))
+	}
+
+	// Call-ID: same as the dialog.
+	if h := inviteReq.CallID(); h != nil {
+		bye.AppendHeader(sip.HeaderClone(h))
+	}
+
+	// CSeq: new sequence number, method BYE.
+	cseq := &sip.CSeqHeader{
+		SeqNo:      2,
+		MethodName: sip.BYE,
+	}
+	bye.AppendHeader(cseq)
+
+	maxFwd := sip.MaxForwardsHeader(70)
+	bye.AppendHeader(&maxFwd)
+
+	bye.SetTransport(inviteReq.Transport())
+	bye.SetSource(inviteReq.Source())
+
+	return bye
+}
+
+// buildReverseDialogBYE creates a BYE request to the caller (originating side).
+// Since the PBX is the UAS for the caller's INVITE, the From/To headers are
+// swapped: our To becomes From, and the caller's From becomes To.
+func (s *Server) buildReverseDialogBYE(callerReq *sip.Request) *sip.Request {
+	// Request-URI: the Contact from the caller's INVITE (where to send BYE).
+	recipient := &callerReq.Recipient
+	if contact := callerReq.Contact(); contact != nil {
+		recipient = &contact.Address
+	}
+
+	bye := sip.NewRequest(sip.BYE, *recipient.Clone())
+	bye.SipVersion = callerReq.SipVersion
+
+	// From/To swapped: we are now the initiator of BYE.
+	// From = original To (PBX side), To = original From (caller side).
+	if h := callerReq.To(); h != nil {
+		fromHeader := h.AsFrom()
+		bye.AppendHeader(&fromHeader)
+	}
+	if h := callerReq.From(); h != nil {
+		toHeader := h.AsTo()
+		bye.AppendHeader(&toHeader)
+	}
+
+	// Call-ID: same as the dialog.
+	if h := callerReq.CallID(); h != nil {
+		bye.AppendHeader(sip.HeaderClone(h))
+	}
+
+	// CSeq: new sequence number for this direction.
+	cseq := &sip.CSeqHeader{
+		SeqNo:      1,
+		MethodName: sip.BYE,
+	}
+	bye.AppendHeader(cseq)
+
+	maxFwd := sip.MaxForwardsHeader(70)
+	bye.AppendHeader(&maxFwd)
+
+	bye.SetTransport(callerReq.Transport())
+	bye.SetSource(callerReq.Source())
+
+	return bye
+}
+
+// createCDR generates a call detail record from a terminated dialog and
+// persists it to the database.
+func (s *Server) createCDR(d *Dialog) {
+	durationSec := int(d.Duration().Seconds())
+	billableSec := int(d.BillableDuration().Seconds())
+
+	cdr := &models.CDR{
+		CallID:       d.CallID,
+		StartTime:    d.StartTime,
+		AnswerTime:   d.AnswerTime,
+		EndTime:      d.EndTime,
+		Duration:     &durationSec,
+		BillableDur:  &billableSec,
+		CallerIDName: d.CallerIDName,
+		CallerIDNum:  d.CallerIDNum,
+		Callee:       d.CalledNum,
+		Direction:    string(d.Direction),
+		Disposition:  d.Disposition(),
+		HangupCause:  d.HangupCause,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := s.cdrs.Create(ctx, cdr); err != nil {
+		s.logger.Error("failed to create cdr",
+			"call_id", d.CallID,
+			"error", err,
+		)
+		return
+	}
+
+	s.logger.Info("cdr created",
+		"call_id", d.CallID,
+		"cdr_id", cdr.ID,
+		"direction", cdr.Direction,
+		"disposition", cdr.Disposition,
+		"duration", durationSec,
+		"billable", billableSec,
+	)
 }
 
 // handleCANCEL processes incoming CANCEL requests when the caller hangs up

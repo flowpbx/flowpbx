@@ -88,6 +88,16 @@ type ConfigReloader interface {
 // an adapter that wraps the media.ConferenceManager.
 type ConferenceProvider interface {
 	MuteParticipant(bridgeID int64, participantID string, muted bool) error
+	Participants(bridgeID int64) ([]ConferenceParticipantEntry, error)
+}
+
+// ConferenceParticipantEntry holds metadata about an active conference participant.
+type ConferenceParticipantEntry struct {
+	ID           string
+	CallerIDName string
+	CallerIDNum  string
+	JoinedAt     time.Time
+	Muted        bool
 }
 
 // Server holds HTTP handler dependencies and the chi router.
@@ -278,6 +288,7 @@ func (s *Server) routes() {
 				r.Get("/", s.handleGetConferenceBridge)
 				r.Put("/", s.handleUpdateConferenceBridge)
 				r.Delete("/", s.handleDeleteConferenceBridge)
+				r.Get("/participants", s.handleListConferenceParticipants)
 				r.Put("/participants/{participantID}/mute", s.handleMuteConferenceParticipant)
 			})
 		})

@@ -410,3 +410,21 @@ type conferenceProviderAdapter struct {
 func (a *conferenceProviderAdapter) MuteParticipant(bridgeID int64, participantID string, muted bool) error {
 	return a.mgr.MuteParticipant(bridgeID, participantID, muted)
 }
+
+func (a *conferenceProviderAdapter) Participants(bridgeID int64) ([]api.ConferenceParticipantEntry, error) {
+	participants, err := a.mgr.Participants(bridgeID)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]api.ConferenceParticipantEntry, len(participants))
+	for i, p := range participants {
+		entries[i] = api.ConferenceParticipantEntry{
+			ID:           p.ID,
+			CallerIDName: p.CallerIDName,
+			CallerIDNum:  p.CallerIDNum,
+			JoinedAt:     p.JoinedAt,
+			Muted:        p.Muted,
+		}
+	}
+	return entries, nil
+}

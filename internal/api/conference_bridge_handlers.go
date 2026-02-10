@@ -269,6 +269,62 @@ func parseConferenceBridgeID(r *http.Request) (int64, error) {
 	return strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 }
 
+// conferenceParticipantResponse is the JSON response for an active conference participant.
+type conferenceParticipantResponse struct {
+	ID           string `json:"id"`
+	CallerIDName string `json:"caller_id_name"`
+	CallerIDNum  string `json:"caller_id_num"`
+	JoinedAt     string `json:"joined_at"`
+	Muted        bool   `json:"muted"`
+}
+
+// handleListConferenceParticipants returns the active participants for a conference room.
+func (s *Server) handleListConferenceParticipants(w http.ResponseWriter, r *http.Request) {
+	bridgeID, err := parseConferenceBridgeID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid conference bridge id")
+		return
+	}
+
+	// Verify the conference bridge exists in the database.
+	bridge, err := s.conferenceBridges.GetByID(r.Context(), bridgeID)
+	if err != nil {
+		slog.Error("list conference participants: failed to query bridge", "error", err, "conference_bridge_id", bridgeID)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if bridge == nil {
+		writeError(w, http.StatusNotFound, "conference bridge not found")
+		return
+	}
+
+	if s.conferenceProv == nil {
+		writeError(w, http.StatusServiceUnavailable, "conference manager not available")
+		return
+	}
+
+	participants, err := s.conferenceProv.Participants(bridgeID)
+	if err != nil {
+		slog.Error("list conference participants: failed", "error", err, "conference_bridge_id", bridgeID)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Return empty array rather than null when no participants.
+	items := make([]conferenceParticipantResponse, 0, len(participants))
+	for _, p := range participants {
+		items = append(items, conferenceParticipantResponse{
+			ID:           p.ID,
+			CallerIDName: p.CallerIDName,
+			CallerIDNum:  p.CallerIDNum,
+			JoinedAt:     p.JoinedAt.Format(time.RFC3339),
+			Muted:        p.Muted,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, items)
+}
+
 // handleMuteConferenceParticipant sets or clears the mute state for a
 // participant in an active conference room.
 func (s *Server) handleMuteConferenceParticipant(w http.ResponseWriter, r *http.Request) {

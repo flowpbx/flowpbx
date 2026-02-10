@@ -17,5 +17,5 @@
 - [x] Enforce max_members limit per conference bridge
 - [x] Implement conference recording (mix all participant audio → single WAV output)
 - [x] Track active conference participants in memory
-- [ ] Expose active participants via API: `GET /api/v1/conferences/:id/participants`
+- [x] Expose active participants via API: `GET /api/v1/conferences/:id/participants`
 - [ ] Add conference management UI: view active participants, mute/kick controls

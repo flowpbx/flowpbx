@@ -92,6 +92,23 @@ func (h *VoicemailHandler) Execute(ctx context.Context, callCtx *flow.CallContex
 		return "", fmt.Errorf("voicemail node %s: entity is %T, expected *models.VoicemailBox", node.ID, entity)
 	}
 
+	// Check if the mailbox has reached its max_messages limit.
+	if box.MaxMessages > 0 {
+		count, err := h.messages.CountByMailbox(ctx, box.ID)
+		if err != nil {
+			return "", fmt.Errorf("checking mailbox message count: %w", err)
+		}
+		if count >= int64(box.MaxMessages) {
+			h.logger.Warn("voicemail box full, rejecting recording",
+				"call_id", callCtx.CallID,
+				"mailbox_id", box.ID,
+				"max_messages", box.MaxMessages,
+				"current_count", count,
+			)
+			return "", fmt.Errorf("voicemail box %d is full (%d/%d messages)", box.ID, count, box.MaxMessages)
+		}
+	}
+
 	// Determine the greeting to play.
 	greeting := h.resolveGreeting(box)
 

@@ -668,6 +668,145 @@ func TestVoicemailEmailNotificationAttempted(t *testing.T) {
 	}
 }
 
+func TestVoicemailMaxMessagesLimitReject(t *testing.T) {
+	dataDir := t.TempDir()
+
+	box := &models.VoicemailBox{
+		ID:                 20,
+		Name:               "Full Box",
+		MailboxNumber:      "2000",
+		MaxMessageDuration: 60,
+		MaxMessages:        2,
+	}
+
+	sipActions := &mockVoicemailSIPActions{
+		recordResult: &flow.RecordResult{DurationSecs: 10},
+	}
+
+	// Pre-populate with 2 messages — box is at capacity.
+	msgRepo := &mockVoicemailMessageRepo{
+		messages: []models.VoicemailMessage{
+			{ID: 1, MailboxID: 20, Read: false},
+			{ID: 2, MailboxID: 20, Read: true},
+		},
+		nextID: 2,
+	}
+	extRepo := &mockExtensionRepo{extensions: map[int64]*models.Extension{}}
+
+	h := newTestVoicemailHandler(box, sipActions, msgRepo, extRepo, dataDir)
+	callCtx := &flow.CallContext{
+		CallID:      "test-vm-full",
+		CallerIDNum: "0400000000",
+	}
+
+	_, err := h.Execute(context.Background(), callCtx, makeVoicemailNode(20))
+	if err == nil {
+		t.Fatal("expected error when mailbox is full, got nil")
+	}
+	if !strings.Contains(err.Error(), "is full") {
+		t.Errorf("expected 'is full' error, got: %v", err)
+	}
+
+	// Verify no new message was recorded.
+	if len(msgRepo.messages) != 2 {
+		t.Errorf("expected 2 messages (unchanged), got %d", len(msgRepo.messages))
+	}
+}
+
+func TestVoicemailMaxMessagesLimitAllow(t *testing.T) {
+	dataDir := t.TempDir()
+
+	box := &models.VoicemailBox{
+		ID:                 21,
+		Name:               "Under Limit Box",
+		MailboxNumber:      "2100",
+		MaxMessageDuration: 60,
+		MaxMessages:        5,
+	}
+
+	sipActions := &mockVoicemailSIPActions{
+		recordResult: &flow.RecordResult{DurationSecs: 10},
+	}
+
+	// Pre-populate with 3 messages — below limit of 5.
+	msgRepo := &mockVoicemailMessageRepo{
+		messages: []models.VoicemailMessage{
+			{ID: 1, MailboxID: 21},
+			{ID: 2, MailboxID: 21},
+			{ID: 3, MailboxID: 21},
+		},
+		nextID: 3,
+	}
+	extRepo := &mockExtensionRepo{extensions: map[int64]*models.Extension{}}
+
+	h := newTestVoicemailHandler(box, sipActions, msgRepo, extRepo, dataDir)
+	callCtx := &flow.CallContext{
+		CallID:      "test-vm-under-limit",
+		CallerIDNum: "0400000000",
+	}
+
+	edge, err := h.Execute(context.Background(), callCtx, makeVoicemailNode(21))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if edge != "next" {
+		t.Errorf("expected edge %q, got %q", "next", edge)
+	}
+
+	// Verify new message was recorded.
+	if len(msgRepo.messages) != 4 {
+		t.Errorf("expected 4 messages after recording, got %d", len(msgRepo.messages))
+	}
+}
+
+func TestVoicemailMaxMessagesZeroUnlimited(t *testing.T) {
+	dataDir := t.TempDir()
+
+	box := &models.VoicemailBox{
+		ID:                 22,
+		Name:               "Unlimited Box",
+		MailboxNumber:      "2200",
+		MaxMessageDuration: 60,
+		MaxMessages:        0, // 0 means no limit.
+	}
+
+	sipActions := &mockVoicemailSIPActions{
+		recordResult: &flow.RecordResult{DurationSecs: 10},
+	}
+
+	// Pre-populate with many messages.
+	msgRepo := &mockVoicemailMessageRepo{
+		messages: []models.VoicemailMessage{
+			{ID: 1, MailboxID: 22},
+			{ID: 2, MailboxID: 22},
+			{ID: 3, MailboxID: 22},
+			{ID: 4, MailboxID: 22},
+			{ID: 5, MailboxID: 22},
+		},
+		nextID: 5,
+	}
+	extRepo := &mockExtensionRepo{extensions: map[int64]*models.Extension{}}
+
+	h := newTestVoicemailHandler(box, sipActions, msgRepo, extRepo, dataDir)
+	callCtx := &flow.CallContext{
+		CallID:      "test-vm-unlimited",
+		CallerIDNum: "0400000000",
+	}
+
+	edge, err := h.Execute(context.Background(), callCtx, makeVoicemailNode(22))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if edge != "next" {
+		t.Errorf("expected edge %q, got %q", "next", edge)
+	}
+
+	// Verify new message was recorded even with many existing messages.
+	if len(msgRepo.messages) != 6 {
+		t.Errorf("expected 6 messages after recording, got %d", len(msgRepo.messages))
+	}
+}
+
 func TestVoicemailLoadSMTPConfig(t *testing.T) {
 	dataDir := t.TempDir()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))

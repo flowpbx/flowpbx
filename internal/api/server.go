@@ -3,14 +3,17 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/flowpbx/flowpbx/internal/api/middleware"
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/flowpbx/flowpbx/internal/web"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 )
@@ -221,10 +224,8 @@ func (s *Server) routes() {
 		})
 	})
 
-	// SPA fallback — serve embedded React UI for non-API routes.
-	// This will be wired to //go:embed static file serving in a later task.
-	// For now, return a placeholder so the route structure is established.
-	r.NotFound(s.handleSPAFallback)
+	// Serve embedded React SPA for non-API routes.
+	s.mountSPA(r)
 
 	slog.Info("api routes mounted")
 }
@@ -428,10 +429,35 @@ func (s *Server) handleNotImplemented(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotImplemented, "not implemented")
 }
 
-// handleSPAFallback serves the embedded React SPA for non-API routes.
-// Will be replaced with //go:embed static file serving in a later task.
-func (s *Server) handleSPAFallback(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("<!doctype html><html><body><p>FlowPBX UI not built yet. Run <code>make ui-build</code>.</p></body></html>"))
+// mountSPA configures static file serving from the embedded web.DistFS with
+// SPA fallback: requests for files that exist in the bundle are served directly;
+// all other non-API paths receive index.html so client-side routing works.
+func (s *Server) mountSPA(r *chi.Mux) {
+	// web.DistFS embeds files under "dist/", so sub the root to strip the prefix.
+	distFS, err := fs.Sub(web.DistFS, "dist")
+	if err != nil {
+		slog.Error("failed to create sub filesystem for embedded SPA", "error", err)
+		return
+	}
+
+	staticHandler := http.FileServer(http.FS(distFS))
+
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		// Try to serve the exact file from the embedded bundle.
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path == "" {
+			path = "index.html"
+		}
+
+		// Check whether the requested file exists in the embedded FS.
+		if f, err := distFS.Open(path); err == nil {
+			f.Close()
+			staticHandler.ServeHTTP(w, r)
+			return
+		}
+
+		// File not found — serve index.html for SPA client-side routing.
+		r.URL.Path = "/"
+		staticHandler.ServeHTTP(w, r)
+	})
 }

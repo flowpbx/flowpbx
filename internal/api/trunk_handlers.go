@@ -59,6 +59,19 @@ type trunkResponse struct {
 	UpdatedAt      string   `json:"updated_at"`
 }
 
+// trunkDetailResponse extends trunkResponse with live registration status.
+type trunkDetailResponse struct {
+	trunkResponse
+	Status         string  `json:"status"`
+	LastError      string  `json:"last_error"`
+	RetryAttempt   int     `json:"retry_attempt"`
+	OptionsHealthy bool    `json:"options_healthy"`
+	RegisteredAt   *string `json:"registered_at"`
+	ExpiresAt      *string `json:"expires_at"`
+	FailedAt       *string `json:"failed_at"`
+	LastOptionsAt  *string `json:"last_options_at"`
+}
+
 // toTrunkResponse converts a models.Trunk to the API response, decoding JSON
 // array fields and omitting the password.
 func toTrunkResponse(t *models.Trunk) trunkResponse {
@@ -218,7 +231,7 @@ func (s *Server) handleCreateTrunk(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, toTrunkResponse(created))
 }
 
-// handleGetTrunk returns a single trunk by ID.
+// handleGetTrunk returns a single trunk by ID including current registration status.
 func (s *Server) handleGetTrunk(w http.ResponseWriter, r *http.Request) {
 	id, err := parseTrunkID(r)
 	if err != nil {
@@ -237,7 +250,37 @@ func (s *Server) handleGetTrunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, toTrunkResponse(trunk))
+	detail := trunkDetailResponse{
+		trunkResponse: toTrunkResponse(trunk),
+		Status:        "unknown",
+	}
+
+	if s.trunkStatus != nil {
+		if st, ok := s.trunkStatus.GetTrunkStatus(id); ok {
+			detail.Status = st.Status
+			detail.LastError = st.LastError
+			detail.RetryAttempt = st.RetryAttempt
+			detail.OptionsHealthy = st.OptionsHealthy
+			if st.RegisteredAt != nil {
+				v := st.RegisteredAt.Format(time.RFC3339)
+				detail.RegisteredAt = &v
+			}
+			if st.ExpiresAt != nil {
+				v := st.ExpiresAt.Format(time.RFC3339)
+				detail.ExpiresAt = &v
+			}
+			if st.FailedAt != nil {
+				v := st.FailedAt.Format(time.RFC3339)
+				detail.FailedAt = &v
+			}
+			if st.LastOptionsAt != nil {
+				v := st.LastOptionsAt.Format(time.RFC3339)
+				detail.LastOptionsAt = &v
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, detail)
 }
 
 // handleUpdateTrunk updates an existing trunk.

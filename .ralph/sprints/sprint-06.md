@@ -15,7 +15,7 @@
 - [x] Track trunk status (registered / failed / disabled) in memory + expose via API
 - [x] Implement IP-auth trunk support (ACL-based, match source IP/CIDR, no registration)
 - [x] Create trunk CRUD API handlers: `GET/POST/PUT/DELETE /api/v1/trunks`
-- [ ] Implement `GET /api/v1/trunks/:id` — include current registration status
+- [x] Implement `GET /api/v1/trunks/:id` — include current registration status
 - [ ] Implement `POST /api/v1/trunks/:id/test` — attempt registration or OPTIONS ping, return result
 - [ ] Add trunk status to admin UI trunk list (green/red indicator)
 - [ ] Load all enabled trunks on startup, begin registration

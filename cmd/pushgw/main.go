@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/flowpbx/flowpbx/internal/pushgw"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -37,7 +38,12 @@ func main() {
 
 	slog.Info("starting pushgw", "http_port", *httpPort)
 
-	// HTTP router.
+	// Create the push gateway server with nil dependencies for now.
+	// The PostgreSQL store, FCM/APNs sender, and push logger will be
+	// wired up in subsequent sprint tasks.
+	gwServer := pushgw.NewServer(nil, nil, nil)
+
+	// HTTP router with global middleware.
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -50,34 +56,8 @@ func main() {
 		fmt.Fprintf(w, `{"status":"ok"}`)
 	})
 
-	// Push gateway API routes (v1).
-	r.Route("/v1", func(r chi.Router) {
-		// Push notification delivery.
-		r.Post("/push", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotImplemented)
-			fmt.Fprintf(w, `{"data":null,"error":"not implemented"}`)
-		})
-
-		// License management.
-		r.Post("/license/validate", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotImplemented)
-			fmt.Fprintf(w, `{"data":null,"error":"not implemented"}`)
-		})
-
-		r.Post("/license/activate", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotImplemented)
-			fmt.Fprintf(w, `{"data":null,"error":"not implemented"}`)
-		})
-
-		r.Get("/license/status", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotImplemented)
-			fmt.Fprintf(w, `{"data":null,"error":"not implemented"}`)
-		})
-	})
+	// Mount push gateway routes.
+	r.Mount("/", gwServer)
 
 	// HTTP server with graceful shutdown.
 	srv := &http.Server{

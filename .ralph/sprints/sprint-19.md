@@ -9,7 +9,7 @@
 ## Tasks
 
 ### Push Gateway (`cmd/pushgw` + `internal/pushgw/`)
-- [ ] Create push gateway handlers in `internal/pushgw/` (shares Go module with PBX)
+- [x] Create push gateway handlers in `internal/pushgw/` (shares Go module with PBX)
 - [ ] Create PostgreSQL schema: licenses, installations, push_logs
 - [ ] Implement FCM integration (Firebase Admin SDK for Go)
 - [ ] Implement APNs integration (HTTP/2 provider API)

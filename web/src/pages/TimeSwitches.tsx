@@ -4,6 +4,7 @@ import type { TimeSwitch, TimeSwitchRequest } from '../api'
 import DataTable, { type Column } from '../components/DataTable'
 import { TextInput, SelectField } from '../components/FormFields'
 import TimeSwitchRuleEditor from '../components/TimeSwitchRuleEditor'
+import WeeklyGridPreview from '../components/WeeklyGridPreview'
 
 const TIMEZONES = [
   { group: 'Australia', zones: ['Australia/Sydney', 'Australia/Melbourne', 'Australia/Brisbane', 'Australia/Perth', 'Australia/Adelaide'] },
@@ -205,6 +206,8 @@ export default function TimeSwitches() {
             rules={form.rules}
             onChange={(rules) => setForm({ ...form, rules })}
           />
+
+          <WeeklyGridPreview rules={form.rules} />
 
           <div className="pt-4 border-t border-gray-100">
             <button

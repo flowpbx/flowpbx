@@ -14,7 +14,7 @@
 - [x] Create `cmd/pushgw/main.go` entry point (boots push gateway HTTP server)
 - [x] Create Makefile with targets: `build`, `dev`, `test`, `lint`, `ui-build`, `release`
 - [x] Set up cross-compilation in Makefile for linux/amd64 and linux/arm64
-- [ ] Create `.github/workflows/ci.yml` — lint + test on PR
+- [x] Create `.github/workflows/ci.yml` — lint + test on PR
 - [ ] Create `.github/workflows/release.yml` — build + release on tag
 - [ ] Create `internal/config/config.go` — load config from CLI flags, env vars (`FLOWPBX_` prefix), and defaults
 - [ ] Implement config precedence: CLI flags > env vars > database config > defaults

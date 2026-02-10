@@ -10,7 +10,7 @@
 
 - [x] Initialize Vite + React 18 + TypeScript project in `web/`
 - [x] Install and configure Tailwind CSS
-- [ ] Set up React Router with route definitions for all pages
+- [x] Set up React Router with route definitions for all pages
 - [ ] Create API client module (`web/src/api/`) with auth handling, JSON envelope parsing
 - [ ] Create layout components: sidebar nav, header, content area
 - [ ] Create Login page — username/password form, session auth

@@ -93,6 +93,16 @@ func (h *InviteHandler) HandleInvite(req *sip.Request, tx sip.ServerTransaction)
 		"source", req.Source(),
 	)
 
+	// Send 100 Trying immediately to stop UAC retransmissions (RFC 3261 §8.2.6.1).
+	trying := sip.NewResponseFromRequest(req, 100, "Trying", nil)
+	if err := tx.Respond(trying); err != nil {
+		h.logger.Error("failed to send 100 trying",
+			"call_id", callID,
+			"error", err,
+		)
+		return
+	}
+
 	// Classify the call type.
 	ic, err := h.classifyCall(req, tx)
 	if err != nil {
@@ -116,16 +126,6 @@ func (h *InviteHandler) HandleInvite(req *sip.Request, tx sip.ServerTransaction)
 		"caller_num", ic.CallerIDNum,
 		"trunk_id", ic.TrunkID,
 	)
-
-	// Send 100 Trying immediately.
-	trying := sip.NewResponseFromRequest(req, 100, "Trying", nil)
-	if err := tx.Respond(trying); err != nil {
-		h.logger.Error("failed to send 100 trying",
-			"call_id", callID,
-			"error", err,
-		)
-		return
-	}
 
 	// Dispatch to call routing based on call type.
 	switch ic.CallType {

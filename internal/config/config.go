@@ -12,13 +12,14 @@ import (
 // Config holds all runtime configuration for the FlowPBX server.
 // Precedence: CLI flags > env vars > defaults.
 type Config struct {
-	DataDir    string
-	HTTPPort   int
-	SIPPort    int
-	SIPTLSPort int
-	TLSCert    string
-	TLSKey     string
-	LogLevel   string
+	DataDir     string
+	HTTPPort    int
+	SIPPort     int
+	SIPTLSPort  int
+	TLSCert     string
+	TLSKey      string
+	LogLevel    string
+	CORSOrigins string
 }
 
 // defaults
@@ -47,6 +48,7 @@ func Load() (*Config, error) {
 	fs.StringVar(&cfg.TLSCert, "tls-cert", "", "path to TLS certificate file")
 	fs.StringVar(&cfg.TLSKey, "tls-key", "", "path to TLS private key file")
 	fs.StringVar(&cfg.LogLevel, "log-level", defaultLogLevel, "log level (debug, info, warn, error)")
+	fs.StringVar(&cfg.CORSOrigins, "cors-origins", "", "comma-separated list of allowed CORS origins (use * for all)")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return nil, fmt.Errorf("parsing flags: %w", err)
@@ -82,6 +84,7 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 		"tls-cert":     envPrefix + "TLS_CERT",
 		"tls-key":      envPrefix + "TLS_KEY",
 		"log-level":    envPrefix + "LOG_LEVEL",
+		"cors-origins": envPrefix + "CORS_ORIGINS",
 	}
 
 	for flagName, envVar := range envMap {
@@ -113,6 +116,8 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 			cfg.TLSKey = val
 		case "log-level":
 			cfg.LogLevel = val
+		case "cors-origins":
+			cfg.CORSOrigins = val
 		}
 	}
 }

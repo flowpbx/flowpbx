@@ -42,6 +42,7 @@ func (s *Server) routes() {
 	// Global middleware stack.
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
+	r.Use(middleware.CORS(middleware.ParseCORSOrigins(s.cfg.CORSOrigins)))
 	r.Use(middleware.StructuredLogger)
 	r.Use(middleware.Recoverer)
 

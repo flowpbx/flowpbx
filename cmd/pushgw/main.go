@@ -20,6 +20,7 @@ import (
 func main() {
 	httpPort := flag.Int("http-port", 8081, "HTTP server listen port")
 	dbDSN := flag.String("db-dsn", "", "PostgreSQL connection string (e.g. postgres://user:pass@host/pushgw)")
+	fcmCredentials := flag.String("fcm-credentials", "", "path to Firebase service account JSON file (or set GOOGLE_APPLICATION_CREDENTIALS)")
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
 	flag.Parse()
 
@@ -55,15 +56,23 @@ func main() {
 		slog.Warn("no --db-dsn provided, license and push logging endpoints will be unavailable")
 	}
 
+	// Initialise FCM sender if credentials are available.
+	var sender pushgw.PushSender
+	fcmSender, err := pushgw.NewFCMSender(context.Background(), *fcmCredentials)
+	if err != nil {
+		slog.Error("failed to initialise fcm sender", "error", err)
+		os.Exit(1)
+	}
+	sender = fcmSender
+
 	// Create the push gateway server.
-	// The FCM/APNs sender will be wired up in a subsequent sprint task.
 	var licenseStore pushgw.LicenseStore
 	var pushLog pushgw.PushLogger
 	if store != nil {
 		licenseStore = store
 		pushLog = store
 	}
-	gwServer := pushgw.NewServer(licenseStore, nil, pushLog)
+	gwServer := pushgw.NewServer(licenseStore, sender, pushLog)
 
 	// HTTP router with global middleware.
 	r := chi.NewRouter()

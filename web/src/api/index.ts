@@ -7,6 +7,7 @@ export { listInboundNumbers, getInboundNumber, createInboundNumber, updateInboun
 export { listCDRs, getCDR, buildExportURL } from './cdrs'
 export { listPrompts, uploadPrompt, deletePrompt, promptAudioURL } from './prompts'
 export { getSettings, updateSettings } from './settings'
+export { listFlows, getFlow, createFlow, updateFlow, deleteFlow, publishFlow, validateFlow } from './flows'
 export type {
   ApiEnvelope,
   PaginatedResponse,
@@ -28,5 +29,9 @@ export type {
   VoicemailMessage,
   AudioPrompt,
   CDR,
+  CallFlow,
+  CallFlowRequest,
+  FlowValidationIssue,
+  FlowValidationResult,
 } from './types'
 export type { SMTPSettings, SystemSettings, SMTPSettingsRequest, SystemSettingsRequest } from './settings'

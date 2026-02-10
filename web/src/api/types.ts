@@ -227,6 +227,37 @@ export interface AudioPrompt {
   created_at: string
 }
 
+/** Call flow resource. */
+export interface CallFlow {
+  id: number
+  name: string
+  flow_data: string
+  version: number
+  published: boolean
+  published_at?: string
+  created_at: string
+  updated_at: string
+}
+
+/** Call flow create/update request. */
+export interface CallFlowRequest {
+  name: string
+  flow_data?: string
+}
+
+/** Flow validation issue from the validate API. */
+export interface FlowValidationIssue {
+  severity: 'error' | 'warning'
+  node_id?: string
+  message: string
+}
+
+/** Flow validation result from POST /flows/:id/validate. */
+export interface FlowValidationResult {
+  valid: boolean
+  issues: FlowValidationIssue[]
+}
+
 /** Call detail record resource. */
 export interface CDR {
   id: number

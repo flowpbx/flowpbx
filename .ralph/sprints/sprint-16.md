@@ -18,8 +18,8 @@
 - [x] Create time switch holiday/specific date override support
 - [x] Create timezone selector component
 - [x] Create Conference Bridges CRUD page + API: `GET/POST/PUT/DELETE /api/v1/conferences`
-- [ ] Create Recordings browser page: list, search, play, download, delete
-- [ ] Create Recordings API: `GET /api/v1/recordings`, `GET .../download`, `DELETE`
+- [x] Create Recordings browser page: list, search, play, download, delete
+- [x] Create Recordings API: `GET /api/v1/recordings`, `GET .../download`, `DELETE`
 - [ ] Create Settings page: SIP ports, TLS certs, codecs, recording storage, SMTP, license key, push gateway URL
 - [ ] Implement `GET/PUT /api/v1/settings` — system config API
 - [ ] Implement `GET /api/v1/system/status` — SIP stack status, trunk registrations

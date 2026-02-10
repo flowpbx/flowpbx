@@ -281,9 +281,9 @@ func (s *Server) routes() {
 		})
 
 		r.Route("/recordings", func(r chi.Router) {
-			r.Get("/", s.handleNotImplemented)
-			r.Get("/{id}/download", s.handleNotImplemented)
-			r.Delete("/{id}", s.handleNotImplemented)
+			r.Get("/", s.handleListRecordings)
+			r.Get("/{id}/download", s.handleDownloadRecording)
+			r.Delete("/{id}", s.handleDeleteRecording)
 		})
 
 		r.Route("/prompts", func(r chi.Router) {

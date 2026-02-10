@@ -386,3 +386,18 @@ export interface CDR {
   flow_path?: string
   hangup_cause: string
 }
+
+/** Recording resource (CDR with a recording file). */
+export interface Recording {
+  id: number
+  call_id: string
+  start_time: string
+  duration?: number
+  caller_id_name: string
+  caller_id_num: string
+  callee: string
+  direction: string
+  disposition: string
+  filename: string
+  file_size?: number
+}

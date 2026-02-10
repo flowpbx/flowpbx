@@ -131,6 +131,7 @@ type CDRRepository interface {
 	Update(ctx context.Context, cdr *models.CDR) error
 	List(ctx context.Context, filter CDRListFilter) ([]models.CDR, int, error)
 	ListRecent(ctx context.Context, limit int) ([]models.CDR, error)
+	ListWithRecordings(ctx context.Context, filter CDRListFilter) ([]models.CDR, int, error)
 }
 
 // RegistrationRepository manages active SIP registrations.

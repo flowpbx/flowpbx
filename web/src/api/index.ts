@@ -12,6 +12,7 @@ export { listRingGroups, getRingGroup, createRingGroup, updateRingGroup, deleteR
 export { listIVRMenus, getIVRMenu, createIVRMenu, updateIVRMenu, deleteIVRMenu } from './ivr_menus'
 export { listTimeSwitches, getTimeSwitch, createTimeSwitch, updateTimeSwitch, deleteTimeSwitch } from './time_switches'
 export { listConferenceBridges, getConferenceBridge, createConferenceBridge, updateConferenceBridge, deleteConferenceBridge } from './conferences'
+export { listRecordings, deleteRecording, recordingDownloadURL } from './recordings'
 export type {
   ApiEnvelope,
   PaginatedResponse,
@@ -43,6 +44,7 @@ export type {
   ConferenceBridge,
   ConferenceBridgeRequest,
   CDR,
+  Recording,
   CallFlow,
   CallFlowRequest,
   FlowValidationIssue,

@@ -142,6 +142,64 @@ func (r *cdrRepo) List(ctx context.Context, filter CDRListFilter) ([]models.CDR,
 	return cdrs, total, nil
 }
 
+// ListWithRecordings returns CDRs that have a non-empty recording_file,
+// with the same filtering and pagination as List.
+func (r *cdrRepo) ListWithRecordings(ctx context.Context, filter CDRListFilter) ([]models.CDR, int, error) {
+	where := "recording_file IS NOT NULL AND recording_file != ''"
+	args := []any{}
+
+	if filter.Search != "" {
+		where += " AND (caller_id_name LIKE ? OR caller_id_num LIKE ? OR callee LIKE ?)"
+		s := "%" + filter.Search + "%"
+		args = append(args, s, s, s)
+	}
+	if filter.StartDate != "" {
+		where += " AND start_time >= ?"
+		args = append(args, filter.StartDate)
+	}
+	if filter.EndDate != "" {
+		where += " AND start_time <= ?"
+		args = append(args, filter.EndDate)
+	}
+
+	// Count total matching rows.
+	var total int
+	countQuery := "SELECT COUNT(*) FROM cdrs WHERE " + where
+	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("counting recordings: %w", err)
+	}
+
+	// Fetch the page of results.
+	query := `SELECT id, call_id, start_time, answer_time, end_time, duration,
+		 billable_dur, caller_id_name, caller_id_num, callee, trunk_id,
+		 direction, disposition, recording_file, flow_path, hangup_cause
+		 FROM cdrs WHERE ` + where + ` ORDER BY start_time DESC LIMIT ? OFFSET ?`
+	args = append(args, filter.Limit, filter.Offset)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing recordings: %w", err)
+	}
+	defer rows.Close()
+
+	var cdrs []models.CDR
+	for rows.Next() {
+		var c models.CDR
+		if err := rows.Scan(&c.ID, &c.CallID, &c.StartTime, &c.AnswerTime, &c.EndTime,
+			&c.Duration, &c.BillableDur, &c.CallerIDName, &c.CallerIDNum,
+			&c.Callee, &c.TrunkID, &c.Direction, &c.Disposition,
+			&c.RecordingFile, &c.FlowPath, &c.HangupCause); err != nil {
+			return nil, 0, fmt.Errorf("scanning recording row: %w", err)
+		}
+		cdrs = append(cdrs, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterating recording rows: %w", err)
+	}
+
+	return cdrs, total, nil
+}
+
 // ListRecent returns the most recent CDRs up to the given limit.
 func (r *cdrRepo) ListRecent(ctx context.Context, limit int) ([]models.CDR, error) {
 	rows, err := r.db.QueryContext(ctx,

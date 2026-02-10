@@ -68,8 +68,11 @@ func main() {
 	sessions := middleware.NewSessionStore()
 	middleware.StartCleanupTicker(appCtx, sessions, 15*time.Minute)
 
+	// Create adapter for trunk status so the API can query SIP trunk state.
+	trunkStatus := &trunkStatusAdapter{registrar: sipSrv.TrunkRegistrar()}
+
 	// HTTP server using the api package.
-	handler := api.NewServer(db, cfg, sessions, sysConfig)
+	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
@@ -112,4 +115,51 @@ func main() {
 	}
 
 	slog.Info("flowpbx stopped")
+}
+
+// trunkStatusAdapter bridges the SIP trunk registrar with the API's
+// TrunkStatusProvider interface, converting between SIP and API types.
+type trunkStatusAdapter struct {
+	registrar *sipserver.TrunkRegistrar
+}
+
+func (a *trunkStatusAdapter) GetTrunkStatus(trunkID int64) (api.TrunkStatusEntry, bool) {
+	st, ok := a.registrar.GetStatus(trunkID)
+	if !ok {
+		return api.TrunkStatusEntry{}, false
+	}
+	return api.TrunkStatusEntry{
+		TrunkID:        st.TrunkID,
+		Name:           st.Name,
+		Type:           st.Type,
+		Status:         string(st.Status),
+		LastError:      st.LastError,
+		RetryAttempt:   st.RetryAttempt,
+		FailedAt:       st.FailedAt,
+		RegisteredAt:   st.RegisteredAt,
+		ExpiresAt:      st.ExpiresAt,
+		LastOptionsAt:  st.LastOptionsAt,
+		OptionsHealthy: st.OptionsHealthy,
+	}, true
+}
+
+func (a *trunkStatusAdapter) GetAllTrunkStatuses() []api.TrunkStatusEntry {
+	states := a.registrar.GetAllStatuses()
+	entries := make([]api.TrunkStatusEntry, len(states))
+	for i, st := range states {
+		entries[i] = api.TrunkStatusEntry{
+			TrunkID:        st.TrunkID,
+			Name:           st.Name,
+			Type:           st.Type,
+			Status:         string(st.Status),
+			LastError:      st.LastError,
+			RetryAttempt:   st.RetryAttempt,
+			FailedAt:       st.FailedAt,
+			RegisteredAt:   st.RegisteredAt,
+			ExpiresAt:      st.ExpiresAt,
+			LastOptionsAt:  st.LastOptionsAt,
+			OptionsHealthy: st.OptionsHealthy,
+		}
+	}
+	return entries
 }

@@ -15,14 +15,15 @@ import (
 
 // Server wraps the sipgo SIP stack with FlowPBX-specific handlers.
 type Server struct {
-	cfg       *config.Config
-	ua        *sipgo.UserAgent
-	srv       *sipgo.Server
-	registrar *Registrar
-	auth      *Authenticator
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	logger    *slog.Logger
+	cfg            *config.Config
+	ua             *sipgo.UserAgent
+	srv            *sipgo.Server
+	registrar      *Registrar
+	trunkRegistrar *TrunkRegistrar
+	auth           *Authenticator
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	logger         *slog.Logger
 }
 
 // NewServer creates a SIP server with all handlers registered.
@@ -50,14 +51,16 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 
 	auth := NewAuthenticator(extensions, logger)
 	registrar := NewRegistrar(extensions, registrations, auth, logger)
+	trunkRegistrar := NewTrunkRegistrar(ua, logger)
 
 	s := &Server{
-		cfg:       cfg,
-		ua:        ua,
-		srv:       srv,
-		registrar: registrar,
-		auth:      auth,
-		logger:    logger,
+		cfg:            cfg,
+		ua:             ua,
+		srv:            srv,
+		registrar:      registrar,
+		trunkRegistrar: trunkRegistrar,
+		auth:           auth,
+		logger:         logger,
 	}
 
 	s.registerHandlers()
@@ -148,6 +151,12 @@ func (s *Server) Stop() {
 	s.srv.Close()
 	s.ua.Close()
 	s.logger.Info("sip server stopped")
+}
+
+// TrunkRegistrar returns the trunk registration manager for querying status
+// and managing trunk registrations.
+func (s *Server) TrunkRegistrar() *TrunkRegistrar {
+	return s.trunkRegistrar
 }
 
 // handleOptions responds to SIP OPTIONS requests (keepalive pings from

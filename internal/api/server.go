@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/flowpbx/flowpbx/internal/api/middleware"
 	"github.com/flowpbx/flowpbx/internal/config"
@@ -17,6 +18,28 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 )
 
+// TrunkStatusEntry represents the runtime status of a single trunk.
+type TrunkStatusEntry struct {
+	TrunkID        int64
+	Name           string
+	Type           string
+	Status         string
+	LastError      string
+	RetryAttempt   int
+	FailedAt       *time.Time
+	RegisteredAt   *time.Time
+	ExpiresAt      *time.Time
+	LastOptionsAt  *time.Time
+	OptionsHealthy bool
+}
+
+// TrunkStatusProvider exposes trunk registration status. Implemented by
+// the SIP trunk registrar.
+type TrunkStatusProvider interface {
+	GetTrunkStatus(trunkID int64) (TrunkStatusEntry, bool)
+	GetAllTrunkStatuses() []TrunkStatusEntry
+}
+
 // Server holds HTTP handler dependencies and the chi router.
 type Server struct {
 	router       *chi.Mux
@@ -25,10 +48,11 @@ type Server struct {
 	sessions     *middleware.SessionStore
 	adminUsers   database.AdminUserRepository
 	systemConfig database.SystemConfigRepository
+	trunkStatus  TrunkStatusProvider
 }
 
 // NewServer creates the HTTP handler with all routes mounted.
-func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository) *Server {
+func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider) *Server {
 	s := &Server{
 		router:       chi.NewRouter(),
 		db:           db,
@@ -36,6 +60,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		sessions:     sessions,
 		adminUsers:   database.NewAdminUserRepository(db),
 		systemConfig: sysConfig,
+		trunkStatus:  trunkStatus,
 	}
 
 	s.routes()
@@ -88,6 +113,7 @@ func (s *Server) routes() {
 		r.Route("/trunks", func(r chi.Router) {
 			r.Get("/", s.handleNotImplemented)
 			r.Post("/", s.handleNotImplemented)
+			r.Get("/status", s.handleListTrunkStatus)
 			r.Route("/{id}", func(r chi.Router) {
 				r.Get("/", s.handleNotImplemented)
 				r.Put("/", s.handleNotImplemented)
@@ -421,6 +447,44 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"user_id":  user.ID,
 		"username": user.Username,
 	})
+}
+
+// handleListTrunkStatus returns the registration status of all trunks.
+func (s *Server) handleListTrunkStatus(w http.ResponseWriter, r *http.Request) {
+	if s.trunkStatus == nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+
+	statuses := s.trunkStatus.GetAllTrunkStatuses()
+
+	items := make([]map[string]any, len(statuses))
+	for i, st := range statuses {
+		item := map[string]any{
+			"trunk_id":        st.TrunkID,
+			"name":            st.Name,
+			"type":            st.Type,
+			"status":          st.Status,
+			"last_error":      st.LastError,
+			"retry_attempt":   st.RetryAttempt,
+			"options_healthy": st.OptionsHealthy,
+		}
+		if st.FailedAt != nil {
+			item["failed_at"] = st.FailedAt.Format(time.RFC3339)
+		}
+		if st.RegisteredAt != nil {
+			item["registered_at"] = st.RegisteredAt.Format(time.RFC3339)
+		}
+		if st.ExpiresAt != nil {
+			item["expires_at"] = st.ExpiresAt.Format(time.RFC3339)
+		}
+		if st.LastOptionsAt != nil {
+			item["last_options_at"] = st.LastOptionsAt.Format(time.RFC3339)
+		}
+		items[i] = item
+	}
+
+	writeJSON(w, http.StatusOK, items)
 }
 
 // handleNotImplemented returns 501 for endpoints not yet wired up.

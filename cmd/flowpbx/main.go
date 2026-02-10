@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/flowpbx/flowpbx/internal/api"
 	"github.com/flowpbx/flowpbx/internal/config"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	"github.com/flowpbx/flowpbx/internal/database"
 )
 
 func main() {
@@ -32,25 +32,23 @@ func main() {
 		"data_dir", cfg.DataDir,
 	)
 
+	// Open database and run migrations.
+	db, err := database.Open(cfg.DataDir)
+	if err != nil {
+		slog.Error("failed to open database", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
 	// Placeholder: SIP stack initialization.
 	slog.Info("sip stack initialization placeholder", "sip_port", cfg.SIPPort)
 
-	// HTTP router.
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Recoverer)
+	// HTTP server using the api package.
+	handler := api.NewServer(db, cfg)
 
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ok"}`)
-	})
-
-	// HTTP server with graceful shutdown.
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
-		Handler:      r,
+		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,

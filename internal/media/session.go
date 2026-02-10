@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -45,6 +46,10 @@ type Session struct {
 
 	// stopped is used to signal relay goroutines to stop.
 	stopped atomic.Bool
+
+	// lastActivity stores the unix nanosecond timestamp of the last
+	// forwarded RTP packet. Used by the reaper to detect orphaned sessions.
+	lastActivity atomic.Int64
 }
 
 // State returns the current session state.
@@ -72,24 +77,62 @@ func (s *Session) IsStopped() bool {
 	return s.stopped.Load()
 }
 
+// TouchActivity updates the last activity timestamp to now.
+// Called by the relay on each successfully forwarded RTP packet.
+func (s *Session) TouchActivity() {
+	s.lastActivity.Store(time.Now().UnixNano())
+}
+
+// LastActivity returns the time of the last forwarded RTP packet,
+// or the session creation time if no packets have been relayed.
+func (s *Session) LastActivity() time.Time {
+	ns := s.lastActivity.Load()
+	if ns == 0 {
+		return s.CreatedAt
+	}
+	return time.Unix(0, ns)
+}
+
+const (
+	// DefaultSessionTimeout is how long a session can be idle (no RTP
+	// packets forwarded) before the reaper considers it orphaned.
+	DefaultSessionTimeout = 60 * time.Second
+
+	// defaultReapInterval is how often the reaper scans for orphaned sessions.
+	defaultReapInterval = 30 * time.Second
+)
+
 // SessionManager handles allocation and tracking of RTP media sessions.
 // It uses the underlying Proxy to allocate port pairs and maintains a
-// registry of active sessions.
+// registry of active sessions. A background reaper goroutine can be
+// started to automatically clean up orphaned sessions that have had
+// no RTP activity within the configured timeout.
 type SessionManager struct {
 	proxy  *Proxy
 	logger *slog.Logger
 
 	mu       sync.RWMutex
 	sessions map[string]*Session // keyed by session ID
+
+	sessionTimeout time.Duration
+	cancelReaper   context.CancelFunc
+	reaperDone     chan struct{}
 }
 
 // NewSessionManager creates a session manager backed by the given proxy.
 func NewSessionManager(proxy *Proxy, logger *slog.Logger) *SessionManager {
 	return &SessionManager{
-		proxy:    proxy,
-		logger:   logger.With("subsystem", "media-sessions"),
-		sessions: make(map[string]*Session),
+		proxy:          proxy,
+		logger:         logger.With("subsystem", "media-sessions"),
+		sessions:       make(map[string]*Session),
+		sessionTimeout: DefaultSessionTimeout,
 	}
+}
+
+// SetSessionTimeout configures the idle timeout for orphaned session
+// detection. Must be called before StartReaper.
+func (m *SessionManager) SetSessionTimeout(d time.Duration) {
+	m.sessionTimeout = d
 }
 
 // Allocate creates a new RTP session for a call by allocating two port pairs:
@@ -186,4 +229,78 @@ func (m *SessionManager) ReleaseAll() {
 	}
 
 	m.logger.Info("all rtp sessions released", "count", len(ids))
+}
+
+// StartReaper launches a background goroutine that periodically scans for
+// sessions with no RTP activity within the configured timeout and releases
+// them. Call StopReaper to shut down the goroutine gracefully.
+func (m *SessionManager) StartReaper() {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancelReaper = cancel
+	m.reaperDone = make(chan struct{})
+
+	go m.reapLoop(ctx)
+
+	m.logger.Info("session reaper started",
+		"timeout", m.sessionTimeout.String(),
+		"interval", defaultReapInterval.String(),
+	)
+}
+
+// StopReaper signals the reaper goroutine to stop and waits for it to finish.
+func (m *SessionManager) StopReaper() {
+	if m.cancelReaper == nil {
+		return
+	}
+	m.cancelReaper()
+	<-m.reaperDone
+	m.logger.Info("session reaper stopped")
+}
+
+// reapLoop runs the periodic orphan scan until the context is cancelled.
+func (m *SessionManager) reapLoop(ctx context.Context) {
+	defer close(m.reaperDone)
+
+	ticker := time.NewTicker(defaultReapInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.reapOrphaned()
+		}
+	}
+}
+
+// reapOrphaned scans all sessions and releases any that have been idle
+// longer than the configured session timeout.
+func (m *SessionManager) reapOrphaned() {
+	now := time.Now()
+
+	m.mu.RLock()
+	var orphaned []string
+	for id, session := range m.sessions {
+		idle := now.Sub(session.LastActivity())
+		if idle > m.sessionTimeout {
+			orphaned = append(orphaned, id)
+		}
+	}
+	m.mu.RUnlock()
+
+	for _, id := range orphaned {
+		m.logger.Warn("reaping orphaned rtp session",
+			"session_id", id,
+			"timeout", m.sessionTimeout.String(),
+		)
+		m.Release(id)
+	}
+
+	if len(orphaned) > 0 {
+		m.logger.Info("reaper cycle complete",
+			"reaped", len(orphaned),
+			"remaining", m.Count(),
+		)
+	}
 }

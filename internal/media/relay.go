@@ -217,7 +217,10 @@ func (r *Relay) forward(direction string, src, dst *net.UDPConn, writeRemote, le
 				"direction", direction,
 				"error", err,
 			)
+			continue
 		}
+
+		r.session.TouchActivity()
 	}
 }
 

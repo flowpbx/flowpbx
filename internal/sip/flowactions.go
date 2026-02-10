@@ -875,10 +875,115 @@ func (a *FlowSIPActions) BlindTransfer(ctx context.Context, callCtx *flow.CallCo
 	return nil
 }
 
+// conferencePINMaxAttempts is the maximum number of PIN entry attempts
+// before rejecting a caller from a PIN-protected conference.
+const conferencePINMaxAttempts = 3
+
+// conferencePINMaxDigits is the maximum number of digits accepted for a
+// conference PIN. PINs are terminated by "#" so callers can enter shorter
+// PINs without waiting for the inter-digit timeout.
+const conferencePINMaxDigits = 10
+
+// conferencePINFirstDigitTimeout is the time to wait for the first PIN
+// digit before treating it as a timeout (seconds).
+const conferencePINFirstDigitTimeout = 10
+
+// conferencePINInterDigitTimeout is the time to wait between consecutive
+// PIN digits (seconds).
+const conferencePINInterDigitTimeout = 5
+
+// verifyConferencePIN prompts the caller for the conference PIN and
+// validates it against the stored hash. Returns nil if the PIN is correct,
+// or an error if the caller fails all attempts or the context is cancelled.
+func (a *FlowSIPActions) verifyConferencePIN(ctx context.Context, callCtx *flow.CallContext, pinHash string) error {
+	callID := callCtx.CallID
+
+	a.logger.Info("conference pin required, collecting digits",
+		"call_id", callID,
+	)
+
+	for attempt := 1; attempt <= conferencePINMaxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		a.logger.Debug("conference pin attempt",
+			"call_id", callID,
+			"attempt", attempt,
+			"max_attempts", conferencePINMaxAttempts,
+		)
+
+		// Clear any stale DTMF from previous nodes or attempts.
+		callCtx.ClearDTMF()
+
+		// Collect PIN digits using the standard PlayAndCollect mechanism.
+		// The prompt is a placeholder — audio playback is not yet
+		// implemented (TODO sprint-14), but DTMF collection via SIP INFO
+		// and RFC 2833 works.
+		result, err := a.PlayAndCollect(ctx, callCtx, "conf-pin-entry", false,
+			conferencePINFirstDigitTimeout, conferencePINInterDigitTimeout, conferencePINMaxDigits)
+		if err != nil {
+			return fmt.Errorf("collecting conference pin: %w", err)
+		}
+
+		if result.TimedOut && result.Digits == "" {
+			a.logger.Debug("conference pin timeout, no digits received",
+				"call_id", callID,
+				"attempt", attempt,
+			)
+			if attempt >= conferencePINMaxAttempts {
+				a.logger.Info("conference pin max attempts exhausted (timeout)",
+					"call_id", callID,
+				)
+				return fmt.Errorf("conference pin: max attempts exhausted")
+			}
+			continue
+		}
+
+		if result.Digits == "" {
+			continue
+		}
+
+		// Verify the entered PIN against the stored Argon2id hash.
+		match, err := database.CheckPassword(result.Digits, pinHash)
+		if err != nil {
+			a.logger.Error("conference pin verification error",
+				"call_id", callID,
+				"error", err,
+			)
+			return fmt.Errorf("verifying conference pin: %w", err)
+		}
+
+		if match {
+			a.logger.Info("conference pin accepted",
+				"call_id", callID,
+				"attempt", attempt,
+			)
+			return nil
+		}
+
+		a.logger.Debug("conference pin rejected",
+			"call_id", callID,
+			"attempt", attempt,
+		)
+
+		if attempt >= conferencePINMaxAttempts {
+			a.logger.Info("conference pin max attempts exhausted (invalid)",
+				"call_id", callID,
+			)
+			return fmt.Errorf("conference pin: max attempts exhausted")
+		}
+	}
+
+	return fmt.Errorf("conference pin: max attempts exhausted")
+}
+
 // JoinConference joins the caller into the specified conference bridge.
 // This blocks until the caller leaves the conference (hang up or context
 // cancellation). The caller's RTP stream is connected to the conference
 // mixer so they can hear and be heard by all other participants.
+// If the bridge has a PIN configured, the caller is prompted to enter it
+// before being admitted. Up to 3 attempts are allowed.
 func (a *FlowSIPActions) JoinConference(ctx context.Context, callCtx *flow.CallContext, bridge *models.ConferenceBridge) error {
 	callID := callCtx.CallID
 
@@ -895,7 +1000,15 @@ func (a *FlowSIPActions) JoinConference(ctx context.Context, callCtx *flow.CallC
 		"conference", bridge.Name,
 		"conference_id", bridge.ID,
 		"max_members", bridge.MaxMembers,
+		"has_pin", bridge.PIN != "",
 	)
+
+	// If the bridge has a PIN, verify it before allowing entry.
+	if bridge.PIN != "" {
+		if err := a.verifyConferencePIN(ctx, callCtx, bridge.PIN); err != nil {
+			return fmt.Errorf("conference pin verification failed: %w", err)
+		}
+	}
 
 	// Parse the caller's SDP to extract their RTP address and codec.
 	sdpBody := callCtx.Request.Body()

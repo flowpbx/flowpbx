@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
 	"github.com/go-chi/chi/v5"
 )
@@ -26,7 +27,7 @@ type conferenceBridgeResponse struct {
 	ID            int64  `json:"id"`
 	Name          string `json:"name"`
 	Extension     string `json:"extension"`
-	PIN           string `json:"pin"`
+	HasPIN        bool   `json:"has_pin"`
 	MaxMembers    int    `json:"max_members"`
 	Record        bool   `json:"record"`
 	MuteOnJoin    bool   `json:"mute_on_join"`
@@ -40,7 +41,7 @@ func toConferenceBridgeResponse(b *models.ConferenceBridge) conferenceBridgeResp
 		ID:            b.ID,
 		Name:          b.Name,
 		Extension:     b.Extension,
-		PIN:           b.PIN,
+		HasPIN:        b.PIN != "",
 		MaxMembers:    b.MaxMembers,
 		Record:        b.Record,
 		MuteOnJoin:    b.MuteOnJoin,
@@ -79,10 +80,22 @@ func (s *Server) handleCreateConferenceBridge(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Hash the conference PIN if provided.
+	var pinHash string
+	if req.PIN != "" {
+		var err error
+		pinHash, err = database.HashPassword(req.PIN)
+		if err != nil {
+			slog.Error("create conference bridge: failed to hash pin", "error", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+	}
+
 	bridge := &models.ConferenceBridge{
 		Name:          req.Name,
 		Extension:     req.Extension,
-		PIN:           req.PIN,
+		PIN:           pinHash,
 		MaxMembers:    10,
 		Record:        false,
 		MuteOnJoin:    false,
@@ -176,7 +189,20 @@ func (s *Server) handleUpdateConferenceBridge(w http.ResponseWriter, r *http.Req
 	if req.Extension != "" {
 		existing.Extension = req.Extension
 	}
-	existing.PIN = req.PIN
+
+	// Hash the conference PIN if provided, or clear it if empty.
+	if req.PIN != "" {
+		pinHash, err := database.HashPassword(req.PIN)
+		if err != nil {
+			slog.Error("update conference bridge: failed to hash pin", "error", err, "conference_bridge_id", id)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		existing.PIN = pinHash
+	} else {
+		existing.PIN = ""
+	}
+
 	if req.MaxMembers != nil {
 		existing.MaxMembers = *req.MaxMembers
 	}

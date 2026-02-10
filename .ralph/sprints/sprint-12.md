@@ -16,7 +16,7 @@
 - [x] Implement Ring Group node handler — longest_idle strategy
 - [x] Implement Time Switch node handler (evaluate rules against current time + timezone, follow matching edge or default)
 - [x] Implement IVR Menu node handler (play prompt, collect DTMF digits, route by digit match, handle timeout + invalid)
-- [ ] Implement Voicemail node handler (play greeting from target box, record to WAV, store message, trigger MWI)
+- [x] Implement Voicemail node handler (play greeting from target box, record to WAV, store message, trigger MWI)
 - [ ] Implement Play Message node handler (play audio file via RTP, then continue to next edge)
 - [ ] Implement Hangup node handler (terminate call with configurable cause code)
 - [ ] Implement Set Caller ID node handler (override caller ID name/number for downstream nodes)

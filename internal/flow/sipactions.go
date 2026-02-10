@@ -33,6 +33,15 @@ type CollectResult struct {
 	TimedOut bool
 }
 
+// RecordResult describes the outcome of a voicemail recording operation.
+type RecordResult struct {
+	// FilePath is the path to the recorded WAV file.
+	FilePath string
+
+	// DurationSecs is the duration of the recording in seconds.
+	DurationSecs int
+}
+
 // SIPActions abstracts the SIP operations that flow node handlers need to
 // perform. This interface is defined in the flow package to avoid circular
 // dependencies between flow and sip packages. The sip package implements it.
@@ -55,4 +64,15 @@ type SIPActions interface {
 	// maxDigits limits the number of digits collected (0 = single digit).
 	// The terminator character (e.g. "#") ends collection early if pressed.
 	PlayAndCollect(ctx context.Context, callCtx *CallContext, prompt string, isTTS bool, timeout int, digitTimeout int, maxDigits int) (*CollectResult, error)
+
+	// RecordMessage plays a greeting prompt and then records the caller's
+	// message to a WAV file. Recording stops when the caller hangs up,
+	// presses '#', or the maxDuration (seconds) is reached. The filePath
+	// specifies the destination file for the recording.
+	RecordMessage(ctx context.Context, callCtx *CallContext, greeting string, maxDuration int, filePath string) (*RecordResult, error)
+
+	// SendMWI sends a SIP NOTIFY message to the specified extension to
+	// update the Message Waiting Indicator (voicemail lamp). newMessages
+	// and oldMessages indicate the counts for the mailbox summary.
+	SendMWI(ctx context.Context, ext *models.Extension, newMessages int, oldMessages int) error
 }

@@ -41,6 +41,14 @@ func (m *mockSIPActions) PlayAndCollect(_ context.Context, callCtx *flow.CallCon
 	return &flow.CollectResult{TimedOut: true}, nil
 }
 
+func (m *mockSIPActions) RecordMessage(_ context.Context, _ *flow.CallContext, _ string, _ int, _ string) (*flow.RecordResult, error) {
+	return &flow.RecordResult{}, nil
+}
+
+func (m *mockSIPActions) SendMWI(_ context.Context, _ *models.Extension, _ int, _ int) error {
+	return nil
+}
+
 func newTestIVRHandler(menu *models.IVRMenu, sip *mockSIPActions) *IVRMenuHandler {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	resolver := &mockEntityResolver{entity: menu}

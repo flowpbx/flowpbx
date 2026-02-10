@@ -1,0 +1,216 @@
+package nodes
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/flowpbx/flowpbx/internal/database"
+	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/flowpbx/flowpbx/internal/flow"
+)
+
+// defaultMaxMessageDuration is the default maximum voicemail recording length
+// in seconds, used when the voicemail box has no override configured.
+const defaultMaxMessageDuration = 120
+
+// defaultGreetingFile is the path to the built-in greeting played when a
+// voicemail box has no custom greeting configured.
+const defaultGreetingFile = "prompts/system/default_voicemail_greeting.wav"
+
+// VoicemailHandler handles the Voicemail node type. It plays the greeting
+// for the target voicemail box, records the caller's message to a WAV file,
+// stores the message metadata, and triggers MWI notification to the linked
+// extension if configured.
+type VoicemailHandler struct {
+	engine     *flow.Engine
+	sip        flow.SIPActions
+	messages   database.VoicemailMessageRepository
+	extensions database.ExtensionRepository
+	logger     *slog.Logger
+	dataDir    string
+	nowFunc    func() time.Time // injectable for testing
+}
+
+// NewVoicemailHandler creates a new VoicemailHandler.
+func NewVoicemailHandler(
+	engine *flow.Engine,
+	sip flow.SIPActions,
+	messages database.VoicemailMessageRepository,
+	extensions database.ExtensionRepository,
+	logger *slog.Logger,
+	dataDir string,
+) *VoicemailHandler {
+	return &VoicemailHandler{
+		engine:     engine,
+		sip:        sip,
+		messages:   messages,
+		extensions: extensions,
+		logger:     logger.With("handler", "voicemail"),
+		dataDir:    dataDir,
+		nowFunc:    time.Now,
+	}
+}
+
+// Execute resolves the voicemail box entity, plays its greeting, records the
+// caller's message, stores the message metadata, and sends MWI if a linked
+// extension is configured. Voicemail is a terminal node — it returns "next"
+// so the flow can optionally continue (e.g. to a hangup node).
+func (h *VoicemailHandler) Execute(ctx context.Context, callCtx *flow.CallContext, node flow.Node) (string, error) {
+	h.logger.Debug("voicemail node executing",
+		"call_id", callCtx.CallID,
+		"node_id", node.ID,
+	)
+
+	// Resolve the voicemail box entity.
+	entity, err := h.engine.ResolveNodeEntity(ctx, node)
+	if err != nil {
+		return "", fmt.Errorf("resolving voicemail box entity: %w", err)
+	}
+	if entity == nil {
+		return "", fmt.Errorf("voicemail node %s: no entity reference configured", node.ID)
+	}
+
+	box, ok := entity.(*models.VoicemailBox)
+	if !ok {
+		return "", fmt.Errorf("voicemail node %s: entity is %T, expected *models.VoicemailBox", node.ID, entity)
+	}
+
+	// Determine the greeting to play.
+	greeting := h.resolveGreeting(box)
+
+	// Determine max recording duration.
+	maxDuration := box.MaxMessageDuration
+	if maxDuration <= 0 {
+		maxDuration = defaultMaxMessageDuration
+	}
+
+	// Build the recording file path: voicemail/box_<id>/msg_<timestamp>.wav
+	now := h.nowFunc()
+	recordingDir := filepath.Join(h.dataDir, "voicemail", fmt.Sprintf("box_%d", box.ID))
+	if err := os.MkdirAll(recordingDir, 0750); err != nil {
+		return "", fmt.Errorf("creating voicemail directory: %w", err)
+	}
+	recordingFile := filepath.Join(recordingDir, fmt.Sprintf("msg_%d.wav", now.UnixMilli()))
+
+	h.logger.Info("recording voicemail",
+		"call_id", callCtx.CallID,
+		"node_id", node.ID,
+		"mailbox", box.MailboxNumber,
+		"mailbox_id", box.ID,
+		"greeting", greeting,
+		"max_duration", maxDuration,
+		"file", recordingFile,
+	)
+
+	// Play greeting and record the message.
+	result, err := h.sip.RecordMessage(ctx, callCtx, greeting, maxDuration, recordingFile)
+	if err != nil {
+		return "", fmt.Errorf("recording voicemail: %w", err)
+	}
+
+	// Store the voicemail message metadata.
+	msg := &models.VoicemailMessage{
+		MailboxID:    box.ID,
+		CallerIDName: callCtx.CallerIDName,
+		CallerIDNum:  callCtx.CallerIDNum,
+		Timestamp:    now,
+		Duration:     result.DurationSecs,
+		FilePath:     recordingFile,
+	}
+	if err := h.messages.Create(ctx, msg); err != nil {
+		h.logger.Error("failed to save voicemail message metadata",
+			"call_id", callCtx.CallID,
+			"mailbox_id", box.ID,
+			"error", err,
+		)
+		// Don't fail the node — the recording was captured even if metadata save failed.
+	} else {
+		h.logger.Info("voicemail message saved",
+			"call_id", callCtx.CallID,
+			"mailbox_id", box.ID,
+			"message_id", msg.ID,
+			"duration", result.DurationSecs,
+		)
+	}
+
+	// Send MWI notification to the linked extension, if configured.
+	if box.NotifyExtensionID != nil {
+		h.sendMWI(ctx, box, *box.NotifyExtensionID)
+	}
+
+	return "next", nil
+}
+
+// resolveGreeting returns the greeting file path for the voicemail box.
+// Custom greetings take precedence; the default system greeting is used
+// when no custom greeting is configured.
+func (h *VoicemailHandler) resolveGreeting(box *models.VoicemailBox) string {
+	if box.GreetingFile != "" {
+		return box.GreetingFile
+	}
+	return filepath.Join(h.dataDir, defaultGreetingFile)
+}
+
+// sendMWI looks up the linked extension and sends a SIP NOTIFY to update
+// the message waiting indicator. Errors are logged but do not fail the node.
+func (h *VoicemailHandler) sendMWI(ctx context.Context, box *models.VoicemailBox, extensionID int64) {
+	ext, err := h.extensions.GetByID(ctx, extensionID)
+	if err != nil {
+		h.logger.Error("failed to resolve MWI extension",
+			"mailbox_id", box.ID,
+			"extension_id", extensionID,
+			"error", err,
+		)
+		return
+	}
+	if ext == nil {
+		h.logger.Warn("MWI extension not found",
+			"mailbox_id", box.ID,
+			"extension_id", extensionID,
+		)
+		return
+	}
+
+	// Count messages in the mailbox for the MWI summary.
+	messages, err := h.messages.ListByMailbox(ctx, box.ID)
+	if err != nil {
+		h.logger.Error("failed to count voicemail messages for MWI",
+			"mailbox_id", box.ID,
+			"error", err,
+		)
+		return
+	}
+
+	newCount := 0
+	oldCount := 0
+	for _, m := range messages {
+		if m.Read {
+			oldCount++
+		} else {
+			newCount++
+		}
+	}
+
+	if err := h.sip.SendMWI(ctx, ext, newCount, oldCount); err != nil {
+		h.logger.Error("failed to send MWI notification",
+			"mailbox_id", box.ID,
+			"extension", ext.Extension,
+			"error", err,
+		)
+		return
+	}
+
+	h.logger.Info("MWI notification sent",
+		"mailbox_id", box.ID,
+		"extension", ext.Extension,
+		"new_messages", newCount,
+		"old_messages", oldCount,
+	)
+}
+
+// Ensure VoicemailHandler satisfies the NodeHandler interface.
+var _ flow.NodeHandler = (*VoicemailHandler)(nil)

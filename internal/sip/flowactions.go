@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/emiago/sipgo/sip"
@@ -649,6 +650,56 @@ func (a *FlowSIPActions) updateCDROnAnswer(callID string) {
 			"error", err,
 		)
 	}
+}
+
+// RecordMessage plays a greeting prompt and records the caller's message.
+//
+// TODO(sprint-14): Full media implementation — play greeting via RTP, then
+// record incoming RTP to WAV file. Current implementation creates an empty
+// recording file and returns immediately.
+func (a *FlowSIPActions) RecordMessage(ctx context.Context, callCtx *flow.CallContext, greeting string, maxDuration int, filePath string) (*flow.RecordResult, error) {
+	callID := callCtx.CallID
+	a.logger.Info("record message starting",
+		"call_id", callID,
+		"greeting", greeting,
+		"max_duration", maxDuration,
+		"file_path", filePath,
+	)
+
+	// Stub: create an empty file as a placeholder for the recording.
+	// The full RTP recording implementation will be added in the media sprint.
+	f, err := os.Create(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("creating recording file: %w", err)
+	}
+	f.Close()
+
+	a.logger.Info("record message completed (stub)",
+		"call_id", callID,
+		"file_path", filePath,
+	)
+
+	return &flow.RecordResult{
+		FilePath:     filePath,
+		DurationSecs: 0,
+	}, nil
+}
+
+// SendMWI sends a SIP NOTIFY to update the message waiting indicator for
+// the specified extension.
+//
+// TODO(sprint-14): Full MWI implementation — send SIP NOTIFY with
+// Messages-Waiting header to all registered devices for the extension.
+func (a *FlowSIPActions) SendMWI(ctx context.Context, ext *models.Extension, newMessages int, oldMessages int) error {
+	a.logger.Info("sending MWI notification (stub)",
+		"extension", ext.Extension,
+		"new_messages", newMessages,
+		"old_messages", oldMessages,
+	)
+
+	// Stub: log the MWI event. The full SIP NOTIFY implementation will be
+	// added in the media sprint.
+	return nil
 }
 
 // Ensure FlowSIPActions satisfies the flow.SIPActions interface.

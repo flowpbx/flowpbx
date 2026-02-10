@@ -269,6 +269,57 @@ func parseConferenceBridgeID(r *http.Request) (int64, error) {
 	return strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 }
 
+// handleMuteConferenceParticipant sets or clears the mute state for a
+// participant in an active conference room.
+func (s *Server) handleMuteConferenceParticipant(w http.ResponseWriter, r *http.Request) {
+	bridgeID, err := parseConferenceBridgeID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid conference bridge id")
+		return
+	}
+
+	participantID := chi.URLParam(r, "participantID")
+	if participantID == "" {
+		writeError(w, http.StatusBadRequest, "participant id is required")
+		return
+	}
+
+	var req struct {
+		Muted bool `json:"muted"`
+	}
+	if errMsg := readJSON(r, &req); errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
+	if s.conferenceProv == nil {
+		writeError(w, http.StatusServiceUnavailable, "conference manager not available")
+		return
+	}
+
+	if err := s.conferenceProv.MuteParticipant(bridgeID, participantID, req.Muted); err != nil {
+		slog.Error("mute conference participant: failed",
+			"error", err,
+			"conference_bridge_id", bridgeID,
+			"participant_id", participantID,
+			"muted", req.Muted,
+		)
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	slog.Info("conference participant mute state changed",
+		"conference_bridge_id", bridgeID,
+		"participant_id", participantID,
+		"muted", req.Muted,
+	)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"participant_id": participantID,
+		"muted":          req.Muted,
+	})
+}
+
 // validateConferenceBridgeRequest checks required fields for a conference bridge create/update.
 func validateConferenceBridgeRequest(req conferenceBridgeRequest, isCreate bool) string {
 	if req.Name == "" {

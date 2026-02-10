@@ -32,6 +32,7 @@ type Server struct {
 	pendingMgr     *PendingCallManager
 	sessionMgr     *media.SessionManager
 	dtmfMgr        *media.CallDTMFManager
+	conferenceMgr  *media.ConferenceManager
 	cdrs           database.CDRRepository
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
@@ -122,6 +123,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sys
 		pendingMgr:     pendingMgr,
 		sessionMgr:     sessionMgr,
 		dtmfMgr:        dtmfMgr,
+		conferenceMgr:  conferenceMgr,
 		cdrs:           cdrs,
 		logger:         logger,
 	}
@@ -666,6 +668,12 @@ func (s *Server) PendingCallManager() *PendingCallManager {
 // and collecting DTMF digits during IVR operations.
 func (s *Server) CallDTMFManager() *media.CallDTMFManager {
 	return s.dtmfMgr
+}
+
+// ConferenceManager returns the conference room manager for querying and
+// controlling active conference participants.
+func (s *Server) ConferenceManager() *media.ConferenceManager {
+	return s.conferenceMgr
 }
 
 // handleOptions responds to SIP OPTIONS requests (keepalive pings from

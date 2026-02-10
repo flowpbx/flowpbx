@@ -16,6 +16,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
 	"github.com/flowpbx/flowpbx/internal/email"
+	"github.com/flowpbx/flowpbx/internal/media"
 	"github.com/flowpbx/flowpbx/internal/prompts"
 	sipserver "github.com/flowpbx/flowpbx/internal/sip"
 	"github.com/flowpbx/flowpbx/internal/voicemail"
@@ -126,8 +127,11 @@ func main() {
 		enc:       enc,
 	}
 
+	// Create adapter for conference management so the API can mute/unmute participants.
+	conferenceProv := &conferenceProviderAdapter{mgr: sipSrv.ConferenceManager()}
+
 	// HTTP server using the api package.
-	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, trunkTester, trunkLifecycle, activeCalls, enc, reloader)
+	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, trunkTester, trunkLifecycle, activeCalls, conferenceProv, enc, reloader)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
@@ -395,4 +399,14 @@ func (cr *configReloader) Reload(ctx context.Context) error {
 
 	slog.Info("reload: trunks reloaded")
 	return nil
+}
+
+// conferenceProviderAdapter bridges the media.ConferenceManager with the
+// API's ConferenceProvider interface for runtime conference control.
+type conferenceProviderAdapter struct {
+	mgr *media.ConferenceManager
+}
+
+func (a *conferenceProviderAdapter) MuteParticipant(bridgeID int64, participantID string, muted bool) error {
+	return a.mgr.MuteParticipant(bridgeID, participantID, muted)
 }

@@ -84,6 +84,12 @@ type ConfigReloader interface {
 	Reload(ctx context.Context) error
 }
 
+// ConferenceProvider exposes runtime conference room state. Implemented by
+// an adapter that wraps the media.ConferenceManager.
+type ConferenceProvider interface {
+	MuteParticipant(bridgeID int64, participantID string, muted bool) error
+}
+
 // Server holds HTTP handler dependencies and the chi router.
 type Server struct {
 	router            *chi.Mux
@@ -104,6 +110,7 @@ type Server struct {
 	trunkTester       TrunkTester
 	trunkLifecycle    TrunkLifecycleManager
 	activeCalls       ActiveCallsProvider
+	conferenceProv    ConferenceProvider
 	configReloader    ConfigReloader
 	audioPrompts      database.AudioPromptRepository
 	voicemailBoxes    database.VoicemailBoxRepository
@@ -116,7 +123,7 @@ type Server struct {
 }
 
 // NewServer creates the HTTP handler with all routes mounted.
-func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, trunkTester TrunkTester, trunkLifecycle TrunkLifecycleManager, activeCalls ActiveCallsProvider, enc *database.Encryptor, reloader ConfigReloader) *Server {
+func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, trunkTester TrunkTester, trunkLifecycle TrunkLifecycleManager, activeCalls ActiveCallsProvider, conferenceProv ConferenceProvider, enc *database.Encryptor, reloader ConfigReloader) *Server {
 	s := &Server{
 		router:            chi.NewRouter(),
 		db:                db,
@@ -143,6 +150,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		trunkTester:       trunkTester,
 		trunkLifecycle:    trunkLifecycle,
 		activeCalls:       activeCalls,
+		conferenceProv:    conferenceProv,
 		configReloader:    reloader,
 		encryptor:         enc,
 	}
@@ -270,6 +278,7 @@ func (s *Server) routes() {
 				r.Get("/", s.handleGetConferenceBridge)
 				r.Put("/", s.handleUpdateConferenceBridge)
 				r.Delete("/", s.handleDeleteConferenceBridge)
+				r.Put("/participants/{participantID}/mute", s.handleMuteConferenceParticipant)
 			})
 		})
 

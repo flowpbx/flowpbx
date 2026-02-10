@@ -636,6 +636,11 @@ func (s *Server) DialogManager() *DialogManager {
 	return s.dialogMgr
 }
 
+// PendingCallManager returns the pending call tracker for querying ringing calls.
+func (s *Server) PendingCallManager() *PendingCallManager {
+	return s.pendingMgr
+}
+
 // handleOptions responds to SIP OPTIONS requests (keepalive pings from
 // trunks and phones).
 func (s *Server) handleOptions(req *sip.Request, tx sip.ServerTransaction) {

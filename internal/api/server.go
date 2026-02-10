@@ -56,6 +56,26 @@ type TrunkLifecycleManager interface {
 	StopTrunk(trunkID int64)
 }
 
+// ActiveCallEntry represents a single active call for the API response.
+type ActiveCallEntry struct {
+	CallID       string     `json:"call_id"`
+	State        string     `json:"state"`
+	Direction    string     `json:"direction"`
+	CallerIDName string     `json:"caller_id_name"`
+	CallerIDNum  string     `json:"caller_id_num"`
+	CalledNum    string     `json:"called_num"`
+	StartTime    time.Time  `json:"start_time"`
+	AnswerTime   *time.Time `json:"answer_time,omitempty"`
+	DurationSec  int        `json:"duration_sec"`
+}
+
+// ActiveCallsProvider exposes active call state. Implemented by
+// an adapter that queries the SIP dialog and pending call managers.
+type ActiveCallsProvider interface {
+	GetActiveCalls() []ActiveCallEntry
+	GetActiveCallCount() int
+}
+
 // Server holds HTTP handler dependencies and the chi router.
 type Server struct {
 	router         *chi.Mux
@@ -68,11 +88,12 @@ type Server struct {
 	trunkStatus    TrunkStatusProvider
 	trunkTester    TrunkTester
 	trunkLifecycle TrunkLifecycleManager
+	activeCalls    ActiveCallsProvider
 	encryptor      *database.Encryptor
 }
 
 // NewServer creates the HTTP handler with all routes mounted.
-func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, trunkTester TrunkTester, trunkLifecycle TrunkLifecycleManager, enc *database.Encryptor) *Server {
+func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, trunkTester TrunkTester, trunkLifecycle TrunkLifecycleManager, activeCalls ActiveCallsProvider, enc *database.Encryptor) *Server {
 	s := &Server{
 		router:         chi.NewRouter(),
 		db:             db,
@@ -84,6 +105,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		trunkStatus:    trunkStatus,
 		trunkTester:    trunkTester,
 		trunkLifecycle: trunkLifecycle,
+		activeCalls:    activeCalls,
 		encryptor:      enc,
 	}
 
@@ -255,7 +277,7 @@ func (s *Server) routes() {
 		r.Get("/dashboard/stats", s.handleNotImplemented)
 
 		r.Route("/calls", func(r chi.Router) {
-			r.Get("/active", s.handleNotImplemented)
+			r.Get("/active", s.handleListActiveCalls)
 			r.Post("/{id}/hangup", s.handleNotImplemented)
 			r.Post("/{id}/transfer", s.handleNotImplemented)
 		})
@@ -504,6 +526,37 @@ func (s *Server) handleListTrunkStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		if st.LastOptionsAt != nil {
 			item["last_options_at"] = st.LastOptionsAt.Format(time.RFC3339)
+		}
+		items[i] = item
+	}
+
+	writeJSON(w, http.StatusOK, items)
+}
+
+// handleListActiveCalls returns all currently active calls (both ringing
+// and answered) from the in-memory call state.
+func (s *Server) handleListActiveCalls(w http.ResponseWriter, r *http.Request) {
+	if s.activeCalls == nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+
+	calls := s.activeCalls.GetActiveCalls()
+
+	items := make([]map[string]any, len(calls))
+	for i, c := range calls {
+		item := map[string]any{
+			"call_id":        c.CallID,
+			"state":          c.State,
+			"direction":      c.Direction,
+			"caller_id_name": c.CallerIDName,
+			"caller_id_num":  c.CallerIDNum,
+			"called_num":     c.CalledNum,
+			"start_time":     c.StartTime.Format(time.RFC3339),
+			"duration_sec":   c.DurationSec,
+		}
+		if c.AnswerTime != nil {
+			item["answer_time"] = c.AnswerTime.Format(time.RFC3339)
 		}
 		items[i] = item
 	}

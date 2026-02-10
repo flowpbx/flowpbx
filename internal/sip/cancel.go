@@ -81,6 +81,26 @@ func (pm *PendingCallManager) Get(callID string) *PendingCall {
 	return pm.pending[callID]
 }
 
+// PendingCalls returns a snapshot of all currently pending (ringing) calls.
+// The returned slice is a copy safe for iteration without holding the lock.
+func (pm *PendingCallManager) PendingCalls() []*PendingCall {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	calls := make([]*PendingCall, 0, len(pm.pending))
+	for _, pc := range pm.pending {
+		calls = append(calls, pc)
+	}
+	return calls
+}
+
+// PendingCallCount returns the number of currently pending calls.
+func (pm *PendingCallManager) PendingCallCount() int {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return len(pm.pending)
+}
+
 // Cancel cancels a pending call: aborts all fork legs and sends
 // 487 Request Terminated to the caller's INVITE transaction.
 // Returns true if the call was found and cancelled.

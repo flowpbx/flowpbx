@@ -98,8 +98,14 @@ func main() {
 	// when trunks are created, updated (enabled/disabled), or deleted.
 	trunkLifecycle := &trunkLifecycleAdapter{registrar: sipSrv.TrunkRegistrar(), enc: enc}
 
+	// Create adapter for active calls so the API can query SIP call state.
+	activeCalls := &activeCallsAdapter{
+		dialogMgr:  sipSrv.DialogManager(),
+		pendingMgr: sipSrv.PendingCallManager(),
+	}
+
 	// HTTP server using the api package.
-	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, trunkTester, trunkLifecycle, enc)
+	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, trunkTester, trunkLifecycle, activeCalls, enc)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
@@ -293,4 +299,57 @@ func (a *trunkLifecycleAdapter) StartTrunk(ctx context.Context, trunk models.Tru
 
 func (a *trunkLifecycleAdapter) StopTrunk(trunkID int64) {
 	a.registrar.StopTrunk(trunkID)
+}
+
+// activeCallsAdapter bridges the SIP dialog and pending call managers with
+// the API's ActiveCallsProvider interface, combining ringing and answered
+// calls into a unified view.
+type activeCallsAdapter struct {
+	dialogMgr  *sipserver.DialogManager
+	pendingMgr *sipserver.PendingCallManager
+}
+
+func (a *activeCallsAdapter) GetActiveCalls() []api.ActiveCallEntry {
+	now := time.Now()
+	var entries []api.ActiveCallEntry
+
+	// Add answered (in-dialog) calls.
+	for _, d := range a.dialogMgr.ActiveCalls() {
+		entry := api.ActiveCallEntry{
+			CallID:       d.CallID,
+			State:        string(d.State),
+			Direction:    string(d.Direction),
+			CallerIDName: d.CallerIDName,
+			CallerIDNum:  d.CallerIDNum,
+			CalledNum:    d.CalledNum,
+			StartTime:    d.StartTime,
+			AnswerTime:   d.AnswerTime,
+			DurationSec:  int(now.Sub(d.StartTime).Seconds()),
+		}
+		entries = append(entries, entry)
+	}
+
+	// Add pending (ringing) calls.
+	for _, pc := range a.pendingMgr.PendingCalls() {
+		entry := api.ActiveCallEntry{
+			CallID: pc.CallID,
+			State:  "ringing",
+		}
+		if pc.CallerReq != nil {
+			if from := pc.CallerReq.From(); from != nil {
+				entry.CallerIDName = from.DisplayName
+				entry.CallerIDNum = from.Address.User
+			}
+			entry.CalledNum = pc.CallerReq.Recipient.User
+			entry.StartTime = now // approximate; pending calls don't track start time
+			entry.DurationSec = 0
+		}
+		entries = append(entries, entry)
+	}
+
+	return entries
+}
+
+func (a *activeCallsAdapter) GetActiveCallCount() int {
+	return a.dialogMgr.ActiveCallCount() + a.pendingMgr.PendingCallCount()
 }

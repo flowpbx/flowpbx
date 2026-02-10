@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -13,17 +14,21 @@ import (
 
 // Server holds HTTP handler dependencies and the chi router.
 type Server struct {
-	router *chi.Mux
-	db     *database.DB
-	cfg    *config.Config
+	router     *chi.Mux
+	db         *database.DB
+	cfg        *config.Config
+	sessions   *middleware.SessionStore
+	adminUsers database.AdminUserRepository
 }
 
 // NewServer creates the HTTP handler with all routes mounted.
-func NewServer(db *database.DB, cfg *config.Config) *Server {
+func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore) *Server {
 	s := &Server{
-		router: chi.NewRouter(),
-		db:     db,
-		cfg:    cfg,
+		router:     chi.NewRouter(),
+		db:         db,
+		cfg:        cfg,
+		sessions:   sessions,
+		adminUsers: database.NewAdminUserRepository(db),
 	}
 
 	s.routes()
@@ -54,8 +59,11 @@ func (s *Server) routes() {
 
 		// Auth routes (login is unauthenticated, logout/me require auth).
 		r.Post("/auth/login", s.handleLogin)
-		r.Post("/auth/logout", s.handleLogout)
-		r.Get("/auth/me", s.handleMe)
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireAuth(s.sessions, s.cfg.TLSCert != ""))
+			r.Post("/auth/logout", s.handleLogout)
+			r.Get("/auth/me", s.handleMe)
+		})
 
 		// Protected admin routes — auth middleware will be added in a
 		// subsequent sprint task when session middleware is implemented.
@@ -226,19 +234,84 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotImplemented, "setup not implemented")
 }
 
-// handleLogin is a placeholder for the login endpoint.
+// handleLogin validates admin credentials and creates a session.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusNotImplemented, "login not implemented")
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Username == "" || req.Password == "" {
+		writeError(w, http.StatusBadRequest, "username and password are required")
+		return
+	}
+
+	user, err := s.adminUsers.GetByUsername(r.Context(), req.Username)
+	if err != nil {
+		slog.Error("login: failed to query user", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+
+	match, err := database.CheckPassword(req.Password, user.PasswordHash)
+	if err != nil {
+		slog.Error("login: failed to verify password", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if !match {
+		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+
+	sess, err := s.sessions.Create(user.ID, user.Username)
+	if err != nil {
+		slog.Error("login: failed to create session", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	middleware.SetSessionCookie(w, sess, s.cfg.TLSCert != "")
+
+	slog.Info("admin login", "username", user.Username, "user_id", user.ID)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user_id":  user.ID,
+		"username": user.Username,
+	})
 }
 
-// handleLogout is a placeholder for the logout endpoint.
+// handleLogout destroys the current session and clears cookies.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusNotImplemented, "logout not implemented")
+	sessionID := middleware.SessionIDFromContext(r.Context())
+	if sessionID != "" {
+		s.sessions.Delete(sessionID)
+	}
+
+	middleware.ClearSessionCookie(w, s.cfg.TLSCert != "")
+
+	writeJSON(w, http.StatusOK, nil)
 }
 
-// handleMe is a placeholder for the current-user endpoint.
+// handleMe returns the currently authenticated admin user.
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	writeError(w, http.StatusNotImplemented, "not implemented")
+	user := middleware.AdminUserFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user_id":  user.ID,
+		"username": user.Username,
+	})
 }
 
 // handleNotImplemented returns 501 for endpoints not yet wired up.

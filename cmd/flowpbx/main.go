@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/flowpbx/flowpbx/internal/api"
+	"github.com/flowpbx/flowpbx/internal/api/middleware"
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
 )
@@ -43,8 +44,14 @@ func main() {
 	// Placeholder: SIP stack initialization.
 	slog.Info("sip stack initialization placeholder", "sip_port", cfg.SIPPort)
 
+	// Session store for admin auth.
+	sessions := middleware.NewSessionStore()
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+	middleware.StartCleanupTicker(appCtx, sessions, 15*time.Minute)
+
 	// HTTP server using the api package.
-	handler := api.NewServer(db, cfg)
+	handler := api.NewServer(db, cfg, sessions)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),

@@ -15,9 +15,9 @@
 - [x] Create CORS middleware (configurable origins)
 - [x] Implement Argon2id password hashing utility
 - [x] Create admin user table (migration) — username, password_hash, totp_secret (nullable, for Phase 2)
-- [ ] Implement `POST /api/v1/auth/login` — validate credentials, create session
-- [ ] Implement `POST /api/v1/auth/logout` — destroy session
-- [ ] Implement `GET /api/v1/auth/me` — return current admin user
+- [x] Implement `POST /api/v1/auth/login` — validate credentials, create session
+- [x] Implement `POST /api/v1/auth/logout` — destroy session
+- [x] Implement `GET /api/v1/auth/me` — return current admin user
 - [ ] Implement `GET /api/v1/health` — unauthenticated health check
 - [ ] Create first-boot detection (empty admin_users table)
 - [ ] Implement setup wizard API: `POST /api/v1/setup` — create admin account, set hostname, configure SIP ports

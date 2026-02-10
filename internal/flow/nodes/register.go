@@ -16,4 +16,5 @@ func RegisterAll(engine *flow.Engine, sipActions flow.SIPActions, extensions dat
 	engine.RegisterHandler("inbound_number", NewInboundNumberHandler(logger))
 	engine.RegisterHandler("extension", NewExtensionHandler(engine, sipActions, logger))
 	engine.RegisterHandler("ring_group", NewRingGroupHandler(engine, sipActions, extensions, logger))
+	engine.RegisterHandler("time_switch", NewTimeSwitchHandler(engine, logger))
 }

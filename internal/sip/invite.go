@@ -238,9 +238,21 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		}
 	}
 
-	// Create a cancellable context for forking. The CANCEL handler can
-	// abort all fork legs by calling cancelFork().
-	forkCtx, cancelFork := context.WithCancel(ctx)
+	// Determine ring timeout from the target extension's settings.
+	// Default to 30 seconds if unset (0 or negative).
+	ringTimeout := time.Duration(route.TargetExtension.RingTimeout) * time.Second
+	if ringTimeout <= 0 {
+		ringTimeout = 30 * time.Second
+	}
+
+	// Create a context with ring timeout for forking. The CANCEL handler can
+	// also abort all fork legs by calling cancelFork().
+	forkCtx, cancelFork := context.WithTimeout(ctx, ringTimeout)
+
+	h.logger.Debug("forking with ring timeout",
+		"call_id", callID,
+		"ring_timeout_s", int(ringTimeout.Seconds()),
+	)
 
 	// Register this call as pending so the CANCEL handler can find it.
 	h.pendingMgr.Add(&PendingCall{
@@ -299,14 +311,15 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 	}
 
 	if !result.Answered {
-		h.logger.Info("no device answered",
+		h.logger.Info("no device answered (ring timeout)",
 			"call_id", callID,
 			"target", route.TargetExtension.Extension,
+			"ring_timeout_s", int(ringTimeout.Seconds()),
 		)
 		if bridge != nil {
 			bridge.Release()
 		}
-		// 480 Temporarily Unavailable — no device picked up.
+		// 480 Temporarily Unavailable — no device picked up within ring timeout.
 		h.respondError(req, tx, 480, "Temporarily Unavailable")
 		return
 	}

@@ -19,5 +19,5 @@
 - [x] Implement BYE handling — tear down both legs, release media, update CDR
 - [x] Implement CANCEL handling — caller hangs up before answer, cancel all forks
 - [x] Implement busy detection (486 Busy Here) — all devices busy or DND enabled
-- [ ] Implement ring timeout — if no answer within extension's `ring_timeout`, return no-answer
+- [x] Implement ring timeout — if no answer within extension's `ring_timeout`, return no-answer
 - [ ] Create active calls tracking (in-memory map of call ID → call state)

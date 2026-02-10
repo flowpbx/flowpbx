@@ -3,15 +3,7 @@ import { listIVRMenus, createIVRMenu, updateIVRMenu, deleteIVRMenu, ApiError } f
 import type { IVRMenu, IVRMenuRequest } from '../api'
 import DataTable, { type Column } from '../components/DataTable'
 import { TextInput, NumberInput } from '../components/FormFields'
-
-const DIGIT_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '*', '#', 't', 'i'] as const
-
-const DIGIT_LABELS: Record<string, string> = {
-  '1': '1', '2': '2', '3': '3', '4': '4', '5': '5',
-  '6': '6', '7': '7', '8': '8', '9': '9', '0': '0',
-  '*': '* (Star)', '#': '# (Hash)',
-  't': 'Timeout', 'i': 'Invalid',
-}
+import DigitMappingEditor from '../components/DigitMappingEditor'
 
 export default function IVRMenus() {
   const [menus, setMenus] = useState<IVRMenu[]>([])
@@ -253,28 +245,10 @@ export default function IVRMenus() {
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Digit Mappings</label>
-            <p className="text-xs text-gray-500 mb-2">
-              Enter a destination label or node reference for each digit. Leave blank to skip.
-            </p>
-            <div className="border border-gray-200 rounded-md divide-y divide-gray-100">
-              {DIGIT_KEYS.map((key) => (
-                <div key={key} className="flex items-center gap-3 px-3 py-2">
-                  <span className="w-20 text-sm font-medium text-gray-700 shrink-0">
-                    {DIGIT_LABELS[key]}
-                  </span>
-                  <input
-                    type="text"
-                    value={form.options[key] ?? ''}
-                    onChange={(e) => setOption(key, e.currentTarget.value)}
-                    placeholder="destination"
-                    className="flex-1 rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
+          <DigitMappingEditor
+            options={form.options}
+            onChange={setOption}
+          />
 
           <div className="pt-4 border-t border-gray-100">
             <button

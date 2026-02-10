@@ -12,8 +12,8 @@
 - [x] Create directory structure: `cmd/flowpbx/`, `cmd/pushgw/`, `internal/config/`, `internal/database/`, `internal/api/`, `internal/sip/`, `internal/media/`, `internal/flow/`, `internal/voicemail/`, `internal/recording/`, `internal/push/`, `internal/license/`, `internal/pushgw/`
 - [x] Create `cmd/flowpbx/main.go` entry point (boots HTTP server, placeholder SIP init)
 - [x] Create `cmd/pushgw/main.go` entry point (boots push gateway HTTP server)
-- [ ] Create Makefile with targets: `build`, `dev`, `test`, `lint`, `ui-build`, `release`
-- [ ] Set up cross-compilation in Makefile for linux/amd64 and linux/arm64
+- [x] Create Makefile with targets: `build`, `dev`, `test`, `lint`, `ui-build`, `release`
+- [x] Set up cross-compilation in Makefile for linux/amd64 and linux/arm64
 - [ ] Create `.github/workflows/ci.yml` — lint + test on PR
 - [ ] Create `.github/workflows/release.yml` — build + release on tag
 - [ ] Create `internal/config/config.go` — load config from CLI flags, env vars (`FLOWPBX_` prefix), and defaults

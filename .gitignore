@@ -1,0 +1,23 @@
+# Build artifacts
+build/
+
+# Web UI build output
+web/dist/
+web/node_modules/
+
+# Data directory
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local

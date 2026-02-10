@@ -407,6 +407,43 @@ type outboundResult struct {
 	err        error
 }
 
+// callerIDSource describes where the outbound caller ID values were taken from.
+type callerIDSource string
+
+const (
+	callerIDFromTrunk     callerIDSource = "trunk"
+	callerIDFromExtension callerIDSource = "extension"
+)
+
+// buildOutboundCallerID determines the caller ID name and number to use on an
+// outbound INVITE. The rules are:
+//  1. If the trunk has CallerIDName and/or CallerIDNum configured, those values
+//     take priority (the trunk provider may require a specific caller ID).
+//  2. Otherwise, fall back to the calling extension's Name and Extension number.
+//
+// Each field (name and number) is resolved independently, so a trunk could
+// override just the number while letting the extension's name pass through.
+func buildOutboundCallerID(ext *models.Extension, trunk *models.Trunk) (name, number string, source callerIDSource) {
+	// Start with extension values as defaults.
+	if ext != nil {
+		name = ext.Name
+		number = ext.Extension
+	}
+	source = callerIDFromExtension
+
+	// Trunk caller ID overrides extension values when set.
+	if trunk.CallerIDName != "" {
+		name = trunk.CallerIDName
+		source = callerIDFromTrunk
+	}
+	if trunk.CallerIDNum != "" {
+		number = trunk.CallerIDNum
+		source = callerIDFromTrunk
+	}
+
+	return name, number, source
+}
+
 // applyPrefixRules transforms a dialed number according to trunk prefix rules.
 // It strips the configured number of leading digits, then prepends the configured
 // prefix. For example, with PrefixStrip=1 and PrefixAdd="0044", dialing
@@ -472,10 +509,26 @@ func (h *InviteHandler) sendOutboundInvite(
 	// Preserve the Call-ID for CDR correlation.
 	req.AppendHeader(sip.NewHeader("Call-ID", callID))
 
+	// Apply caller ID rules: trunk CID overrides extension CID.
+	cidName, cidNum, cidSource := buildOutboundCallerID(ic.CallerExtension, trunk)
+	from := &sip.FromHeader{
+		DisplayName: cidName,
+		Address: sip.Uri{
+			Scheme: "sip",
+			User:   cidNum,
+			Host:   h.proxyIP,
+		},
+	}
+	from.Params.Add("tag", sip.GenerateTagN(16))
+	req.AppendHeader(from)
+
 	h.logger.Debug("sending outbound invite to trunk",
 		"call_id", callID,
 		"trunk", trunk.Name,
 		"recipient", recipientStr,
+		"caller_id_name", cidName,
+		"caller_id_num", cidNum,
+		"caller_id_source", cidSource,
 	)
 
 	// Send the initial INVITE.

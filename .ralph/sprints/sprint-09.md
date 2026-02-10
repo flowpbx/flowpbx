@@ -14,7 +14,7 @@
 - [x] Implement outbound dialling: extension sends INVITE to external number
 - [x] Implement outbound trunk selection: ordered by priority field, skip failed/disabled trunks
 - [x] Implement prefix manipulation: strip N leading digits (`prefix_strip`), add prefix (`prefix_add`)
-- [ ] Implement caller ID rules for outbound: use extension CID, trunk CID, or override
+- [x] Implement caller ID rules for outbound: use extension CID, trunk CID, or override
 - [ ] Implement max_channels enforcement per trunk (reject if at limit)
 - [ ] Create inbound numbers CRUD API: `GET/POST/PUT/DELETE /api/v1/numbers`
 - [ ] Create extensions CRUD API: `GET/POST/PUT/DELETE /api/v1/extensions`

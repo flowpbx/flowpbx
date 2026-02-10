@@ -148,6 +148,29 @@ export interface TrunkRequest {
   priority?: number
 }
 
+/** Inbound number resource. */
+export interface InboundNumber {
+  id: number
+  number: string
+  name: string
+  trunk_id: number | null
+  flow_id: number | null
+  flow_entry_node: string
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+/** Inbound number create/update request. */
+export interface InboundNumberRequest {
+  number: string
+  name: string
+  trunk_id?: number | null
+  flow_id?: number | null
+  flow_entry_node?: string
+  enabled?: boolean
+}
+
 /** Voicemail box resource. */
 export interface VoicemailBox {
   id: number

@@ -19,4 +19,4 @@
 - [x] Create inbound numbers CRUD API: `GET/POST/PUT/DELETE /api/v1/numbers`
 - [x] Create extensions CRUD API: `GET/POST/PUT/DELETE /api/v1/extensions`
 - [x] Implement `GET /api/v1/extensions/:id/registrations` — list active registrations for extension
-- [ ] Add inbound numbers CRUD page to admin UI
+- [x] Add inbound numbers CRUD page to admin UI

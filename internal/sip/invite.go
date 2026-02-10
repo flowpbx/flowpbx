@@ -79,7 +79,7 @@ func NewInviteHandler(
 	proxyIP string,
 	logger *slog.Logger,
 ) *InviteHandler {
-	router := NewCallRouter(extensions, registrations, logger)
+	router := NewCallRouter(extensions, registrations, dialogMgr, logger)
 	return &InviteHandler{
 		extensions:     extensions,
 		registrations:  registrations,
@@ -179,6 +179,13 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		switch err {
 		case ErrDND:
 			h.logger.Info("internal call rejected: dnd enabled",
+				"call_id", callID,
+				"target", ic.TargetExtension.Extension,
+			)
+			h.respondError(req, tx, 486, "Busy Here")
+			return
+		case ErrAllBusy:
+			h.logger.Info("internal call rejected: all devices busy",
 				"call_id", callID,
 				"target", ic.TargetExtension.Extension,
 			)

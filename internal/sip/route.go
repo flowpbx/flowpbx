@@ -25,6 +25,7 @@ type RouteResult struct {
 type CallRouter struct {
 	extensions    database.ExtensionRepository
 	registrations database.RegistrationRepository
+	dialogMgr     *DialogManager
 	logger        *slog.Logger
 }
 
@@ -32,11 +33,13 @@ type CallRouter struct {
 func NewCallRouter(
 	extensions database.ExtensionRepository,
 	registrations database.RegistrationRepository,
+	dialogMgr *DialogManager,
 	logger *slog.Logger,
 ) *CallRouter {
 	return &CallRouter{
 		extensions:    extensions,
 		registrations: registrations,
+		dialogMgr:     dialogMgr,
 		logger:        logger.With("subsystem", "router"),
 	}
 }
@@ -92,6 +95,21 @@ func (r *CallRouter) RouteInternalCall(ctx context.Context, ic *InviteContext) (
 		return nil, ErrNoRegistrations
 	}
 
+	// Check if all registered devices are already in active calls.
+	// If the extension has as many (or more) active calls as registered
+	// devices, every device is busy and there's nothing to ring.
+	if r.dialogMgr != nil {
+		activeCalls := r.dialogMgr.ActiveCallCountForExtension(ext.ID)
+		if activeCalls > 0 && activeCalls >= len(active) {
+			r.logger.Info("all devices busy for target extension",
+				"extension", ext.Extension,
+				"active_calls", activeCalls,
+				"registered_devices", len(active),
+			)
+			return nil, ErrAllBusy
+		}
+	}
+
 	r.logger.Info("internal call routed",
 		"caller", ic.CallerIDNum,
 		"target", ext.Extension,
@@ -110,4 +128,5 @@ var (
 	ErrExtensionNotFound = fmt.Errorf("extension not found")
 	ErrDND               = fmt.Errorf("do not disturb enabled")
 	ErrNoRegistrations   = fmt.Errorf("no active registrations")
+	ErrAllBusy           = fmt.Errorf("all devices busy")
 )

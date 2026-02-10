@@ -254,12 +254,13 @@ func (f *Forker) Fork(
 			forkCancel()
 			goto answered
 
-		case res.StatusCode == 486:
-			// Busy — track it.
+		case res.StatusCode == 486 || res.StatusCode == 600 || res.StatusCode == 603:
+			// Busy — 486 Busy Here, 600 Busy Everywhere, 603 Decline.
 			busyCount++
 			f.logger.Debug("fork leg busy",
 				"call_id", callID,
 				"contact", lr.leg.contact.ContactURI,
+				"status", res.StatusCode,
 			)
 			if busyCount+failedCount >= totalLegs {
 				break

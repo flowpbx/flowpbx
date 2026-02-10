@@ -236,3 +236,23 @@ func (dm *DialogManager) HasDialog(callID string) bool {
 	_, ok := dm.dialogs[callID]
 	return ok
 }
+
+// ActiveCallCountForExtension returns the number of active calls involving
+// the given extension ID (as either caller or callee). This is used for
+// busy detection: if the count equals or exceeds the number of registered
+// devices, the extension is considered busy.
+func (dm *DialogManager) ActiveCallCountForExtension(extensionID int64) int {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+
+	count := 0
+	for _, d := range dm.dialogs {
+		if d.Caller.Extension != nil && d.Caller.Extension.ID == extensionID {
+			count++
+		}
+		if d.Callee.Extension != nil && d.Callee.Extension.ID == extensionID {
+			count++
+		}
+	}
+	return count
+}

@@ -26,6 +26,10 @@ type ForkResult struct {
 	// which the caller must ACK.
 	AnsweringTx sip.ClientTransaction
 
+	// AnsweringLeg contains the fork leg details for the answering device,
+	// including the original INVITE request needed to build the ACK.
+	AnsweringLeg *forkLeg
+
 	// AllBusy is true if every fork responded with 486 Busy Here.
 	AllBusy bool
 
@@ -76,6 +80,13 @@ func NewForker(ua *sipgo.UserAgent, logger *slog.Logger) (*Forker, error) {
 // Close releases the forker's SIP client resources.
 func (f *Forker) Close() {
 	f.client.Close()
+}
+
+// Client returns the underlying SIP client for sending out-of-transaction
+// requests (e.g. ACK for 2xx responses). Per RFC 3261 §13.2.2.4, the ACK
+// for a 2xx is sent by the UAC core directly, not via a client transaction.
+func (f *Forker) Client() *sipgo.Client {
+	return f.client
 }
 
 // Fork sends INVITE requests to all contacts in parallel (ring-all strategy).
@@ -291,6 +302,7 @@ answered:
 		AnsweringContact: &winningLeg.contact,
 		AnswerResponse:   winningResponse,
 		AnsweringTx:      winningLeg.tx,
+		AnsweringLeg:     winningLeg,
 	}
 }
 

@@ -86,6 +86,7 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 func (s *Server) registerHandlers() {
 	s.srv.OnInvite(s.inviteHandler.HandleInvite)
 	s.srv.OnRegister(s.registrar.HandleRegister)
+	s.srv.OnAck(s.handleACK)
 	s.srv.OnOptions(s.handleOptions)
 	s.srv.OnInfo(s.handleInfo)
 }
@@ -177,6 +178,28 @@ func (s *Server) Stop() {
 // and managing trunk registrations.
 func (s *Server) TrunkRegistrar() *TrunkRegistrar {
 	return s.trunkRegistrar
+}
+
+// handleACK processes incoming ACK requests. Per RFC 3261 §13.2.2.4, when
+// the PBX (as B2BUA) sends a 200 OK to the caller, the caller responds
+// with an ACK to confirm the dialog. ACK requests are not transactional —
+// they have no response. For now we log receipt; dialog state tracking
+// (matching ACK to active calls) will be implemented in dialog.go.
+func (s *Server) handleACK(req *sip.Request, tx sip.ServerTransaction) {
+	callID := ""
+	if cid := req.CallID(); cid != nil {
+		callID = cid.Value()
+	}
+
+	s.logger.Debug("sip ack received",
+		"call_id", callID,
+		"from", req.From().Address.User,
+		"source", req.Source(),
+	)
+
+	// TODO: Match the ACK to the active call dialog and confirm the
+	// caller leg of the call. This will be connected when dialog.go
+	// implements call state tracking.
 }
 
 // handleOptions responds to SIP OPTIONS requests (keepalive pings from

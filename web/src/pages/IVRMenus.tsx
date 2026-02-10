@@ -4,6 +4,7 @@ import type { IVRMenu, IVRMenuRequest } from '../api'
 import DataTable, { type Column } from '../components/DataTable'
 import { TextInput, NumberInput } from '../components/FormFields'
 import DigitMappingEditor from '../components/DigitMappingEditor'
+import PromptSelector from '../components/PromptSelector'
 
 export default function IVRMenus() {
   const [menus, setMenus] = useState<IVRMenu[]>([])
@@ -14,6 +15,7 @@ export default function IVRMenus() {
   const [saving, setSaving] = useState(false)
 
   const [form, setForm] = useState<IVRMenuRequest>(emptyForm())
+  const [greetingType, setGreetingType] = useState<'none' | 'tts' | 'audio'>('none')
 
   function emptyForm(): IVRMenuRequest {
     return {
@@ -41,6 +43,7 @@ export default function IVRMenus() {
 
   function openCreate() {
     setForm(emptyForm())
+    setGreetingType('none')
     setEditing(null)
     setCreating(true)
     setError('')
@@ -56,6 +59,7 @@ export default function IVRMenus() {
       digit_timeout: ivr.digit_timeout,
       options: ivr.options ?? {},
     })
+    setGreetingType(ivr.greeting_file ? 'audio' : ivr.greeting_tts ? 'tts' : 'none')
     setEditing(ivr)
     setCreating(true)
     setError('')
@@ -208,13 +212,46 @@ export default function IVRMenus() {
             placeholder="Main Menu"
           />
 
-          <TextInput
-            label="Greeting TTS Text"
-            id="ivr_greeting_tts"
-            value={form.greeting_tts ?? ''}
-            onChange={(e) => setForm({ ...form, greeting_tts: e.currentTarget.value })}
-            placeholder="Press 1 for Sales, Press 2 for Support..."
-          />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Greeting</label>
+            <div className="flex gap-1 mb-2">
+              {(['none', 'tts', 'audio'] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => {
+                    setGreetingType(t)
+                    if (t !== 'audio') setForm((f) => ({ ...f, greeting_file: '' }))
+                    if (t !== 'tts') setForm((f) => ({ ...f, greeting_tts: '' }))
+                  }}
+                  className={`px-3 py-1 text-xs font-medium rounded-md border transition-colors ${
+                    greetingType === t
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  {t === 'none' ? 'None' : t === 'tts' ? 'TTS Text' : 'Audio File'}
+                </button>
+              ))}
+            </div>
+
+            {greetingType === 'tts' && (
+              <TextInput
+                label=""
+                id="ivr_greeting_tts"
+                value={form.greeting_tts ?? ''}
+                onChange={(e) => setForm({ ...form, greeting_tts: e.currentTarget.value })}
+                placeholder="Press 1 for Sales, Press 2 for Support..."
+              />
+            )}
+
+            {greetingType === 'audio' && (
+              <PromptSelector
+                value={form.greeting_file ?? ''}
+                onChange={(filename) => setForm({ ...form, greeting_file: filename })}
+              />
+            )}
+          </div>
 
           <div className="grid grid-cols-3 gap-4">
             <NumberInput

@@ -11,7 +11,7 @@
 - [x] Create Ring Groups CRUD page + API: `GET/POST/PUT/DELETE /api/v1/ring-groups`
 - [x] Create IVR Menus CRUD page + API: `GET/POST/PUT/DELETE /api/v1/ivr-menus`
 - [x] Create IVR digit mapping editor UI (0-9, *, #, timeout, invalid)
-- [ ] Create IVR audio prompt upload / select from library in UI
+- [x] Create IVR audio prompt upload / select from library in UI
 - [ ] Create Time Switches CRUD page + API: `GET/POST/PUT/DELETE /api/v1/time-switches`
 - [ ] Create time switch visual rule editor: day checkboxes + time range pickers
 - [ ] Create time switch weekly grid preview

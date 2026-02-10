@@ -44,10 +44,12 @@ type TrunkState struct {
 
 // TrunkRegistrar manages outbound SIP registrations for register-type trunks.
 // It sends REGISTER requests to upstream providers and maintains registration
-// state with periodic re-registration.
+// state with periodic re-registration. It also manages IP-auth trunk ACL
+// matching for inbound call identification.
 type TrunkRegistrar struct {
-	ua     *sipgo.UserAgent
-	logger *slog.Logger
+	ua        *sipgo.UserAgent
+	logger    *slog.Logger
+	ipMatcher *IPAuthMatcher
 
 	mu     sync.RWMutex
 	states map[int64]*trunkEntry // keyed by trunk ID
@@ -71,11 +73,18 @@ type trunkEntry struct {
 
 // NewTrunkRegistrar creates a trunk registration manager.
 func NewTrunkRegistrar(ua *sipgo.UserAgent, logger *slog.Logger) *TrunkRegistrar {
+	l := logger.With("subsystem", "trunk-registrar")
 	return &TrunkRegistrar{
-		ua:     ua,
-		logger: logger.With("subsystem", "trunk-registrar"),
-		states: make(map[int64]*trunkEntry),
+		ua:        ua,
+		logger:    l,
+		ipMatcher: NewIPAuthMatcher(l),
+		states:    make(map[int64]*trunkEntry),
 	}
+}
+
+// IPMatcher returns the IP-auth matcher for querying trunk ACLs.
+func (tr *TrunkRegistrar) IPMatcher() *IPAuthMatcher {
+	return tr.ipMatcher
 }
 
 // StartTrunk begins registration for a register-type trunk.
@@ -129,6 +138,7 @@ func (tr *TrunkRegistrar) StartTrunk(ctx context.Context, trunk models.Trunk) er
 }
 
 // StopTrunk cancels the registration loop for a trunk and sends an un-register.
+// For IP-auth trunks, this also removes the trunk from the IP matcher.
 func (tr *TrunkRegistrar) StopTrunk(trunkID int64) {
 	tr.mu.Lock()
 	entry, ok := tr.states[trunkID]
@@ -139,6 +149,11 @@ func (tr *TrunkRegistrar) StopTrunk(trunkID int64) {
 
 	if !ok {
 		return
+	}
+
+	// Remove from IP matcher if this was an IP-auth trunk.
+	if entry.trunk.Type == "ip" {
+		tr.ipMatcher.RemoveTrunk(trunkID)
 	}
 
 	// Cancel health check loop first.
@@ -397,6 +412,9 @@ func (tr *TrunkRegistrar) sendRegister(ctx context.Context, entry *trunkEntry, e
 // StartHealthCheck begins an OPTIONS ping health check loop for a trunk that
 // does not require registration (e.g. IP-auth trunks). For register-type
 // trunks, health checking is started automatically by StartTrunk.
+//
+// For IP-auth trunks, this also registers the trunk's remote_hosts ACL with
+// the IP matcher so inbound requests can be matched to this trunk.
 func (tr *TrunkRegistrar) StartHealthCheck(ctx context.Context, trunk models.Trunk) error {
 	if !trunk.Enabled {
 		tr.setStatus(trunk.ID, trunk.Name, trunk.Type, TrunkStatusDisabled, "")
@@ -405,6 +423,13 @@ func (tr *TrunkRegistrar) StartHealthCheck(ctx context.Context, trunk models.Tru
 
 	// Stop existing entry if running.
 	tr.StopTrunk(trunk.ID)
+
+	// Register IP-auth ACL for inbound matching.
+	if trunk.Type == "ip" {
+		if err := tr.ipMatcher.AddTrunk(trunk); err != nil {
+			return fmt.Errorf("adding ip-auth acl for trunk %q: %w", trunk.Name, err)
+		}
+	}
 
 	client, err := sipgo.NewClient(tr.ua,
 		sipgo.WithClientLogger(tr.logger.With("trunk", trunk.Name)),

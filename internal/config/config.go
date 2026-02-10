@@ -1,0 +1,157 @@
+package config
+
+import (
+	"flag"
+	"fmt"
+	"log/slog"
+	"os"
+	"strconv"
+	"strings"
+)
+
+// Config holds all runtime configuration for the FlowPBX server.
+// Precedence: CLI flags > env vars > defaults.
+type Config struct {
+	DataDir    string
+	HTTPPort   int
+	SIPPort    int
+	SIPTLSPort int
+	TLSCert    string
+	TLSKey     string
+	LogLevel   string
+}
+
+// defaults
+const (
+	defaultDataDir    = "./data"
+	defaultHTTPPort   = 8080
+	defaultSIPPort    = 5060
+	defaultSIPTLSPort = 5061
+	defaultLogLevel   = "info"
+)
+
+// envPrefix is the prefix for all FlowPBX environment variables.
+const envPrefix = "FLOWPBX_"
+
+// Load parses configuration from CLI flags and environment variables.
+// Precedence: CLI flags > env vars > defaults.
+func Load() (*Config, error) {
+	cfg := &Config{}
+
+	fs := flag.NewFlagSet("flowpbx", flag.ContinueOnError)
+
+	fs.StringVar(&cfg.DataDir, "data-dir", defaultDataDir, "data directory for database and file storage")
+	fs.IntVar(&cfg.HTTPPort, "http-port", defaultHTTPPort, "HTTP server listen port")
+	fs.IntVar(&cfg.SIPPort, "sip-port", defaultSIPPort, "SIP UDP/TCP listen port")
+	fs.IntVar(&cfg.SIPTLSPort, "sip-tls-port", defaultSIPTLSPort, "SIP TLS listen port")
+	fs.StringVar(&cfg.TLSCert, "tls-cert", "", "path to TLS certificate file")
+	fs.StringVar(&cfg.TLSKey, "tls-key", "", "path to TLS private key file")
+	fs.StringVar(&cfg.LogLevel, "log-level", defaultLogLevel, "log level (debug, info, warn, error)")
+
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		return nil, fmt.Errorf("parsing flags: %w", err)
+	}
+
+	// Apply env var overrides for any flags not explicitly set on the command line.
+	// CLI flags take precedence over env vars.
+	applyEnvOverrides(fs, cfg)
+
+	if err := cfg.validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	return cfg, nil
+}
+
+// applyEnvOverrides checks environment variables for any flag that was not
+// explicitly provided on the command line. This preserves the precedence:
+// CLI flags > env vars > defaults.
+func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
+	// Track which flags were explicitly set via CLI.
+	set := make(map[string]bool)
+	fs.Visit(func(f *flag.Flag) {
+		set[f.Name] = true
+	})
+
+	// Map of flag name to env var name.
+	envMap := map[string]string{
+		"data-dir":     envPrefix + "DATA_DIR",
+		"http-port":    envPrefix + "HTTP_PORT",
+		"sip-port":     envPrefix + "SIP_PORT",
+		"sip-tls-port": envPrefix + "SIP_TLS_PORT",
+		"tls-cert":     envPrefix + "TLS_CERT",
+		"tls-key":      envPrefix + "TLS_KEY",
+		"log-level":    envPrefix + "LOG_LEVEL",
+	}
+
+	for flagName, envVar := range envMap {
+		if set[flagName] {
+			continue
+		}
+		val, ok := os.LookupEnv(envVar)
+		if !ok || val == "" {
+			continue
+		}
+		switch flagName {
+		case "data-dir":
+			cfg.DataDir = val
+		case "http-port":
+			if v, err := strconv.Atoi(val); err == nil {
+				cfg.HTTPPort = v
+			}
+		case "sip-port":
+			if v, err := strconv.Atoi(val); err == nil {
+				cfg.SIPPort = v
+			}
+		case "sip-tls-port":
+			if v, err := strconv.Atoi(val); err == nil {
+				cfg.SIPTLSPort = v
+			}
+		case "tls-cert":
+			cfg.TLSCert = val
+		case "tls-key":
+			cfg.TLSKey = val
+		case "log-level":
+			cfg.LogLevel = val
+		}
+	}
+}
+
+// validate checks that the config values are sane.
+func (c *Config) validate() error {
+	if c.HTTPPort < 1 || c.HTTPPort > 65535 {
+		return fmt.Errorf("http-port must be between 1 and 65535, got %d", c.HTTPPort)
+	}
+	if c.SIPPort < 1 || c.SIPPort > 65535 {
+		return fmt.Errorf("sip-port must be between 1 and 65535, got %d", c.SIPPort)
+	}
+	if c.SIPTLSPort < 1 || c.SIPTLSPort > 65535 {
+		return fmt.Errorf("sip-tls-port must be between 1 and 65535, got %d", c.SIPTLSPort)
+	}
+	validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
+	if !validLevels[strings.ToLower(c.LogLevel)] {
+		return fmt.Errorf("log-level must be one of debug, info, warn, error; got %q", c.LogLevel)
+	}
+	c.LogLevel = strings.ToLower(c.LogLevel)
+
+	// TLS cert and key must both be set or both be empty.
+	if (c.TLSCert == "") != (c.TLSKey == "") {
+		return fmt.Errorf("tls-cert and tls-key must both be provided or both be omitted")
+	}
+
+	return nil
+}
+
+// SlogLevel returns the slog.Level corresponding to the configured log level.
+func (c *Config) SlogLevel() slog.Level {
+	switch c.LogLevel {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,38 +10,30 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
 func main() {
-	httpPort := flag.Int("http-port", 8080, "HTTP server listen port")
-	sipPort := flag.Int("sip-port", 5060, "SIP UDP/TCP listen port")
-	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
-	flag.Parse()
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Configure structured logging.
-	var level slog.Level
-	switch *logLevel {
-	case "debug":
-		level = slog.LevelDebug
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	default:
-		level = slog.LevelInfo
-	}
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.SlogLevel()}))
 	slog.SetDefault(logger)
 
 	slog.Info("starting flowpbx",
-		"http_port", *httpPort,
-		"sip_port", *sipPort,
+		"http_port", cfg.HTTPPort,
+		"sip_port", cfg.SIPPort,
+		"data_dir", cfg.DataDir,
 	)
 
 	// Placeholder: SIP stack initialization.
-	slog.Info("sip stack initialization placeholder", "sip_port", *sipPort)
+	slog.Info("sip stack initialization placeholder", "sip_port", cfg.SIPPort)
 
 	// HTTP router.
 	r := chi.NewRouter()
@@ -58,7 +49,7 @@ func main() {
 
 	// HTTP server with graceful shutdown.
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", *httpPort),
+		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
 		Handler:      r,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,

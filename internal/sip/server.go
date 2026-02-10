@@ -97,7 +97,8 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor) (*S
 
 	// Create the flow engine for inbound call routing via visual flow graphs.
 	flowEngine := flow.NewEngine(callFlows, cdrs, nil, logger)
-	nodes.RegisterAll(flowEngine, logger)
+	flowSIPActions := NewFlowSIPActions(extensions, registrations, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, proxyIP, logger)
+	nodes.RegisterAll(flowEngine, flowSIPActions, logger)
 
 	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, flowEngine, proxyIP, logger)
 

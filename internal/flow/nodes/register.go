@@ -7,6 +7,9 @@ import (
 )
 
 // RegisterAll registers all implemented node handlers on the flow engine.
-func RegisterAll(engine *flow.Engine, logger *slog.Logger) {
+// The sipActions parameter provides SIP operations needed by handlers that
+// interact with the call (ringing extensions, media bridging, etc.).
+func RegisterAll(engine *flow.Engine, sipActions flow.SIPActions, logger *slog.Logger) {
 	engine.RegisterHandler("inbound_number", NewInboundNumberHandler(logger))
+	engine.RegisterHandler("extension", NewExtensionHandler(engine, sipActions, logger))
 }

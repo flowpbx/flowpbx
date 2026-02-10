@@ -67,6 +67,7 @@ type InviteHandler struct {
 	cdrs           database.CDRRepository
 	flowEngine     *flow.Engine
 	proxyIP        string
+	dataDir        string
 	logger         *slog.Logger
 }
 
@@ -86,6 +87,7 @@ func NewInviteHandler(
 	cdrs database.CDRRepository,
 	flowEngine *flow.Engine,
 	proxyIP string,
+	dataDir string,
 	logger *slog.Logger,
 ) *InviteHandler {
 	router := NewCallRouter(extensions, registrations, dialogMgr, logger)
@@ -105,6 +107,7 @@ func NewInviteHandler(
 		cdrs:           cdrs,
 		flowEngine:     flowEngine,
 		proxyIP:        proxyIP,
+		dataDir:        dataDir,
 		logger:         logger.With("subsystem", "invite"),
 	}
 }
@@ -442,6 +445,11 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		dialog.Callee.RemoteTarget = uri
 	}
 
+	// Start call recording if either extension has recording_mode "always".
+	if shouldRecord(ic.CallerExtension, ic.TargetExtension) && mediaSession != nil {
+		dialog.Recorder = h.startCallRecording(callID, mediaSession)
+	}
+
 	h.dialogMgr.CreateDialog(dialog)
 	h.updateCDROnAnswer(callID, 0)
 
@@ -451,6 +459,7 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		"callee", ic.RequestURI,
 		"active_calls", h.dialogMgr.ActiveCallCount(),
 		"media_bridged", mediaSession != nil,
+		"recording", dialog.Recorder != nil,
 	)
 }
 
@@ -784,6 +793,11 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 		dialog.Callee.RemoteTarget = uri
 	}
 
+	// Start call recording if the target extension has recording_mode "always".
+	if shouldRecord(nil, ic.TargetExtension) && mediaSession != nil {
+		dialog.Recorder = h.startCallRecording(callID, mediaSession)
+	}
+
 	h.dialogMgr.CreateDialog(dialog)
 	h.updateCDROnAnswer(callID, ic.TrunkID)
 
@@ -794,6 +808,7 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 		"trunk_id", ic.TrunkID,
 		"active_calls", h.dialogMgr.ActiveCallCount(),
 		"media_bridged", mediaSession != nil,
+		"recording", dialog.Recorder != nil,
 	)
 }
 
@@ -1045,6 +1060,55 @@ func (h *InviteHandler) createInitialCDR(ic *InviteContext, callID string) {
 		"cdr_id", cdr.ID,
 		"direction", cdr.Direction,
 	)
+}
+
+// shouldRecord determines whether a call should be recorded based on the
+// recording_mode of both the caller and callee extensions. Returns true if
+// either party has recording_mode set to "always".
+func shouldRecord(caller, callee *models.Extension) bool {
+	if caller != nil && caller.RecordingMode == "always" {
+		return true
+	}
+	if callee != nil && callee.RecordingMode == "always" {
+		return true
+	}
+	return false
+}
+
+// startCallRecording creates a Recorder for the call and attaches it to the
+// media session's relay. Returns the recorder on success, or nil if recording
+// could not be started (errors are logged but not fatal to the call).
+func (h *InviteHandler) startCallRecording(callID string, mediaSession *media.MediaSession) *media.Recorder {
+	if h.dataDir == "" || mediaSession == nil {
+		return nil
+	}
+
+	filePath := media.RecordingPath(h.dataDir, callID, time.Now())
+	rec, err := media.NewRecorder(filePath, h.logger)
+	if err != nil {
+		h.logger.Error("failed to start call recording",
+			"call_id", callID,
+			"file", filePath,
+			"error", err,
+		)
+		return nil
+	}
+
+	if err := mediaSession.SetRecorder(rec); err != nil {
+		h.logger.Error("failed to attach recorder to media session",
+			"call_id", callID,
+			"error", err,
+		)
+		rec.Stop()
+		return nil
+	}
+
+	h.logger.Info("call recording started",
+		"call_id", callID,
+		"file", filePath,
+	)
+
+	return rec
 }
 
 // MapSIPToDisposition maps a SIP response status code to a CDR-friendly

@@ -105,6 +105,11 @@ type Dialog struct {
 	// Media is the RTP media session for this call, managing the relay
 	// between caller and callee legs. Released on call teardown.
 	Media *media.MediaSession
+
+	// Recorder is the call recorder attached to this dialog's media relay.
+	// Non-nil when per-extension recording is active (recording_mode "always").
+	// Stopped on call teardown and the file path is stored in the CDR.
+	Recorder *media.Recorder
 }
 
 // Duration returns the total call duration from start to end.

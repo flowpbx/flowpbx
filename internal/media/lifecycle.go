@@ -74,6 +74,20 @@ func (ms *MediaSession) StartRelay(callerRemote, calleeRemote *net.UDPAddr, allo
 	return nil
 }
 
+// SetRecorder attaches a call recorder to the relay. Both directions of
+// RTP audio will be fed to the recorder. Must be called after StartRelay.
+// Returns an error if no relay is running.
+func (ms *MediaSession) SetRecorder(rec *Recorder) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	if ms.relay == nil {
+		return fmt.Errorf("cannot set recorder: no relay running for session %q", ms.session.ID)
+	}
+	ms.relay.SetRecorder(rec)
+	return nil
+}
+
 // Stop gracefully stops the relay (if running) and transitions the session
 // to the Stopped state. The session remains allocated; call Release to
 // return ports to the pool.

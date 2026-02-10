@@ -83,6 +83,10 @@ type Relay struct {
 	// Initialized from SDP and updated on first packet (symmetric RTP).
 	calleeRemote *atomicAddr
 
+	// recorder captures both directions of RTP audio to a WAV file.
+	// Set via SetRecorder before Start, or nil to disable recording.
+	recorder *Recorder
+
 	wg sync.WaitGroup
 }
 
@@ -102,6 +106,12 @@ func NewRelay(session *Session, callerRemote, calleeRemote *net.UDPAddr, allowed
 		callerRemote: newAtomicAddr(callerRemote),
 		calleeRemote: newAtomicAddr(calleeRemote),
 	}
+}
+
+// SetRecorder attaches a call recorder to this relay. Both directions of
+// RTP audio will be fed to the recorder. Must be called before Start.
+func (r *Relay) SetRecorder(rec *Recorder) {
+	r.recorder = rec
 }
 
 // Start begins bidirectional RTP relay between the two legs.
@@ -216,6 +226,13 @@ func (r *Relay) forward(direction string, src, dst *net.UDPConn, writeRemote, le
 				)
 			}
 			learned = true
+		}
+
+		// Feed RTP payload to recorder if active. The RTP payload starts
+		// after the fixed 12-byte header (plus CSRC and extension if present,
+		// but G.711 typically has none). We use the simple 12-byte offset.
+		if r.recorder != nil && n > minRTPHeader {
+			r.recorder.Feed(pkt[minRTPHeader:n], pt)
 		}
 
 		_, err = dst.WriteToUDP(pkt, writeRemote.load())

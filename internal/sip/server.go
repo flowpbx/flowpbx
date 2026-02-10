@@ -108,7 +108,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sys
 	flowSIPActions := NewFlowSIPActions(extensions, registrations, forker, dialogMgr, pendingMgr, sessionMgr, dtmfMgr, conferenceMgr, cdrs, proxyIP, logger)
 	nodes.RegisterAll(flowEngine, flowSIPActions, extensions, voicemailMessages, sysConfig, enc, emailSend, cfg.DataDir, logger)
 
-	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, flowEngine, proxyIP, logger)
+	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, flowEngine, proxyIP, cfg.DataDir, logger)
 
 	s := &Server{
 		cfg:            cfg,
@@ -333,6 +333,17 @@ func (s *Server) handleBYE(req *sip.Request, tx sip.ServerTransaction) {
 		hangupCause = "callee_bye"
 	}
 
+	// Stop call recording if active. Must be done before releasing media
+	// so the recorder can drain remaining packets from the relay.
+	if d.Recorder != nil {
+		filePath, duration := d.Recorder.Stop()
+		s.logger.Info("call recording stopped on bye",
+			"call_id", callID,
+			"file", filePath,
+			"duration_secs", duration,
+		)
+	}
+
 	// Release media resources.
 	if d.Media != nil {
 		d.Media.Release()
@@ -347,7 +358,7 @@ func (s *Server) handleBYE(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 
-	// Create CDR record.
+	// Finalize CDR record (includes recording file path if recorded).
 	s.finalizeCDR(terminated)
 }
 
@@ -535,6 +546,11 @@ func (s *Server) finalizeCDR(d *Dialog) {
 	cdr.Disposition = d.Disposition()
 	cdr.HangupCause = d.HangupCause
 
+	// Store recording file path if call was recorded.
+	if d.Recorder != nil {
+		cdr.RecordingFile = d.Recorder.FilePath()
+	}
+
 	if err := s.cdrs.Update(ctx, cdr); err != nil {
 		s.logger.Error("failed to finalize cdr",
 			"call_id", d.CallID,
@@ -594,6 +610,9 @@ func (s *Server) handleCANCEL(req *sip.Request, tx sip.ServerTransaction) {
 			"call_id", callID,
 		)
 		s.sendBYEToCallee(d)
+		if d.Recorder != nil {
+			d.Recorder.Stop()
+		}
 		if d.Media != nil {
 			d.Media.Release()
 		}

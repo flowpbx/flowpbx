@@ -94,6 +94,10 @@ func (f *Forker) Client() *sipgo.Client {
 // inbound server transaction (callerTx). The first 200 OK from any fork wins;
 // all other forks are immediately cancelled via CANCEL.
 //
+// If sdpBody is non-nil, it overrides the SDP body from the incoming INVITE
+// for all forked legs. This is used by the media proxy to rewrite SDP so that
+// the callee's RTP is directed to the proxy rather than the caller directly.
+//
 // The caller is responsible for:
 //   - Sending ACK for the winning fork's 200 OK
 //   - Setting up media bridging
@@ -107,6 +111,7 @@ func (f *Forker) Fork(
 	contacts []models.Registration,
 	callerExt *models.Extension,
 	callID string,
+	sdpBody []byte,
 ) *ForkResult {
 	if len(contacts) == 0 {
 		return &ForkResult{Error: fmt.Errorf("no contacts to fork to")}
@@ -120,7 +125,7 @@ func (f *Forker) Fork(
 	// Launch all fork legs.
 	legs := make([]*forkLeg, 0, len(contacts))
 	for i := range contacts {
-		leg, err := f.createLeg(forkCtx, incomingReq, &contacts[i], callerExt, callID)
+		leg, err := f.createLeg(forkCtx, incomingReq, &contacts[i], callerExt, callID, sdpBody)
 		if err != nil {
 			f.logger.Error("failed to create fork leg",
 				"call_id", callID,
@@ -307,12 +312,14 @@ answered:
 }
 
 // createLeg builds and sends a forked INVITE to one registered contact.
+// If sdpBody is non-nil, it is used instead of the incoming INVITE's SDP.
 func (f *Forker) createLeg(
 	ctx context.Context,
 	incomingReq *sip.Request,
 	contact *models.Registration,
 	callerExt *models.Extension,
 	callID string,
+	sdpBody []byte,
 ) (*forkLeg, error) {
 	// Parse the contact URI as the Request-URI for the outbound INVITE.
 	var recipient sip.Uri
@@ -330,14 +337,15 @@ func (f *Forker) createLeg(
 	req := sip.NewRequest(sip.INVITE, recipient)
 	req.SetTransport(transportForContact(contact))
 
-	// Copy the SDP body from the incoming INVITE. In later sprints this will
-	// be rewritten with the media proxy's RTP addresses; for now we pass it
-	// through to enable basic call setup.
-	if len(incomingReq.Body()) > 0 {
-		req.SetBody(incomingReq.Body())
-		if ct := incomingReq.ContentType(); ct != nil {
-			req.AppendHeader(sip.NewHeader("Content-Type", ct.Value()))
-		}
+	// Set the SDP body. If an sdpBody override is provided (rewritten by the
+	// media proxy), use it; otherwise copy from the incoming INVITE.
+	body := sdpBody
+	if body == nil {
+		body = incomingReq.Body()
+	}
+	if len(body) > 0 {
+		req.SetBody(body)
+		req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	}
 
 	// Set caller ID in the From header (the SIP client will populate From

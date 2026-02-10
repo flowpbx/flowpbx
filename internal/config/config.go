@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ type Config struct {
 	TLSKey        string
 	LogLevel      string
 	CORSOrigins   string
+	ExternalIP    string // public IP for SDP rewriting (media proxy)
 	EncryptionKey string // 32-byte hex-encoded key for AES-256-GCM
 }
 
@@ -57,6 +59,7 @@ func Load() (*Config, error) {
 	fs.StringVar(&cfg.TLSKey, "tls-key", "", "path to TLS private key file")
 	fs.StringVar(&cfg.LogLevel, "log-level", defaultLogLevel, "log level (debug, info, warn, error)")
 	fs.StringVar(&cfg.CORSOrigins, "cors-origins", "", "comma-separated list of allowed CORS origins (use * for all)")
+	fs.StringVar(&cfg.ExternalIP, "external-ip", "", "public IP address for SDP rewriting (auto-detected if empty)")
 	fs.StringVar(&cfg.EncryptionKey, "encryption-key", "", "hex-encoded 32-byte key for AES-256-GCM encryption of sensitive fields")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -96,6 +99,7 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 		"tls-key":        envPrefix + "TLS_KEY",
 		"log-level":      envPrefix + "LOG_LEVEL",
 		"cors-origins":   envPrefix + "CORS_ORIGINS",
+		"external-ip":    envPrefix + "EXTERNAL_IP",
 		"encryption-key": envPrefix + "ENCRYPTION_KEY",
 	}
 
@@ -138,6 +142,8 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 			cfg.LogLevel = val
 		case "cors-origins":
 			cfg.CORSOrigins = val
+		case "external-ip":
+			cfg.ExternalIP = val
 		case "encryption-key":
 			cfg.EncryptionKey = val
 		}
@@ -203,6 +209,28 @@ func (c *Config) SIPHost() string {
 		return "localhost"
 	}
 	return hostname
+}
+
+// MediaIP returns the IP address to use in SDP for the media proxy.
+// If ExternalIP is configured, it is returned directly. Otherwise the
+// function attempts to detect the machine's primary non-loopback IPv4 address.
+// Falls back to "127.0.0.1" if detection fails.
+func (c *Config) MediaIP() string {
+	if c.ExternalIP != "" {
+		return c.ExternalIP
+	}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "127.0.0.1"
+	}
+	for _, addr := range addrs {
+		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
+			if ipNet.IP.To4() != nil {
+				return ipNet.IP.String()
+			}
+		}
+	}
+	return "127.0.0.1"
 }
 
 // SlogLevel returns the slog.Level corresponding to the configured log level.

@@ -7,6 +7,7 @@ import (
 
 	"github.com/emiago/sipgo/sip"
 	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/flowpbx/flowpbx/internal/media"
 )
 
 // CallState represents the lifecycle state of a call.
@@ -96,6 +97,10 @@ type Dialog struct {
 
 	// HangupCause describes why the call ended.
 	HangupCause string
+
+	// Media is the RTP media session for this call, managing the relay
+	// between caller and callee legs. Released on call teardown.
+	Media *media.MediaSession
 }
 
 // Duration returns the total call duration from start to end.

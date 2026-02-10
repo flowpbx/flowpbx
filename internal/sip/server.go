@@ -25,6 +25,7 @@ type Server struct {
 	forker         *Forker
 	auth           *Authenticator
 	dialogMgr      *DialogManager
+	sessionMgr     *media.SessionManager
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
 	logger         *slog.Logger
@@ -65,8 +66,25 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 		return nil, fmt.Errorf("creating invite forker: %w", err)
 	}
 
+	// Create RTP media proxy and session manager.
+	rtpProxy, err := media.NewProxy(cfg.RTPPortMin, cfg.RTPPortMax, logger)
+	if err != nil {
+		forker.Close()
+		srv.Close()
+		ua.Close()
+		return nil, fmt.Errorf("creating rtp media proxy: %w", err)
+	}
+
+	sessionMgr := media.NewSessionManager(rtpProxy, logger)
+	proxyIP := cfg.MediaIP()
+	logger.Info("media proxy configured",
+		"proxy_ip", proxyIP,
+		"rtp_port_min", cfg.RTPPortMin,
+		"rtp_port_max", cfg.RTPPortMax,
+	)
+
 	dialogMgr := NewDialogManager(logger)
-	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunkRegistrar, auth, forker, dialogMgr, logger)
+	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunkRegistrar, auth, forker, dialogMgr, sessionMgr, proxyIP, logger)
 
 	s := &Server{
 		cfg:            cfg,
@@ -78,6 +96,7 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 		forker:         forker,
 		auth:           auth,
 		dialogMgr:      dialogMgr,
+		sessionMgr:     sessionMgr,
 		logger:         logger,
 	}
 
@@ -161,6 +180,9 @@ func (s *Server) Start(ctx context.Context) error {
 		s.registrar.RunExpiryCleanup(ctx)
 	}()
 
+	// Start the RTP session reaper for orphaned media sessions.
+	s.sessionMgr.StartReaper()
+
 	return nil
 }
 
@@ -171,6 +193,11 @@ func (s *Server) Stop() {
 		s.cancel()
 	}
 	s.wg.Wait()
+	// Stop the session reaper and release all active media sessions.
+	if s.sessionMgr != nil {
+		s.sessionMgr.StopReaper()
+		s.sessionMgr.ReleaseAll()
+	}
 	if s.forker != nil {
 		s.forker.Close()
 	}
@@ -243,6 +270,14 @@ func (s *Server) handleBYE(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 
+	// Release media resources before terminating the dialog.
+	if d.Media != nil {
+		d.Media.Release()
+		s.logger.Debug("media session released on bye",
+			"call_id", callID,
+		)
+	}
+
 	// Acknowledge the BYE with 200 OK.
 	res := sip.NewResponseFromRequest(req, 200, "OK", nil)
 	if err := tx.Respond(res); err != nil {
@@ -252,7 +287,7 @@ func (s *Server) handleBYE(req *sip.Request, tx sip.ServerTransaction) {
 	// Terminate the dialog and record hangup cause.
 	s.dialogMgr.TerminateDialog(callID, "normal_clearing")
 
-	// TODO: Send BYE to the other leg, release media resources, create CDR.
+	// TODO: Send BYE to the other leg, create CDR.
 }
 
 // handleCANCEL processes incoming CANCEL requests when the caller hangs up

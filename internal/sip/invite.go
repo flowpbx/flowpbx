@@ -9,6 +9,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/flowpbx/flowpbx/internal/media"
 )
 
 // CallType identifies the direction/nature of a call.
@@ -58,6 +59,8 @@ type InviteHandler struct {
 	router         *CallRouter
 	forker         *Forker
 	dialogMgr      *DialogManager
+	sessionMgr     *media.SessionManager
+	proxyIP        string
 	logger         *slog.Logger
 }
 
@@ -70,6 +73,8 @@ func NewInviteHandler(
 	auth *Authenticator,
 	forker *Forker,
 	dialogMgr *DialogManager,
+	sessionMgr *media.SessionManager,
+	proxyIP string,
 	logger *slog.Logger,
 ) *InviteHandler {
 	router := NewCallRouter(extensions, registrations, logger)
@@ -82,6 +87,8 @@ func NewInviteHandler(
 		router:         router,
 		forker:         forker,
 		dialogMgr:      dialogMgr,
+		sessionMgr:     sessionMgr,
+		proxyIP:        proxyIP,
 		logger:         logger.With("subsystem", "invite"),
 	}
 }
@@ -204,14 +211,35 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		"contacts", len(route.Contacts),
 	)
 
+	// Phase 1 of media bridging: allocate RTP session and rewrite the caller's
+	// SDP so forked INVITEs direct the callee's RTP to the proxy.
+	var bridge *MediaBridge
+	var calleeSDP []byte
+	if len(req.Body()) > 0 && h.sessionMgr != nil {
+		var err error
+		bridge, calleeSDP, err = AllocateMediaBridge(h.sessionMgr, req.Body(), callID, h.proxyIP, h.logger)
+		if err != nil {
+			h.logger.Error("failed to allocate media bridge",
+				"call_id", callID,
+				"error", err,
+			)
+			h.respondError(req, tx, 500, "Internal Server Error")
+			return
+		}
+	}
+
 	// Fork INVITE to all registered contacts (multi-device ringing).
-	result := h.forker.Fork(ctx, req, tx, route.Contacts, ic.CallerExtension, callID)
+	// Pass the rewritten SDP so callees send RTP to the proxy.
+	result := h.forker.Fork(ctx, req, tx, route.Contacts, ic.CallerExtension, callID, calleeSDP)
 
 	if result.Error != nil {
 		h.logger.Error("fork failed",
 			"call_id", callID,
 			"error", result.Error,
 		)
+		if bridge != nil {
+			bridge.Release()
+		}
 		h.respondError(req, tx, 500, "Internal Server Error")
 		return
 	}
@@ -221,6 +249,9 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 			"call_id", callID,
 			"target", route.TargetExtension.Extension,
 		)
+		if bridge != nil {
+			bridge.Release()
+		}
 		h.respondError(req, tx, 486, "Busy Here")
 		return
 	}
@@ -230,6 +261,9 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 			"call_id", callID,
 			"target", route.TargetExtension.Extension,
 		)
+		if bridge != nil {
+			bridge.Release()
+		}
 		// 480 Temporarily Unavailable — no device picked up.
 		h.respondError(req, tx, 480, "Temporarily Unavailable")
 		return
@@ -253,6 +287,9 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 			"error", err,
 		)
 		result.AnsweringTx.Terminate()
+		if bridge != nil {
+			bridge.Release()
+		}
 		h.respondError(req, tx, 500, "Internal Server Error")
 		return
 	}
@@ -262,11 +299,29 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		"contact", result.AnsweringContact.ContactURI,
 	)
 
+	// Phase 2 of media bridging: negotiate codec, rewrite callee's SDP for the
+	// caller, and start the RTP relay.
+	var mediaSession *media.MediaSession
+	okBody := result.AnswerResponse.Body()
+	if bridge != nil && len(result.AnswerResponse.Body()) > 0 {
+		rewrittenForCaller, err := bridge.CompleteMediaBridge(result.AnswerResponse.Body())
+		if err != nil {
+			h.logger.Error("failed to complete media bridge",
+				"call_id", callID,
+				"error", err,
+			)
+			// Fall back to direct media (SDP pass-through) — bridge already released.
+		} else {
+			okBody = rewrittenForCaller
+			mediaSession = bridge.Session()
+		}
+	}
+
 	// Forward the 200 OK from the callee back to the caller.
-	// Copy the SDP body so the caller can set up media.
-	okResponse := sip.NewResponseFromRequest(req, 200, "OK", result.AnswerResponse.Body())
-	if ct := result.AnswerResponse.ContentType(); ct != nil {
-		okResponse.AppendHeader(sip.NewHeader("Content-Type", ct.Value()))
+	// Use the (potentially rewritten) SDP body.
+	okResponse := sip.NewResponseFromRequest(req, 200, "OK", okBody)
+	if len(okBody) > 0 {
+		okResponse.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	}
 
 	if err := tx.Respond(okResponse); err != nil {
@@ -276,6 +331,9 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		)
 		// Clean up the answering leg since the caller won't get the 200 OK.
 		result.AnsweringTx.Terminate()
+		if mediaSession != nil {
+			mediaSession.Release()
+		}
 		return
 	}
 
@@ -292,6 +350,7 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		CalleeTx:     result.AnsweringTx,
 		CalleeReq:    result.AnsweringLeg.req,
 		CalleeRes:    result.AnswerResponse,
+		Media:        mediaSession,
 		Caller: CallLeg{
 			Extension: ic.CallerExtension,
 		},
@@ -327,10 +386,8 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		"caller", ic.CallerIDNum,
 		"callee", ic.RequestURI,
 		"active_calls", h.dialogMgr.ActiveCallCount(),
+		"media_bridged", mediaSession != nil,
 	)
-
-	// TODO: Set up media bridging (allocate RTP proxy session, rewrite SDP).
-	// This will be implemented in a subsequent sprint task.
 }
 
 // classifyCall determines whether the INVITE is internal, inbound, or outbound.

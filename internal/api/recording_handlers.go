@@ -171,6 +171,47 @@ func parseRecordingID(r *http.Request) (int64, error) {
 	return strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 }
 
+// handleRecordingStorageUsage returns storage usage statistics for recordings:
+// total size on disk, file count, and recording count tracked in the database.
+func (s *Server) handleRecordingStorageUsage(w http.ResponseWriter, r *http.Request) {
+	recordingsDir := filepath.Join(s.cfg.DataDir, "recordings")
+
+	var totalBytes int64
+	var fileCount int
+
+	// Walk the recordings directory to sum file sizes.
+	err := filepath.Walk(recordingsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip inaccessible files
+		}
+		if !info.IsDir() {
+			totalBytes += info.Size()
+			fileCount++
+		}
+		return nil
+	})
+	if err != nil && !os.IsNotExist(err) {
+		slog.Error("recording storage: failed to walk directory", "error", err, "dir", recordingsDir)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Count recordings tracked in the database.
+	dbCount, err := s.cdrs.CountRecordings(r.Context())
+	if err != nil {
+		slog.Error("recording storage: failed to count recordings", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total_bytes":     totalBytes,
+		"total_mb":        float64(totalBytes) / (1024 * 1024),
+		"file_count":      fileCount,
+		"recording_count": dbCount,
+	})
+}
+
 // recordingFilePath resolves a recording file path. If the path is relative,
 // it is resolved under the data directory's recordings subdirectory.
 func (s *Server) recordingFilePath(path string) string {

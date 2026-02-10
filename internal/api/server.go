@@ -315,6 +315,7 @@ func (s *Server) routes() {
 
 		r.Route("/recordings", func(r chi.Router) {
 			r.Get("/", s.handleListRecordings)
+			r.Get("/storage", s.handleRecordingStorageUsage)
 			r.Get("/{id}/download", s.handleDownloadRecording)
 			r.Delete("/{id}", s.handleDeleteRecording)
 		})

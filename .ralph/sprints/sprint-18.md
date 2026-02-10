@@ -15,7 +15,7 @@
 - [x] Organize recording files by date: `$DATA_DIR/recordings/YYYY/MM/DD/call_{id}.wav`
 - [x] Store recording_file path in CDR on recording completion
 - [x] Implement recording retention policy: auto-delete recordings older than configurable days
-- [ ] Add storage usage monitoring (total recordings size)
+- [x] Add storage usage monitoring (total recordings size)
 - [ ] Create recording browser API with playback stream and download
 - [ ] Implement follow-me: sequential ring — ring registered devices → after timeout → ring external numbers via trunk
 - [ ] Implement follow-me: simultaneous ring option (ring all at once)

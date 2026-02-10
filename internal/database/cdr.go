@@ -231,6 +231,17 @@ func (r *cdrRepo) ListRecent(ctx context.Context, limit int) ([]models.CDR, erro
 	return cdrs, nil
 }
 
+// CountRecordings returns the number of CDRs that have a non-empty recording_file.
+func (r *cdrRepo) CountRecordings(ctx context.Context) (int, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM cdrs WHERE recording_file IS NOT NULL AND recording_file != ''`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("counting recordings: %w", err)
+	}
+	return count, nil
+}
+
 // DeleteExpiredRecordings clears the recording_file field on CDRs whose
 // start_time is older than the given number of days and that have a non-empty
 // recording_file. Returns the file paths of the cleared recordings so callers

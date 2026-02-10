@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
@@ -29,6 +31,12 @@ type RingGroupHandler struct {
 	// starting member index is counter % len(members). State resets on
 	// process restart, which is standard PBX behavior.
 	rrCounters sync.Map
+
+	// lastAnswered tracks the last time each extension answered a call,
+	// keyed by extension ID (int64). Used by the longest_idle strategy
+	// to ring the member who has been idle the longest. State resets on
+	// process restart, which is standard PBX behavior.
+	lastAnswered sync.Map
 }
 
 // NewRingGroupHandler creates a new RingGroupHandler.
@@ -148,6 +156,8 @@ func (h *RingGroupHandler) Execute(ctx context.Context, callCtx *flow.CallContex
 		return h.executeRoundRobin(ctx, callCtx, node, rg, members, ringTimeout)
 	case "random":
 		return h.executeRandom(ctx, callCtx, node, rg, members, ringTimeout)
+	case "longest_idle":
+		return h.executeLongestIdle(ctx, callCtx, node, rg, members, ringTimeout)
 	default:
 		// ring_all is the default strategy (also used for unrecognized values).
 		return h.executeRingAll(ctx, callCtx, node, rg, members, ringTimeout)
@@ -318,6 +328,109 @@ func (h *RingGroupHandler) executeRandom(ctx context.Context, callCtx *flow.Call
 	)
 
 	return "no_answer", nil
+}
+
+// executeLongestIdle sorts members by their last answered time (ascending)
+// and rings each member sequentially, starting with the one who has been idle
+// the longest. Members who have never answered a call (or after process
+// restart) are treated as infinitely idle and tried first. Each member gets
+// the full ring timeout before the next member is tried.
+func (h *RingGroupHandler) executeLongestIdle(ctx context.Context, callCtx *flow.CallContext, node flow.Node, rg *models.RingGroup, members []*models.Extension, ringTimeout int) (string, error) {
+	// Sort a copy by last answered time ascending (oldest first).
+	sorted := make([]*models.Extension, len(members))
+	copy(sorted, members)
+	sort.Slice(sorted, func(i, j int) bool {
+		ti := h.getLastAnswered(sorted[i].ID)
+		tj := h.getLastAnswered(sorted[j].ID)
+		// Zero times (never answered) sort before non-zero times.
+		if ti.IsZero() && !tj.IsZero() {
+			return true
+		}
+		if !ti.IsZero() && tj.IsZero() {
+			return false
+		}
+		return ti.Before(tj)
+	})
+
+	h.logger.Debug("longest_idle member order",
+		"call_id", callCtx.CallID,
+		"ring_group", rg.Name,
+		"order", extensionNumbers(sorted),
+	)
+
+	for _, member := range sorted {
+		h.logger.Debug("longest_idle ringing member",
+			"call_id", callCtx.CallID,
+			"ring_group", rg.Name,
+			"extension", member.Extension,
+		)
+
+		result, err := h.sip.RingExtension(ctx, callCtx, member, ringTimeout)
+		if err != nil {
+			h.logger.Error("longest_idle ring extension failed",
+				"call_id", callCtx.CallID,
+				"ring_group", rg.Name,
+				"extension", member.Extension,
+				"error", err,
+			)
+			continue
+		}
+
+		if result.Answered {
+			h.recordAnswer(member.ID)
+			h.logger.Info("ring group answered",
+				"call_id", callCtx.CallID,
+				"node_id", node.ID,
+				"ring_group", rg.Name,
+				"answered_by", member.Extension,
+				"strategy", "longest_idle",
+			)
+			return "answered", nil
+		}
+
+		// If the member was busy or had DND, move to next member immediately.
+		if result.AllBusy || result.DND || result.NoRegistrations {
+			h.logger.Debug("longest_idle member unavailable, trying next",
+				"call_id", callCtx.CallID,
+				"ring_group", rg.Name,
+				"extension", member.Extension,
+				"busy", result.AllBusy,
+				"dnd", result.DND,
+				"no_registrations", result.NoRegistrations,
+			)
+			continue
+		}
+
+		// Timed out — try next member.
+	}
+
+	h.logger.Info("ring group not answered",
+		"call_id", callCtx.CallID,
+		"node_id", node.ID,
+		"ring_group", rg.Name,
+		"reason", "all_members_tried",
+		"strategy", "longest_idle",
+	)
+
+	return "no_answer", nil
+}
+
+// getLastAnswered returns the last time the extension answered a call.
+// Returns the zero time if the extension has never answered (or state was
+// reset on process restart).
+func (h *RingGroupHandler) getLastAnswered(extensionID int64) time.Time {
+	val, ok := h.lastAnswered.Load(extensionID)
+	if !ok {
+		return time.Time{}
+	}
+	return val.(time.Time)
+}
+
+// recordAnswer records the current time as the last answered time for the
+// given extension. Called when a member answers a call under the longest_idle
+// strategy so that subsequent calls deprioritize recently active members.
+func (h *RingGroupHandler) recordAnswer(extensionID int64) {
+	h.lastAnswered.Store(extensionID, time.Now())
 }
 
 // extensionNumbers returns a slice of extension numbers for logging.

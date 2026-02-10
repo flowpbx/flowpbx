@@ -79,51 +79,53 @@ type ActiveCallsProvider interface {
 
 // Server holds HTTP handler dependencies and the chi router.
 type Server struct {
-	router         *chi.Mux
-	db             *database.DB
-	cfg            *config.Config
-	sessions       *middleware.SessionStore
-	adminUsers     database.AdminUserRepository
-	systemConfig   database.SystemConfigRepository
-	extensions     database.ExtensionRepository
-	trunks         database.TrunkRepository
-	inboundNumbers database.InboundNumberRepository
-	registrations  database.RegistrationRepository
-	cdrs           database.CDRRepository
-	callFlows      database.CallFlowRepository
-	flowValidator  *flow.Validator
-	trunkStatus    TrunkStatusProvider
-	trunkTester    TrunkTester
-	trunkLifecycle TrunkLifecycleManager
-	activeCalls    ActiveCallsProvider
-	audioPrompts   database.AudioPromptRepository
-	voicemailBoxes database.VoicemailBoxRepository
-	encryptor      *database.Encryptor
+	router            *chi.Mux
+	db                *database.DB
+	cfg               *config.Config
+	sessions          *middleware.SessionStore
+	adminUsers        database.AdminUserRepository
+	systemConfig      database.SystemConfigRepository
+	extensions        database.ExtensionRepository
+	trunks            database.TrunkRepository
+	inboundNumbers    database.InboundNumberRepository
+	registrations     database.RegistrationRepository
+	cdrs              database.CDRRepository
+	callFlows         database.CallFlowRepository
+	flowValidator     *flow.Validator
+	trunkStatus       TrunkStatusProvider
+	trunkTester       TrunkTester
+	trunkLifecycle    TrunkLifecycleManager
+	activeCalls       ActiveCallsProvider
+	audioPrompts      database.AudioPromptRepository
+	voicemailBoxes    database.VoicemailBoxRepository
+	voicemailMessages database.VoicemailMessageRepository
+	encryptor         *database.Encryptor
 }
 
 // NewServer creates the HTTP handler with all routes mounted.
 func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, trunkTester TrunkTester, trunkLifecycle TrunkLifecycleManager, activeCalls ActiveCallsProvider, enc *database.Encryptor) *Server {
 	s := &Server{
-		router:         chi.NewRouter(),
-		db:             db,
-		cfg:            cfg,
-		sessions:       sessions,
-		adminUsers:     database.NewAdminUserRepository(db),
-		systemConfig:   sysConfig,
-		extensions:     database.NewExtensionRepository(db),
-		trunks:         database.NewTrunkRepository(db),
-		inboundNumbers: database.NewInboundNumberRepository(db),
-		registrations:  database.NewRegistrationRepository(db),
-		cdrs:           database.NewCDRRepository(db),
-		callFlows:      database.NewCallFlowRepository(db),
-		audioPrompts:   database.NewAudioPromptRepository(db),
-		voicemailBoxes: database.NewVoicemailBoxRepository(db),
-		flowValidator:  flow.NewValidator(nil),
-		trunkStatus:    trunkStatus,
-		trunkTester:    trunkTester,
-		trunkLifecycle: trunkLifecycle,
-		activeCalls:    activeCalls,
-		encryptor:      enc,
+		router:            chi.NewRouter(),
+		db:                db,
+		cfg:               cfg,
+		sessions:          sessions,
+		adminUsers:        database.NewAdminUserRepository(db),
+		systemConfig:      sysConfig,
+		extensions:        database.NewExtensionRepository(db),
+		trunks:            database.NewTrunkRepository(db),
+		inboundNumbers:    database.NewInboundNumberRepository(db),
+		registrations:     database.NewRegistrationRepository(db),
+		cdrs:              database.NewCDRRepository(db),
+		callFlows:         database.NewCallFlowRepository(db),
+		audioPrompts:      database.NewAudioPromptRepository(db),
+		voicemailBoxes:    database.NewVoicemailBoxRepository(db),
+		voicemailMessages: database.NewVoicemailMessageRepository(db),
+		flowValidator:     flow.NewValidator(nil),
+		trunkStatus:       trunkStatus,
+		trunkTester:       trunkTester,
+		trunkLifecycle:    trunkLifecycle,
+		activeCalls:       activeCalls,
+		encryptor:         enc,
 	}
 
 	s.routes()
@@ -202,12 +204,12 @@ func (s *Server) routes() {
 				r.Get("/", s.handleGetVoicemailBox)
 				r.Put("/", s.handleUpdateVoicemailBox)
 				r.Delete("/", s.handleDeleteVoicemailBox)
-				r.Get("/messages", s.handleNotImplemented)
+				r.Get("/messages", s.handleListVoicemailMessages)
 				r.Post("/greeting", s.handleNotImplemented)
 				r.Route("/messages/{msgID}", func(r chi.Router) {
-					r.Delete("/", s.handleNotImplemented)
-					r.Put("/read", s.handleNotImplemented)
-					r.Get("/audio", s.handleNotImplemented)
+					r.Delete("/", s.handleDeleteVoicemailMessage)
+					r.Put("/read", s.handleMarkVoicemailMessageRead)
+					r.Get("/audio", s.handleGetVoicemailMessageAudio)
 				})
 			})
 		})

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -443,10 +444,26 @@ func validateExtensionRequest(req extensionRequest, isCreate bool) string {
 		return "max_registrations must be a positive integer"
 	}
 	if req.FollowMeNumbers != nil {
-		// Validate that follow_me_numbers is valid JSON array.
-		var arr []json.RawMessage
-		if err := json.Unmarshal(req.FollowMeNumbers, &arr); err != nil {
+		// Validate that follow_me_numbers is a valid JSON array of follow-me entries
+		// with required fields and sensible per-destination timeout/delay values.
+		var entries []struct {
+			Number  string `json:"number"`
+			Delay   *int   `json:"delay"`
+			Timeout *int   `json:"timeout"`
+		}
+		if err := json.Unmarshal(req.FollowMeNumbers, &entries); err != nil {
 			return "follow_me_numbers must be a valid JSON array"
+		}
+		for i, entry := range entries {
+			if entry.Number == "" {
+				return fmt.Sprintf("follow_me_numbers[%d].number is required", i)
+			}
+			if entry.Delay != nil && *entry.Delay < 0 {
+				return fmt.Sprintf("follow_me_numbers[%d].delay must be non-negative", i)
+			}
+			if entry.Timeout != nil && *entry.Timeout < 1 {
+				return fmt.Sprintf("follow_me_numbers[%d].timeout must be a positive integer", i)
+			}
 		}
 	}
 	if req.FollowMeStrategy != "" && req.FollowMeStrategy != "sequential" && req.FollowMeStrategy != "simultaneous" {

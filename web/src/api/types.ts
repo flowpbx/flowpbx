@@ -54,6 +54,13 @@ export interface HealthResponse {
   needs_setup: boolean
 }
 
+/** A single external number entry in a follow-me sequence. */
+export interface FollowMeNumber {
+  number: string
+  delay: number   // seconds to wait before ringing this number
+  timeout: number // seconds to ring this number before giving up
+}
+
 /** Extension resource. */
 export interface Extension {
   id: number
@@ -64,6 +71,9 @@ export interface Extension {
   ring_timeout: number
   dnd: boolean
   follow_me_enabled: boolean
+  follow_me_numbers: FollowMeNumber[]
+  follow_me_strategy: string
+  follow_me_confirm: boolean
   recording_mode: string
   max_registrations: number
   created_at: string
@@ -80,6 +90,9 @@ export interface ExtensionRequest {
   ring_timeout?: number
   dnd?: boolean
   follow_me_enabled?: boolean
+  follow_me_numbers?: FollowMeNumber[]
+  follow_me_strategy?: string
+  follow_me_confirm?: boolean
   recording_mode?: string
   max_registrations?: number
 }

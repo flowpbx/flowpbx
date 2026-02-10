@@ -21,6 +21,7 @@ type Server struct {
 	srv            *sipgo.Server
 	registrar      *Registrar
 	trunkRegistrar *TrunkRegistrar
+	inviteHandler  *InviteHandler
 	auth           *Authenticator
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
@@ -49,10 +50,12 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 
 	extensions := database.NewExtensionRepository(db)
 	registrations := database.NewRegistrationRepository(db)
+	inboundNumbers := database.NewInboundNumberRepository(db)
 
 	auth := NewAuthenticator(extensions, logger)
 	registrar := NewRegistrar(extensions, registrations, auth, logger)
 	trunkRegistrar := NewTrunkRegistrar(ua, logger)
+	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunkRegistrar, auth, logger)
 
 	s := &Server{
 		cfg:            cfg,
@@ -60,6 +63,7 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 		srv:            srv,
 		registrar:      registrar,
 		trunkRegistrar: trunkRegistrar,
+		inviteHandler:  inviteHandler,
 		auth:           auth,
 		logger:         logger,
 	}
@@ -70,6 +74,7 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 
 // registerHandlers attaches SIP method handlers to the server.
 func (s *Server) registerHandlers() {
+	s.srv.OnInvite(s.inviteHandler.HandleInvite)
 	s.srv.OnRegister(s.registrar.HandleRegister)
 	s.srv.OnOptions(s.handleOptions)
 	s.srv.OnInfo(s.handleInfo)

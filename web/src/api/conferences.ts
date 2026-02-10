@@ -1,5 +1,5 @@
 import { get, post, put, del } from './client'
-import type { ConferenceBridge, ConferenceBridgeRequest } from './types'
+import type { ConferenceBridge, ConferenceBridgeRequest, ConferenceParticipant } from './types'
 
 /** List all conference bridges. */
 export function listConferenceBridges(): Promise<ConferenceBridge[]> {
@@ -24,4 +24,19 @@ export function updateConferenceBridge(id: number, data: ConferenceBridgeRequest
 /** Delete a conference bridge. */
 export function deleteConferenceBridge(id: number): Promise<null> {
   return del(`/conferences/${id}`)
+}
+
+/** List active participants in a conference bridge. */
+export function listConferenceParticipants(bridgeId: number): Promise<ConferenceParticipant[]> {
+  return get<ConferenceParticipant[]>(`/conferences/${bridgeId}/participants`)
+}
+
+/** Mute or unmute a conference participant. */
+export function muteConferenceParticipant(bridgeId: number, participantId: string, muted: boolean): Promise<{ participant_id: string; muted: boolean }> {
+  return put<{ participant_id: string; muted: boolean }>(`/conferences/${bridgeId}/participants/${participantId}/mute`, { muted })
+}
+
+/** Kick a participant from a conference. */
+export function kickConferenceParticipant(bridgeId: number, participantId: string): Promise<null> {
+  return del(`/conferences/${bridgeId}/participants/${participantId}`)
 }

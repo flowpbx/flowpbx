@@ -356,6 +356,15 @@ export interface ConferenceBridge {
   created_at: string
 }
 
+/** Active conference participant. */
+export interface ConferenceParticipant {
+  id: string
+  caller_id_name: string
+  caller_id_num: string
+  joined_at: string
+  muted: boolean
+}
+
 /** Conference bridge create/update request. */
 export interface ConferenceBridgeRequest {
   name: string

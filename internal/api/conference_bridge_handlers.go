@@ -376,6 +376,43 @@ func (s *Server) handleMuteConferenceParticipant(w http.ResponseWriter, r *http.
 	})
 }
 
+// handleKickConferenceParticipant removes a participant from an active conference room.
+func (s *Server) handleKickConferenceParticipant(w http.ResponseWriter, r *http.Request) {
+	bridgeID, err := parseConferenceBridgeID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid conference bridge id")
+		return
+	}
+
+	participantID := chi.URLParam(r, "participantID")
+	if participantID == "" {
+		writeError(w, http.StatusBadRequest, "participant id is required")
+		return
+	}
+
+	if s.conferenceProv == nil {
+		writeError(w, http.StatusServiceUnavailable, "conference manager not available")
+		return
+	}
+
+	if err := s.conferenceProv.KickParticipant(bridgeID, participantID); err != nil {
+		slog.Error("kick conference participant: failed",
+			"error", err,
+			"conference_bridge_id", bridgeID,
+			"participant_id", participantID,
+		)
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	slog.Info("conference participant kicked",
+		"conference_bridge_id", bridgeID,
+		"participant_id", participantID,
+	)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // validateConferenceBridgeRequest checks required fields for a conference bridge create/update.
 func validateConferenceBridgeRequest(req conferenceBridgeRequest, isCreate bool) string {
 	if req.Name == "" {

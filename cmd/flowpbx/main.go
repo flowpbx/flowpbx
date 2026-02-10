@@ -411,6 +411,10 @@ func (a *conferenceProviderAdapter) MuteParticipant(bridgeID int64, participantI
 	return a.mgr.MuteParticipant(bridgeID, participantID, muted)
 }
 
+func (a *conferenceProviderAdapter) KickParticipant(bridgeID int64, participantID string) error {
+	return a.mgr.Kick(bridgeID, participantID)
+}
+
 func (a *conferenceProviderAdapter) Participants(bridgeID int64) ([]api.ConferenceParticipantEntry, error) {
 	participants, err := a.mgr.Participants(bridgeID)
 	if err != nil {

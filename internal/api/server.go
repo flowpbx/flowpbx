@@ -88,6 +88,7 @@ type ConfigReloader interface {
 // an adapter that wraps the media.ConferenceManager.
 type ConferenceProvider interface {
 	MuteParticipant(bridgeID int64, participantID string, muted bool) error
+	KickParticipant(bridgeID int64, participantID string) error
 	Participants(bridgeID int64) ([]ConferenceParticipantEntry, error)
 }
 
@@ -290,6 +291,7 @@ func (s *Server) routes() {
 				r.Delete("/", s.handleDeleteConferenceBridge)
 				r.Get("/participants", s.handleListConferenceParticipants)
 				r.Put("/participants/{participantID}/mute", s.handleMuteConferenceParticipant)
+				r.Delete("/participants/{participantID}", s.handleKickConferenceParticipant)
 			})
 		})
 

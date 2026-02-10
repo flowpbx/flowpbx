@@ -13,6 +13,7 @@ import RingGroups from './pages/RingGroups'
 import IVRMenus from './pages/IVRMenus'
 import TimeSwitches from './pages/TimeSwitches'
 import ConferenceBridges from './pages/ConferenceBridges'
+import Prompts from './pages/Prompts'
 import Recordings from './pages/Recordings'
 import CallHistory from './pages/CallHistory'
 import Settings from './pages/Settings'
@@ -37,6 +38,7 @@ const router = createBrowserRouter([
       { path: '/ivr-menus', element: <IVRMenus /> },
       { path: '/time-switches', element: <TimeSwitches /> },
       { path: '/conferences', element: <ConferenceBridges /> },
+      { path: '/prompts', element: <Prompts /> },
       { path: '/recordings', element: <Recordings /> },
       { path: '/call-history', element: <CallHistory /> },
       { path: '/settings', element: <Settings /> },

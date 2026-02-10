@@ -5,6 +5,7 @@ export { listTrunks, getTrunk, createTrunk, updateTrunk, deleteTrunk, listTrunkS
 export { listVoicemailBoxes, getVoicemailBox, createVoicemailBox, updateVoicemailBox, deleteVoicemailBox } from './voicemail'
 export { listInboundNumbers, getInboundNumber, createInboundNumber, updateInboundNumber, deleteInboundNumber } from './inbound_numbers'
 export { listCDRs, getCDR, buildExportURL } from './cdrs'
+export { listPrompts, uploadPrompt, deletePrompt, promptAudioURL } from './prompts'
 export type {
   ApiEnvelope,
   PaginatedResponse,
@@ -23,5 +24,6 @@ export type {
   TrunkStatusEntry,
   VoicemailBox,
   VoicemailBoxRequest,
+  AudioPrompt,
   CDR,
 } from './types'

@@ -203,6 +203,16 @@ export interface VoicemailBoxRequest {
   notify_extension_id?: number | null
 }
 
+/** Audio prompt resource. */
+export interface AudioPrompt {
+  id: number
+  name: string
+  filename: string
+  format: string
+  file_size: number
+  created_at: string
+}
+
 /** Call detail record resource. */
 export interface CDR {
   id: number

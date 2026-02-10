@@ -12,7 +12,7 @@
 - [x] Implement RTP session allocation: allocate a pair of ports (RTP + RTCP) per call leg
 - [x] Implement SDP parsing (extract media lines, codecs, connection info)
 - [x] Implement SDP rewriting (replace endpoint IPs/ports with proxy addresses)
-- [ ] Implement G.711 alaw (PCMA, payload 8) passthrough relay
+- [x] Implement G.711 alaw (PCMA, payload 8) passthrough relay
 - [ ] Implement G.711 ulaw (PCMU, payload 0) passthrough relay
 - [ ] Implement Opus (payload 111) passthrough relay
 - [ ] Create `internal/media/dtmf.go` — RFC 2833 telephone-event relay

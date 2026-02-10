@@ -18,5 +18,5 @@
 - [x] Implement `GET /api/v1/trunks/:id` — include current registration status
 - [x] Implement `POST /api/v1/trunks/:id/test` — attempt registration or OPTIONS ping, return result
 - [x] Add trunk status to admin UI trunk list (green/red indicator)
-- [ ] Load all enabled trunks on startup, begin registration
+- [x] Load all enabled trunks on startup, begin registration
 - [ ] Handle trunk enable/disable — start/stop registration on config change

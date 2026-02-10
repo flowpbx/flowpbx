@@ -88,6 +88,9 @@ func main() {
 		slog.Warn("no encryption key configured, trunk passwords will be stored in plaintext")
 	}
 
+	// Load all enabled trunks and begin registration / health checks.
+	loadTrunks(appCtx, db, sipSrv.TrunkRegistrar(), enc)
+
 	// Create adapter for trunk testing so the API can trigger one-shot SIP tests.
 	trunkTester := &trunkTesterAdapter{registrar: sipSrv.TrunkRegistrar()}
 
@@ -135,6 +138,65 @@ func main() {
 	}
 
 	slog.Info("flowpbx stopped")
+}
+
+// loadTrunks queries the database for all enabled trunks and starts their
+// registration or health check loops. Register-type trunks have their
+// passwords decrypted before being handed to the SIP trunk registrar.
+func loadTrunks(ctx context.Context, db *database.DB, registrar *sipserver.TrunkRegistrar, enc *database.Encryptor) {
+	trunks := database.NewTrunkRepository(db)
+	enabled, err := trunks.ListEnabled(ctx)
+	if err != nil {
+		slog.Error("failed to load enabled trunks", "error", err)
+		return
+	}
+
+	if len(enabled) == 0 {
+		slog.Info("no enabled trunks to load")
+		return
+	}
+
+	slog.Info("loading enabled trunks", "count", len(enabled))
+
+	for _, trunk := range enabled {
+		switch trunk.Type {
+		case "register":
+			// Decrypt password before starting registration.
+			if trunk.Password != "" && enc != nil {
+				decrypted, err := enc.Decrypt(trunk.Password)
+				if err != nil {
+					slog.Error("failed to decrypt trunk password, skipping",
+						"trunk", trunk.Name,
+						"trunk_id", trunk.ID,
+						"error", err,
+					)
+					continue
+				}
+				trunk.Password = decrypted
+			}
+			if err := registrar.StartTrunk(ctx, trunk); err != nil {
+				slog.Error("failed to start trunk registration",
+					"trunk", trunk.Name,
+					"trunk_id", trunk.ID,
+					"error", err,
+				)
+			}
+		case "ip":
+			if err := registrar.StartHealthCheck(ctx, trunk); err != nil {
+				slog.Error("failed to start trunk health check",
+					"trunk", trunk.Name,
+					"trunk_id", trunk.ID,
+					"error", err,
+				)
+			}
+		default:
+			slog.Warn("unknown trunk type, skipping",
+				"trunk", trunk.Name,
+				"trunk_id", trunk.ID,
+				"type", trunk.Type,
+			)
+		}
+	}
 }
 
 // trunkStatusAdapter bridges the SIP trunk registrar with the API's

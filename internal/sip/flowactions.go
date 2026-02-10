@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"time"
 
@@ -25,6 +26,7 @@ type FlowSIPActions struct {
 	pendingMgr    *PendingCallManager
 	sessionMgr    *media.SessionManager
 	dtmfMgr       *media.CallDTMFManager
+	conferenceMgr *media.ConferenceManager
 	cdrs          database.CDRRepository
 	proxyIP       string
 	logger        *slog.Logger
@@ -39,6 +41,7 @@ func NewFlowSIPActions(
 	pendingMgr *PendingCallManager,
 	sessionMgr *media.SessionManager,
 	dtmfMgr *media.CallDTMFManager,
+	conferenceMgr *media.ConferenceManager,
 	cdrs database.CDRRepository,
 	proxyIP string,
 	logger *slog.Logger,
@@ -51,6 +54,7 @@ func NewFlowSIPActions(
 		pendingMgr:    pendingMgr,
 		sessionMgr:    sessionMgr,
 		dtmfMgr:       dtmfMgr,
+		conferenceMgr: conferenceMgr,
 		cdrs:          cdrs,
 		proxyIP:       proxyIP,
 		logger:        logger.With("subsystem", "flow_sip_actions"),
@@ -872,22 +876,121 @@ func (a *FlowSIPActions) BlindTransfer(ctx context.Context, callCtx *flow.CallCo
 }
 
 // JoinConference joins the caller into the specified conference bridge.
-// This blocks until the caller leaves the conference.
-//
-// TODO(sprint-14): Full conference implementation — connect caller's RTP
-// stream to the conference mixer, handle PIN verification, mute-on-join,
-// and announce-joins settings. Current implementation logs and returns
-// immediately.
+// This blocks until the caller leaves the conference (hang up or context
+// cancellation). The caller's RTP stream is connected to the conference
+// mixer so they can hear and be heard by all other participants.
 func (a *FlowSIPActions) JoinConference(ctx context.Context, callCtx *flow.CallContext, bridge *models.ConferenceBridge) error {
 	callID := callCtx.CallID
-	a.logger.Info("join conference (stub)",
+
+	if callCtx.Request == nil || callCtx.Transaction == nil {
+		return fmt.Errorf("call context has no sip request or transaction")
+	}
+
+	if a.conferenceMgr == nil {
+		return fmt.Errorf("conference manager not available")
+	}
+
+	a.logger.Info("joining conference",
+		"call_id", callID,
+		"conference", bridge.Name,
+		"conference_id", bridge.ID,
+		"max_members", bridge.MaxMembers,
+	)
+
+	// Parse the caller's SDP to extract their RTP address and codec.
+	sdpBody := callCtx.Request.Body()
+	if len(sdpBody) == 0 {
+		return fmt.Errorf("caller has no SDP body")
+	}
+
+	callerSD, err := media.ParseSDP(sdpBody)
+	if err != nil {
+		return fmt.Errorf("parsing caller sdp: %w", err)
+	}
+
+	callerAudio := callerSD.AudioMedia()
+	if callerAudio == nil {
+		return fmt.Errorf("caller sdp has no audio media")
+	}
+
+	// Determine the caller's RTP address from SDP.
+	callerIP := callerSD.ConnectionAddress(callerAudio)
+	if callerIP == "" {
+		return fmt.Errorf("no connection address in caller sdp")
+	}
+
+	callerRemote := &net.UDPAddr{
+		IP:   net.ParseIP(callerIP),
+		Port: callerAudio.Port,
+	}
+
+	// Negotiate a G.711 codec (PCMU or PCMA) from the caller's SDP.
+	// The mixer only supports G.711 codecs.
+	payloadType := -1
+	for _, pt := range callerAudio.Formats {
+		if pt == media.PayloadPCMU || pt == media.PayloadPCMA {
+			payloadType = pt
+			break
+		}
+	}
+	if payloadType < 0 {
+		return fmt.Errorf("no supported G.711 codec in caller sdp (need PCMU or PCMA)")
+	}
+
+	// Add participant to the conference room via ConferenceManager.
+	joinResult, err := a.conferenceMgr.Join(ctx, bridge.ID, bridge.Name, bridge.MaxMembers, callID, callerRemote, payloadType)
+	if err != nil {
+		return fmt.Errorf("joining conference room: %w", err)
+	}
+
+	// Rewrite the caller's SDP so RTP flows to the mixer's allocated port.
+	rewrittenSDP, err := media.RewriteSDPBytes(sdpBody, a.proxyIP, joinResult.Port)
+	if err != nil {
+		a.conferenceMgr.Leave(bridge.ID, callID)
+		return fmt.Errorf("rewriting sdp for conference: %w", err)
+	}
+
+	// Apply mute-on-join if configured.
+	if bridge.MuteOnJoin {
+		a.conferenceMgr.MuteParticipant(bridge.ID, callID, true)
+	}
+
+	// Send 200 OK to the caller with the rewritten SDP pointing to the mixer.
+	okResponse := sip.NewResponseFromRequest(callCtx.Request, 200, "OK", rewrittenSDP)
+	okResponse.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+
+	if err := callCtx.Transaction.Respond(okResponse); err != nil {
+		a.conferenceMgr.Leave(bridge.ID, callID)
+		return fmt.Errorf("sending 200 ok for conference: %w", err)
+	}
+
+	a.logger.Info("participant connected to conference",
+		"call_id", callID,
+		"conference", bridge.Name,
+		"conference_id", bridge.ID,
+		"mixer_port", joinResult.Port,
+		"payload_type", payloadType,
+		"muted", bridge.MuteOnJoin,
+	)
+
+	// Block until the caller hangs up (context cancelled) or we are shut down.
+	<-ctx.Done()
+
+	// Remove participant from the conference on exit.
+	if err := a.conferenceMgr.Leave(bridge.ID, callID); err != nil {
+		a.logger.Warn("error leaving conference",
+			"call_id", callID,
+			"conference", bridge.Name,
+			"error", err,
+		)
+	}
+
+	a.logger.Info("participant left conference",
 		"call_id", callID,
 		"conference", bridge.Name,
 		"conference_id", bridge.ID,
 	)
 
-	// Stub: log the conference join. The full audio mixing implementation
-	// will be added in the conference/media sprint.
 	return nil
 }
 

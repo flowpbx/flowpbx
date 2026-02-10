@@ -98,10 +98,13 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sys
 	callFlows := database.NewCallFlowRepository(db)
 	outboundRouter := NewOutboundRouter(trunks, trunkRegistrar, enc, logger)
 
+	// Create conference manager for active conference room lifecycle.
+	conferenceMgr := media.NewConferenceManager(rtpProxy, logger)
+
 	// Create the flow engine for inbound call routing via visual flow graphs.
 	voicemailMessages := database.NewVoicemailMessageRepository(db)
 	flowEngine := flow.NewEngine(callFlows, cdrs, nil, logger)
-	flowSIPActions := NewFlowSIPActions(extensions, registrations, forker, dialogMgr, pendingMgr, sessionMgr, dtmfMgr, cdrs, proxyIP, logger)
+	flowSIPActions := NewFlowSIPActions(extensions, registrations, forker, dialogMgr, pendingMgr, sessionMgr, dtmfMgr, conferenceMgr, cdrs, proxyIP, logger)
 	nodes.RegisterAll(flowEngine, flowSIPActions, extensions, voicemailMessages, sysConfig, enc, emailSend, cfg.DataDir, logger)
 
 	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, flowEngine, proxyIP, logger)

@@ -9,7 +9,7 @@
 ## Tasks
 
 - [x] Create `internal/media/mixer.go` — N-way audio mixing engine in RTP proxy
-- [ ] Implement conference room management: create room, join participant, leave, kick
+- [x] Implement conference room management: create room, join participant, leave, kick
 - [ ] Implement PIN-protected conference entry (play prompt, collect digits, validate)
 - [ ] Implement mute/unmute per participant
 - [ ] Implement mute_on_join option (join muted by default)

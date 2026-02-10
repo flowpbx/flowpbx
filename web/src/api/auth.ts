@@ -1,5 +1,5 @@
 import { get, post } from './client'
-import type { AuthUser, HealthResponse, LoginRequest, LoginResponse } from './types'
+import type { AuthUser, HealthResponse, LoginRequest, LoginResponse, SetupRequest } from './types'
 
 /** Check system health and whether setup is needed. */
 export function getHealth(): Promise<HealthResponse> {
@@ -19,4 +19,9 @@ export function logout(): Promise<null> {
 /** Get the currently authenticated user. */
 export function getMe(): Promise<AuthUser> {
   return get<AuthUser>('/auth/me')
+}
+
+/** Run first-boot setup. */
+export function setup(data: SetupRequest): Promise<null> {
+  return post<null>('/setup', data)
 }

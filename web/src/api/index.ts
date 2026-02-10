@@ -1,5 +1,5 @@
 export { ApiError, get, post, put, del, list } from './client'
-export { getHealth, login, logout, getMe } from './auth'
+export { getHealth, login, logout, getMe, setup } from './auth'
 export type {
   ApiEnvelope,
   PaginatedResponse,

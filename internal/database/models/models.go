@@ -196,6 +196,17 @@ type AdminUser struct {
 	UpdatedAt    time.Time
 }
 
+// AudioPrompt represents a custom audio prompt file.
+type AudioPrompt struct {
+	ID        int64
+	Name      string
+	Filename  string
+	Format    string // "wav", "alaw", "ulaw"
+	FileSize  int64
+	FilePath  string // relative path under $DATA_DIR/prompts/custom/
+	CreatedAt time.Time
+}
+
 // ConferenceBridge represents a conference bridge configuration.
 type ConferenceBridge struct {
 	ID            int64

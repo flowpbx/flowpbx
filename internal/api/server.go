@@ -96,6 +96,7 @@ type Server struct {
 	trunkTester    TrunkTester
 	trunkLifecycle TrunkLifecycleManager
 	activeCalls    ActiveCallsProvider
+	audioPrompts   database.AudioPromptRepository
 	encryptor      *database.Encryptor
 }
 
@@ -114,6 +115,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		registrations:  database.NewRegistrationRepository(db),
 		cdrs:           database.NewCDRRepository(db),
 		callFlows:      database.NewCallFlowRepository(db),
+		audioPrompts:   database.NewAudioPromptRepository(db),
 		flowValidator:  flow.NewValidator(nil),
 		trunkStatus:    trunkStatus,
 		trunkTester:    trunkTester,
@@ -273,10 +275,10 @@ func (s *Server) routes() {
 		})
 
 		r.Route("/prompts", func(r chi.Router) {
-			r.Get("/", s.handleNotImplemented)
-			r.Post("/", s.handleNotImplemented)
-			r.Get("/{id}/audio", s.handleNotImplemented)
-			r.Delete("/{id}", s.handleNotImplemented)
+			r.Get("/", s.handleListPrompts)
+			r.Post("/", s.handleUploadPrompt)
+			r.Get("/{id}/audio", s.handleGetPromptAudio)
+			r.Delete("/{id}", s.handleDeletePrompt)
 		})
 
 		r.Get("/settings", s.handleNotImplemented)

@@ -143,6 +143,14 @@ type RegistrationRepository interface {
 	Count(ctx context.Context) (int64, error)
 }
 
+// AudioPromptRepository manages custom audio prompts.
+type AudioPromptRepository interface {
+	Create(ctx context.Context, prompt *models.AudioPrompt) error
+	GetByID(ctx context.Context, id int64) (*models.AudioPrompt, error)
+	List(ctx context.Context) ([]models.AudioPrompt, error)
+	Delete(ctx context.Context, id int64) error
+}
+
 // ConferenceBridgeRepository manages conference bridges.
 type ConferenceBridgeRepository interface {
 	Create(ctx context.Context, bridge *models.ConferenceBridge) error

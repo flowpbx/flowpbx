@@ -44,6 +44,13 @@ func main() {
 	// Placeholder: SIP stack initialization.
 	slog.Info("sip stack initialization placeholder", "sip_port", cfg.SIPPort)
 
+	// Load system configuration from database.
+	sysConfig, err := database.NewSystemConfigRepository(context.Background(), db)
+	if err != nil {
+		slog.Error("failed to load system config", "error", err)
+		os.Exit(1)
+	}
+
 	// Session store for admin auth.
 	sessions := middleware.NewSessionStore()
 	appCtx, appCancel := context.WithCancel(context.Background())
@@ -51,7 +58,7 @@ func main() {
 	middleware.StartCleanupTicker(appCtx, sessions, 15*time.Minute)
 
 	// HTTP server using the api package.
-	handler := api.NewServer(db, cfg, sessions)
+	handler := api.NewServer(db, cfg, sessions, sysConfig)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),

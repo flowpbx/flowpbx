@@ -5,31 +5,35 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/flowpbx/flowpbx/internal/api/middleware"
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
+	"github.com/flowpbx/flowpbx/internal/database/models"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 )
 
 // Server holds HTTP handler dependencies and the chi router.
 type Server struct {
-	router     *chi.Mux
-	db         *database.DB
-	cfg        *config.Config
-	sessions   *middleware.SessionStore
-	adminUsers database.AdminUserRepository
+	router       *chi.Mux
+	db           *database.DB
+	cfg          *config.Config
+	sessions     *middleware.SessionStore
+	adminUsers   database.AdminUserRepository
+	systemConfig database.SystemConfigRepository
 }
 
 // NewServer creates the HTTP handler with all routes mounted.
-func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore) *Server {
+func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository) *Server {
 	s := &Server{
-		router:     chi.NewRouter(),
-		db:         db,
-		cfg:        cfg,
-		sessions:   sessions,
-		adminUsers: database.NewAdminUserRepository(db),
+		router:       chi.NewRouter(),
+		db:           db,
+		cfg:          cfg,
+		sessions:     sessions,
+		adminUsers:   database.NewAdminUserRepository(db),
+		systemConfig: sysConfig,
 	}
 
 	s.routes()
@@ -251,7 +255,8 @@ func (s *Server) isFirstBoot(ctx context.Context) (bool, error) {
 	return count == 0, nil
 }
 
-// handleSetup is a placeholder for the first-boot setup wizard endpoint.
+// handleSetup completes the first-boot setup wizard by creating the initial
+// admin account and saving system configuration (hostname, SIP ports).
 // Only allowed when the system is in first-boot state (no admin users exist).
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	needsSetup, err := s.isFirstBoot(r.Context())
@@ -265,7 +270,77 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeError(w, http.StatusNotImplemented, "setup not implemented")
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Hostname string `json:"hostname"`
+		SIPPort  int    `json:"sip_port"`
+		SIPTLS   int    `json:"sip_tls_port"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Validate required fields.
+	if req.Username == "" || req.Password == "" {
+		writeError(w, http.StatusBadRequest, "username and password are required")
+		return
+	}
+	if len(req.Password) < 8 {
+		writeError(w, http.StatusBadRequest, "password must be at least 8 characters")
+		return
+	}
+
+	// Hash the admin password with Argon2id.
+	hash, err := database.HashPassword(req.Password)
+	if err != nil {
+		slog.Error("setup: failed to hash password", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Create the admin user.
+	user := &models.AdminUser{
+		Username:     req.Username,
+		PasswordHash: hash,
+	}
+	if err := s.adminUsers.Create(r.Context(), user); err != nil {
+		slog.Error("setup: failed to create admin user", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create admin account")
+		return
+	}
+
+	// Store system configuration values (only if provided).
+	ctx := r.Context()
+	if req.Hostname != "" {
+		if err := s.systemConfig.Set(ctx, "hostname", req.Hostname); err != nil {
+			slog.Error("setup: failed to save hostname", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to save configuration")
+			return
+		}
+	}
+	if req.SIPPort > 0 {
+		if err := s.systemConfig.Set(ctx, "sip_port", strconv.Itoa(req.SIPPort)); err != nil {
+			slog.Error("setup: failed to save sip port", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to save configuration")
+			return
+		}
+	}
+	if req.SIPTLS > 0 {
+		if err := s.systemConfig.Set(ctx, "sip_tls_port", strconv.Itoa(req.SIPTLS)); err != nil {
+			slog.Error("setup: failed to save sip tls port", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to save configuration")
+			return
+		}
+	}
+
+	slog.Info("setup: initial configuration completed", "username", req.Username, "user_id", user.ID)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"user_id":  user.ID,
+		"username": user.Username,
+	})
 }
 
 // handleLogin validates admin credentials and creates a session.

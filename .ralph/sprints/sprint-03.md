@@ -20,7 +20,7 @@
 - [x] Implement `GET /api/v1/auth/me` — return current admin user
 - [x] Implement `GET /api/v1/health` — unauthenticated health check
 - [x] Create first-boot detection (empty admin_users table)
-- [ ] Implement setup wizard API: `POST /api/v1/setup` — create admin account, set hostname, configure SIP ports
+- [x] Implement setup wizard API: `POST /api/v1/setup` — create admin account, set hostname, configure SIP ports
 - [ ] Set up static file serving via `//go:embed` with SPA fallback (non-API routes → `index.html`)
 - [ ] Implement consistent JSON response envelope `{ "data": ..., "error": ... }`
 - [ ] Add pagination helpers (`?limit=N&offset=N`) for list endpoints

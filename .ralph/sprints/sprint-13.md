@@ -17,5 +17,5 @@
 - [x] Implement per-call DTMF buffer management
 - [x] Create audio prompts CRUD API: `POST /api/v1/prompts` (upload), `GET /api/v1/prompts`, `GET /api/v1/prompts/:id/audio`, `DELETE /api/v1/prompts/:id`
 - [x] Implement audio format validation on upload (WAV, G.711 alaw/ulaw)
-- [ ] Store custom prompts in `$DATA_DIR/prompts/custom/`
+- [x] Store custom prompts in `$DATA_DIR/prompts/custom/`
 - [ ] Create audio prompt library page in admin UI (upload, list, play, delete)

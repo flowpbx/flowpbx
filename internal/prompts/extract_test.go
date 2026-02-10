@@ -26,6 +26,16 @@ func TestExtractToDataDir(t *testing.T) {
 			t.Errorf("expected file %s to be non-empty", name)
 		}
 	}
+
+	// Custom prompts directory should also be created.
+	customDir := filepath.Join(dataDir, "prompts", "custom")
+	info, err := os.Stat(customDir)
+	if err != nil {
+		t.Fatalf("expected custom prompts directory to exist: %v", err)
+	}
+	if !info.IsDir() {
+		t.Errorf("expected %s to be a directory", customDir)
+	}
 }
 
 func TestExtractToDataDir_SkipsExisting(t *testing.T) {
@@ -54,6 +64,22 @@ func TestExtractToDataDir_SkipsExisting(t *testing.T) {
 	}
 	if string(got) != string(custom) {
 		t.Errorf("expected custom content to be preserved, got %q", string(got))
+	}
+}
+
+func TestSystemDir(t *testing.T) {
+	got := SystemDir("/data")
+	want := filepath.Join("/data", "prompts", "system")
+	if got != want {
+		t.Errorf("SystemDir() = %q, want %q", got, want)
+	}
+}
+
+func TestCustomDir(t *testing.T) {
+	got := CustomDir("/data")
+	want := filepath.Join("/data", "prompts", "custom")
+	if got != want {
+		t.Errorf("CustomDir() = %q, want %q", got, want)
 	}
 }
 

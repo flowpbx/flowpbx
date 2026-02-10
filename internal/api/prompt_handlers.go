@@ -13,6 +13,7 @@ import (
 
 	"github.com/flowpbx/flowpbx/internal/database/models"
 	"github.com/flowpbx/flowpbx/internal/media"
+	"github.com/flowpbx/flowpbx/internal/prompts"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -126,13 +127,8 @@ func (s *Server) handleUploadPrompt(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Ensure custom prompts directory exists.
-	promptDir := filepath.Join(s.cfg.DataDir, "prompts", "custom")
-	if err := os.MkdirAll(promptDir, 0750); err != nil {
-		slog.Error("upload prompt: failed to create prompts directory", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
+	// Custom prompts directory is created on startup by prompts.ExtractToDataDir.
+	promptDir := prompts.CustomDir(s.cfg.DataDir)
 
 	// Generate a unique filename to avoid collisions.
 	storedFilename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), sanitizeFilename(header.Filename))
@@ -192,7 +188,7 @@ func (s *Server) handleGetPromptAudio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath := filepath.Join(s.cfg.DataDir, "prompts", "custom", prompt.FilePath)
+	filePath := filepath.Join(prompts.CustomDir(s.cfg.DataDir), prompt.FilePath)
 
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -245,7 +241,7 @@ func (s *Server) handleDeletePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Remove the audio file from disk.
-	filePath := filepath.Join(s.cfg.DataDir, "prompts", "custom", existing.FilePath)
+	filePath := filepath.Join(prompts.CustomDir(s.cfg.DataDir), existing.FilePath)
 	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		slog.Warn("delete prompt: failed to remove audio file", "error", err, "path", filePath)
 	}

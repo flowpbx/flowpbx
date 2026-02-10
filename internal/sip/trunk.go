@@ -559,6 +559,38 @@ func (tr *TrunkRegistrar) sendOptionsEntry(ctx context.Context, entry *trunkEntr
 	return nil
 }
 
+// TestRegister sends a one-shot SIP REGISTER request to verify that a trunk's
+// credentials are valid and the registrar is reachable. Unlike StartTrunk, this
+// does not start a registration loop — it returns after a single attempt.
+func (tr *TrunkRegistrar) TestRegister(ctx context.Context, trunk models.Trunk) error {
+	client, err := sipgo.NewClient(tr.ua,
+		sipgo.WithClientLogger(tr.logger.With("trunk", trunk.Name)),
+	)
+	if err != nil {
+		return fmt.Errorf("creating sip client: %w", err)
+	}
+	defer client.Close()
+
+	entry := &trunkEntry{
+		trunk:  trunk,
+		client: client,
+		state: TrunkState{
+			TrunkID: trunk.ID,
+			Name:    trunk.Name,
+			Type:    trunk.Type,
+			Status:  TrunkStatusRegistering,
+		},
+	}
+
+	expiry := trunk.RegisterExpiry
+	if expiry <= 0 {
+		expiry = 300
+	}
+
+	_, err = tr.sendRegister(ctx, entry, expiry)
+	return err
+}
+
 // SendOptions sends a SIP OPTIONS ping to a trunk and returns an error if
 // the trunk is unreachable or responds with a non-2xx status.
 func (tr *TrunkRegistrar) SendOptions(ctx context.Context, trunk models.Trunk) error {

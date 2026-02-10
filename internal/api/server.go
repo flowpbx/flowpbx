@@ -40,6 +40,14 @@ type TrunkStatusProvider interface {
 	GetAllTrunkStatuses() []TrunkStatusEntry
 }
 
+// TrunkTester performs one-shot connectivity tests against trunks.
+// For register-type trunks it attempts a SIP REGISTER; for IP-auth trunks
+// it sends an OPTIONS ping.
+type TrunkTester interface {
+	TestRegister(ctx context.Context, trunk models.Trunk) error
+	SendOptions(ctx context.Context, trunk models.Trunk) error
+}
+
 // Server holds HTTP handler dependencies and the chi router.
 type Server struct {
 	router       *chi.Mux
@@ -50,11 +58,12 @@ type Server struct {
 	systemConfig database.SystemConfigRepository
 	trunks       database.TrunkRepository
 	trunkStatus  TrunkStatusProvider
+	trunkTester  TrunkTester
 	encryptor    *database.Encryptor
 }
 
 // NewServer creates the HTTP handler with all routes mounted.
-func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, enc *database.Encryptor) *Server {
+func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, trunkTester TrunkTester, enc *database.Encryptor) *Server {
 	s := &Server{
 		router:       chi.NewRouter(),
 		db:           db,
@@ -64,6 +73,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		systemConfig: sysConfig,
 		trunks:       database.NewTrunkRepository(db),
 		trunkStatus:  trunkStatus,
+		trunkTester:  trunkTester,
 		encryptor:    enc,
 	}
 
@@ -122,7 +132,7 @@ func (s *Server) routes() {
 				r.Get("/", s.handleGetTrunk)
 				r.Put("/", s.handleUpdateTrunk)
 				r.Delete("/", s.handleDeleteTrunk)
-				r.Post("/test", s.handleNotImplemented)
+				r.Post("/test", s.handleTestTrunk)
 			})
 		})
 

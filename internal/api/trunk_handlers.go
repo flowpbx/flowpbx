@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -423,6 +424,96 @@ func (s *Server) handleDeleteTrunk(w http.ResponseWriter, r *http.Request) {
 // parseTrunkID extracts and parses the trunk ID from the URL parameter.
 func parseTrunkID(r *http.Request) (int64, error) {
 	return strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+}
+
+// trunkTestResponse is the JSON response for a trunk connectivity test.
+type trunkTestResponse struct {
+	Success  bool   `json:"success"`
+	Method   string `json:"method"`
+	Message  string `json:"message"`
+	Duration string `json:"duration"`
+}
+
+// handleTestTrunk performs a one-shot connectivity test on a trunk.
+// For register-type trunks, it attempts a SIP REGISTER to verify credentials
+// and registrar reachability. For IP-auth trunks, it sends an OPTIONS ping.
+func (s *Server) handleTestTrunk(w http.ResponseWriter, r *http.Request) {
+	id, err := parseTrunkID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid trunk id")
+		return
+	}
+
+	trunk, err := s.trunks.GetByID(r.Context(), id)
+	if err != nil {
+		slog.Error("test trunk: failed to query", "error", err, "trunk_id", id)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if trunk == nil {
+		writeError(w, http.StatusNotFound, "trunk not found")
+		return
+	}
+
+	if s.trunkTester == nil {
+		writeError(w, http.StatusServiceUnavailable, "sip stack not available")
+		return
+	}
+
+	// For register trunks, decrypt the password before testing.
+	if trunk.Type == "register" && trunk.Password != "" && s.encryptor != nil {
+		decrypted, err := s.encryptor.Decrypt(trunk.Password)
+		if err != nil {
+			slog.Error("test trunk: failed to decrypt password", "error", err, "trunk_id", id)
+			writeError(w, http.StatusInternalServerError, "failed to decrypt trunk credentials")
+			return
+		}
+		trunk.Password = decrypted
+	}
+
+	// Use a bounded timeout for the test to prevent long hangs.
+	testCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	start := time.Now()
+
+	var testErr error
+	method := "OPTIONS"
+	if trunk.Type == "register" {
+		method = "REGISTER"
+		testErr = s.trunkTester.TestRegister(testCtx, *trunk)
+	} else {
+		testErr = s.trunkTester.SendOptions(testCtx, *trunk)
+	}
+	duration := time.Since(start)
+
+	resp := trunkTestResponse{
+		Method:   method,
+		Duration: duration.Round(time.Millisecond).String(),
+	}
+
+	if testErr != nil {
+		resp.Success = false
+		resp.Message = testErr.Error()
+		slog.Info("trunk test failed",
+			"trunk_id", id,
+			"name", trunk.Name,
+			"method", method,
+			"error", testErr,
+			"duration", duration.String(),
+		)
+	} else {
+		resp.Success = true
+		resp.Message = method + " successful"
+		slog.Info("trunk test succeeded",
+			"trunk_id", id,
+			"name", trunk.Name,
+			"method", method,
+			"duration", duration.String(),
+		)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // validateTrunkRequest checks required fields for a trunk create/update.

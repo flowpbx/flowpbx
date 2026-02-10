@@ -14,6 +14,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/api/middleware"
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
+	"github.com/flowpbx/flowpbx/internal/database/models"
 	sipserver "github.com/flowpbx/flowpbx/internal/sip"
 )
 
@@ -87,8 +88,11 @@ func main() {
 		slog.Warn("no encryption key configured, trunk passwords will be stored in plaintext")
 	}
 
+	// Create adapter for trunk testing so the API can trigger one-shot SIP tests.
+	trunkTester := &trunkTesterAdapter{registrar: sipSrv.TrunkRegistrar()}
+
 	// HTTP server using the api package.
-	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, enc)
+	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, trunkTester, enc)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
@@ -178,4 +182,18 @@ func (a *trunkStatusAdapter) GetAllTrunkStatuses() []api.TrunkStatusEntry {
 		}
 	}
 	return entries
+}
+
+// trunkTesterAdapter bridges the SIP trunk registrar with the API's
+// TrunkTester interface for one-shot connectivity tests.
+type trunkTesterAdapter struct {
+	registrar *sipserver.TrunkRegistrar
+}
+
+func (a *trunkTesterAdapter) TestRegister(ctx context.Context, trunk models.Trunk) error {
+	return a.registrar.TestRegister(ctx, trunk)
+}
+
+func (a *trunkTesterAdapter) SendOptions(ctx context.Context, trunk models.Trunk) error {
+	return a.registrar.SendOptions(ctx, trunk)
 }

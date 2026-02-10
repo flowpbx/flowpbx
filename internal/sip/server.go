@@ -12,6 +12,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
+	"github.com/flowpbx/flowpbx/internal/email"
 	"github.com/flowpbx/flowpbx/internal/flow"
 	"github.com/flowpbx/flowpbx/internal/flow/nodes"
 	"github.com/flowpbx/flowpbx/internal/media"
@@ -38,7 +39,7 @@ type Server struct {
 }
 
 // NewServer creates a SIP server with all handlers registered.
-func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor) (*Server, error) {
+func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sysConfig database.SystemConfigRepository, emailSend *email.Sender) (*Server, error) {
 	logger := slog.Default().With("component", "sip")
 
 	ua, err := sipgo.NewUA(
@@ -101,7 +102,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor) (*S
 	voicemailMessages := database.NewVoicemailMessageRepository(db)
 	flowEngine := flow.NewEngine(callFlows, cdrs, nil, logger)
 	flowSIPActions := NewFlowSIPActions(extensions, registrations, forker, dialogMgr, pendingMgr, sessionMgr, dtmfMgr, cdrs, proxyIP, logger)
-	nodes.RegisterAll(flowEngine, flowSIPActions, extensions, voicemailMessages, cfg.DataDir, logger)
+	nodes.RegisterAll(flowEngine, flowSIPActions, extensions, voicemailMessages, sysConfig, enc, emailSend, cfg.DataDir, logger)
 
 	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, flowEngine, proxyIP, logger)
 

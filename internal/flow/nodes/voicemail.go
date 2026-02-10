@@ -10,6 +10,7 @@ import (
 
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/flowpbx/flowpbx/internal/email"
 	"github.com/flowpbx/flowpbx/internal/flow"
 	"github.com/flowpbx/flowpbx/internal/prompts"
 )
@@ -25,12 +26,17 @@ const defaultGreetingFile = "prompts/system/default_voicemail_greeting.wav"
 // VoicemailHandler handles the Voicemail node type. It plays the greeting
 // for the target voicemail box, records the caller's message to a WAV file,
 // stores the message metadata, and triggers MWI notification to the linked
-// extension if configured.
+// extension if configured. When the voicemail box has email notification
+// enabled and SMTP is configured, it sends an email with optional WAV
+// attachment.
 type VoicemailHandler struct {
 	engine     *flow.Engine
 	sip        flow.SIPActions
 	messages   database.VoicemailMessageRepository
 	extensions database.ExtensionRepository
+	sysConfig  database.SystemConfigRepository
+	enc        *database.Encryptor
+	emailSend  *email.Sender
 	logger     *slog.Logger
 	dataDir    string
 	nowFunc    func() time.Time // injectable for testing
@@ -42,6 +48,9 @@ func NewVoicemailHandler(
 	sip flow.SIPActions,
 	messages database.VoicemailMessageRepository,
 	extensions database.ExtensionRepository,
+	sysConfig database.SystemConfigRepository,
+	enc *database.Encryptor,
+	emailSend *email.Sender,
 	logger *slog.Logger,
 	dataDir string,
 ) *VoicemailHandler {
@@ -50,6 +59,9 @@ func NewVoicemailHandler(
 		sip:        sip,
 		messages:   messages,
 		extensions: extensions,
+		sysConfig:  sysConfig,
+		enc:        enc,
+		emailSend:  emailSend,
 		logger:     logger.With("handler", "voicemail"),
 		dataDir:    dataDir,
 		nowFunc:    time.Now,
@@ -143,6 +155,11 @@ func (h *VoicemailHandler) Execute(ctx context.Context, callCtx *flow.CallContex
 		h.sendMWI(ctx, box, *box.NotifyExtensionID)
 	}
 
+	// Send email notification if enabled for this box.
+	if box.EmailNotify && box.EmailAddress != "" {
+		h.sendEmailNotification(ctx, box, msg)
+	}
+
 	return "next", nil
 }
 
@@ -219,6 +236,89 @@ func (h *VoicemailHandler) sendMWI(ctx context.Context, box *models.VoicemailBox
 		"new_messages", newCount,
 		"old_messages", oldCount,
 	)
+}
+
+// sendEmailNotification loads SMTP configuration and sends an email
+// notification for the new voicemail message. Errors are logged but do not
+// fail the node.
+func (h *VoicemailHandler) sendEmailNotification(ctx context.Context, box *models.VoicemailBox, msg *models.VoicemailMessage) {
+	if h.emailSend == nil || h.sysConfig == nil {
+		h.logger.Debug("email notification skipped: email sender or system config not available",
+			"mailbox_id", box.ID,
+		)
+		return
+	}
+
+	cfg, err := h.loadSMTPConfig(ctx)
+	if err != nil {
+		h.logger.Error("failed to load smtp config for voicemail email",
+			"mailbox_id", box.ID,
+			"error", err,
+		)
+		return
+	}
+
+	if !cfg.Valid() {
+		h.logger.Debug("email notification skipped: smtp not configured",
+			"mailbox_id", box.ID,
+		)
+		return
+	}
+
+	notif := email.VoicemailNotification{
+		To:           box.EmailAddress,
+		BoxName:      box.Name,
+		CallerIDName: msg.CallerIDName,
+		CallerIDNum:  msg.CallerIDNum,
+		Timestamp:    msg.Timestamp,
+		DurationSecs: msg.Duration,
+		AudioFile:    msg.FilePath,
+		AttachAudio:  box.EmailAttachAudio,
+	}
+
+	if err := h.emailSend.SendVoicemailNotification(ctx, cfg, notif); err != nil {
+		h.logger.Error("failed to send voicemail email notification",
+			"mailbox_id", box.ID,
+			"to", box.EmailAddress,
+			"error", err,
+		)
+		return
+	}
+
+	h.logger.Info("voicemail email notification sent",
+		"mailbox_id", box.ID,
+		"to", box.EmailAddress,
+	)
+}
+
+// loadSMTPConfig reads SMTP settings from system_config, decrypting the
+// password if an encryptor is available.
+func (h *VoicemailHandler) loadSMTPConfig(ctx context.Context) (email.SMTPConfig, error) {
+	get := func(key string) string {
+		val, _ := h.sysConfig.Get(ctx, key)
+		return val
+	}
+
+	cfg := email.SMTPConfig{
+		Host:     get("smtp_host"),
+		Port:     get("smtp_port"),
+		From:     get("smtp_from"),
+		Username: get("smtp_username"),
+		TLS:      get("smtp_tls"),
+	}
+
+	password := get("smtp_password")
+	if password != "" && h.enc != nil {
+		decrypted, err := h.enc.Decrypt(password)
+		if err != nil {
+			return cfg, fmt.Errorf("decrypting smtp password: %w", err)
+		}
+		cfg.Password = decrypted
+	} else {
+		cfg.Password = password
+	}
+
+	return cfg, nil
 }
 
 // Ensure VoicemailHandler satisfies the NodeHandler interface.

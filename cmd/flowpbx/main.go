@@ -15,6 +15,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/flowpbx/flowpbx/internal/email"
 	"github.com/flowpbx/flowpbx/internal/prompts"
 	sipserver "github.com/flowpbx/flowpbx/internal/sip"
 )
@@ -70,21 +71,24 @@ func main() {
 	appCtx, appCancel := context.WithCancel(context.Background())
 	defer appCancel()
 
+	// Load system configuration from database.
+	sysConfig, err := database.NewSystemConfigRepository(context.Background(), db)
+	if err != nil {
+		slog.Error("failed to load system config", "error", err)
+		os.Exit(1)
+	}
+
+	// Create email sender for voicemail notifications.
+	emailSend := email.NewSender(slog.Default())
+
 	// Initialize SIP server.
-	sipSrv, err := sipserver.NewServer(cfg, db, enc)
+	sipSrv, err := sipserver.NewServer(cfg, db, enc, sysConfig, emailSend)
 	if err != nil {
 		slog.Error("failed to create sip server", "error", err)
 		os.Exit(1)
 	}
 	if err := sipSrv.Start(appCtx); err != nil {
 		slog.Error("failed to start sip server", "error", err)
-		os.Exit(1)
-	}
-
-	// Load system configuration from database.
-	sysConfig, err := database.NewSystemConfigRepository(context.Background(), db)
-	if err != nil {
-		slog.Error("failed to load system config", "error", err)
 		os.Exit(1)
 	}
 

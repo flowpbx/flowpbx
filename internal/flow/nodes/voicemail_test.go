@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/flowpbx/flowpbx/internal/email"
 	"github.com/flowpbx/flowpbx/internal/flow"
 )
 
@@ -137,7 +138,7 @@ func newTestVoicemailHandler(box *models.VoicemailBox, sipActions *mockVoicemail
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	resolver := &mockEntityResolver{entity: box}
 	engine := flow.NewEngine(nil, nil, resolver, logger)
-	h := NewVoicemailHandler(engine, sipActions, msgRepo, extRepo, logger, dataDir)
+	h := NewVoicemailHandler(engine, sipActions, msgRepo, extRepo, nil, nil, nil, logger, dataDir)
 	return h
 }
 
@@ -458,7 +459,7 @@ func TestVoicemailNoEntityError(t *testing.T) {
 	msgRepo := &mockVoicemailMessageRepo{}
 	extRepo := &mockExtensionRepo{extensions: map[int64]*models.Extension{}}
 
-	h := NewVoicemailHandler(engine, sipActions, msgRepo, extRepo, logger, dataDir)
+	h := NewVoicemailHandler(engine, sipActions, msgRepo, extRepo, nil, nil, nil, logger, dataDir)
 	callCtx := &flow.CallContext{CallID: "test-vm-noentity"}
 
 	_, err := h.Execute(context.Background(), callCtx, makeVoicemailNode(1))
@@ -540,5 +541,160 @@ func TestVoicemailFilePathContainsBoxID(t *testing.T) {
 	}
 	if !strings.HasSuffix(filePath, ".wav") {
 		t.Errorf("expected file path to end with '.wav', got %q", filePath)
+	}
+}
+
+// mockSystemConfig implements database.SystemConfigRepository for testing.
+type mockSystemConfig struct {
+	values map[string]string
+}
+
+func (m *mockSystemConfig) Get(_ context.Context, key string) (string, error) {
+	return m.values[key], nil
+}
+
+func (m *mockSystemConfig) Set(_ context.Context, key, value string) error {
+	m.values[key] = value
+	return nil
+}
+
+func (m *mockSystemConfig) GetAll(_ context.Context) ([]models.SystemConfig, error) {
+	return nil, nil
+}
+
+func TestVoicemailEmailNotificationSkippedWhenDisabled(t *testing.T) {
+	dataDir := t.TempDir()
+
+	box := &models.VoicemailBox{
+		ID:                 8,
+		Name:               "No Email Box",
+		MailboxNumber:      "800",
+		MaxMessageDuration: 60,
+		EmailNotify:        false,
+		EmailAddress:       "admin@example.com",
+	}
+
+	sipActions := &mockVoicemailSIPActions{
+		recordResult: &flow.RecordResult{DurationSecs: 10},
+	}
+
+	msgRepo := &mockVoicemailMessageRepo{}
+	extRepo := &mockExtensionRepo{extensions: map[int64]*models.Extension{}}
+
+	h := newTestVoicemailHandler(box, sipActions, msgRepo, extRepo, dataDir)
+	callCtx := &flow.CallContext{CallID: "test-vm-noemail", CallerIDNum: "0400000000"}
+
+	edge, err := h.Execute(context.Background(), callCtx, makeVoicemailNode(8))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if edge != "next" {
+		t.Errorf("expected edge %q, got %q", "next", edge)
+	}
+
+	// With EmailNotify=false, no email should be attempted (no panic, no error).
+	// Since we passed nil for emailSend and sysConfig, if the code tried to send
+	// email it would either panic or skip gracefully.
+}
+
+func TestVoicemailEmailNotificationAttempted(t *testing.T) {
+	dataDir := t.TempDir()
+
+	box := &models.VoicemailBox{
+		ID:                 9,
+		Name:               "Email Box",
+		MailboxNumber:      "900",
+		MaxMessageDuration: 60,
+		EmailNotify:        true,
+		EmailAddress:       "admin@example.com",
+		EmailAttachAudio:   true,
+	}
+
+	sipActions := &mockVoicemailSIPActions{
+		recordResult: &flow.RecordResult{DurationSecs: 15},
+	}
+
+	msgRepo := &mockVoicemailMessageRepo{}
+	extRepo := &mockExtensionRepo{extensions: map[int64]*models.Extension{}}
+
+	sysConfig := &mockSystemConfig{values: map[string]string{
+		"smtp_host": "mail.example.com",
+		"smtp_port": "587",
+		"smtp_from": "pbx@example.com",
+		"smtp_tls":  "none",
+	}}
+
+	// Create a real email.Sender with a dial function that returns an error
+	// (no actual SMTP server to connect to). The handler should log the error
+	// but not fail the node.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	emailSend := email.NewSender(logger)
+
+	resolver := &mockEntityResolver{entity: box}
+	engine := flow.NewEngine(nil, nil, resolver, logger)
+	h := NewVoicemailHandler(engine, sipActions, msgRepo, extRepo, sysConfig, nil, emailSend, logger, dataDir)
+
+	callCtx := &flow.CallContext{
+		CallID:       "test-vm-email",
+		CallerIDName: "John Doe",
+		CallerIDNum:  "+61400000000",
+	}
+
+	edge, err := h.Execute(context.Background(), callCtx, makeVoicemailNode(9))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if edge != "next" {
+		t.Errorf("expected edge %q, got %q", "next", edge)
+	}
+
+	// Verify message was stored despite email send failure (SMTP unreachable).
+	if len(msgRepo.messages) != 1 {
+		t.Fatalf("expected 1 stored message, got %d", len(msgRepo.messages))
+	}
+}
+
+func TestVoicemailLoadSMTPConfig(t *testing.T) {
+	dataDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	sysConfig := &mockSystemConfig{values: map[string]string{
+		"smtp_host":     "mail.example.com",
+		"smtp_port":     "465",
+		"smtp_from":     "pbx@example.com",
+		"smtp_username": "user@example.com",
+		"smtp_password": "plaintext-pass",
+		"smtp_tls":      "tls",
+	}}
+
+	resolver := &mockEntityResolver{entity: nil}
+	engine := flow.NewEngine(nil, nil, resolver, logger)
+	h := NewVoicemailHandler(engine, nil, nil, nil, sysConfig, nil, nil, logger, dataDir)
+
+	cfg, err := h.loadSMTPConfig(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Host != "mail.example.com" {
+		t.Errorf("expected host %q, got %q", "mail.example.com", cfg.Host)
+	}
+	if cfg.Port != "465" {
+		t.Errorf("expected port %q, got %q", "465", cfg.Port)
+	}
+	if cfg.From != "pbx@example.com" {
+		t.Errorf("expected from %q, got %q", "pbx@example.com", cfg.From)
+	}
+	if cfg.Username != "user@example.com" {
+		t.Errorf("expected username %q, got %q", "user@example.com", cfg.Username)
+	}
+	if cfg.Password != "plaintext-pass" {
+		t.Errorf("expected password %q, got %q", "plaintext-pass", cfg.Password)
+	}
+	if cfg.TLS != "tls" {
+		t.Errorf("expected tls %q, got %q", "tls", cfg.TLS)
+	}
+	if !cfg.Valid() {
+		t.Error("expected config to be valid")
 	}
 }

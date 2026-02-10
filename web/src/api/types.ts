@@ -258,6 +258,27 @@ export interface FlowValidationResult {
   issues: FlowValidationIssue[]
 }
 
+/** Ring group resource. */
+export interface RingGroup {
+  id: number
+  name: string
+  strategy: string
+  ring_timeout: number
+  members: number[]
+  caller_id_mode: string
+  created_at: string
+  updated_at: string
+}
+
+/** Ring group create/update request. */
+export interface RingGroupRequest {
+  name: string
+  strategy?: string
+  ring_timeout?: number
+  members: number[]
+  caller_id_mode?: string
+}
+
 /** Call detail record resource. */
 export interface CDR {
   id: number

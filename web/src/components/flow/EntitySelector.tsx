@@ -3,6 +3,7 @@ import {
   listExtensions,
   listVoicemailBoxes,
   listInboundNumbers,
+  listRingGroups,
 } from '../../api'
 
 interface EntityOption {
@@ -188,8 +189,15 @@ async function fetchEntities(entityType: string): Promise<EntityOption[]> {
         sublabel: n.name || undefined,
       }))
     }
+    case 'ring_group': {
+      const rgs = await listRingGroups()
+      return rgs.map((rg) => ({
+        id: rg.id,
+        label: rg.name,
+        sublabel: rg.strategy,
+      }))
+    }
     // For entity types without dedicated API endpoints yet, return empty.
-    case 'ring_group':
     case 'ivr_menu':
     case 'time_switch':
     case 'conference':

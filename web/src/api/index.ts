@@ -8,6 +8,7 @@ export { listCDRs, getCDR, buildExportURL } from './cdrs'
 export { listPrompts, uploadPrompt, deletePrompt, promptAudioURL } from './prompts'
 export { getSettings, updateSettings } from './settings'
 export { listFlows, getFlow, createFlow, updateFlow, deleteFlow, publishFlow, validateFlow } from './flows'
+export { listRingGroups, getRingGroup, createRingGroup, updateRingGroup, deleteRingGroup } from './ring_groups'
 export type {
   ApiEnvelope,
   PaginatedResponse,
@@ -28,6 +29,8 @@ export type {
   VoicemailBoxRequest,
   VoicemailMessage,
   AudioPrompt,
+  RingGroup,
+  RingGroupRequest,
   CDR,
   CallFlow,
   CallFlowRequest,

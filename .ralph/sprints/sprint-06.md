@@ -9,7 +9,7 @@
 ## Tasks
 
 - [x] Create `internal/sip/trunk.go` — trunk registration client for register-type trunks
-- [ ] Implement periodic re-registration with configurable expiry
+- [x] Implement periodic re-registration with configurable expiry
 - [ ] Implement registration failure handling with exponential backoff retry
 - [ ] Implement trunk health check via OPTIONS ping
 - [ ] Track trunk status (registered / failed / disabled) in memory + expose via API

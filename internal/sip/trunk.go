@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -126,7 +127,7 @@ func (tr *TrunkRegistrar) StopTrunk(trunkID int64) {
 	if entry.state.Status == TrunkStatusRegistered {
 		unregCtx, unregCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer unregCancel()
-		if err := tr.sendRegister(unregCtx, entry, 0); err != nil {
+		if _, err := tr.sendRegister(unregCtx, entry, 0); err != nil {
 			tr.logger.Warn("failed to un-register trunk",
 				"trunk", entry.trunk.Name,
 				"error", err,
@@ -182,7 +183,7 @@ func (tr *TrunkRegistrar) registrationLoop(ctx context.Context, entry *trunkEntr
 	backoff := newBackoff()
 
 	for {
-		err := tr.sendRegister(ctx, entry, expiry)
+		grantedExpiry, err := tr.sendRegister(ctx, entry, expiry)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -203,10 +204,10 @@ func (tr *TrunkRegistrar) registrationLoop(ctx context.Context, entry *trunkEntr
 			}
 		}
 
-		// Registration succeeded.
+		// Registration succeeded — use server-granted expiry for timing.
 		backoff.reset()
 		now := time.Now()
-		expiresAt := now.Add(time.Duration(expiry) * time.Second)
+		expiresAt := now.Add(time.Duration(grantedExpiry) * time.Second)
 		tr.mu.Lock()
 		if e, ok := tr.states[trunk.ID]; ok {
 			e.state.Status = TrunkStatusRegistered
@@ -216,14 +217,22 @@ func (tr *TrunkRegistrar) registrationLoop(ctx context.Context, entry *trunkEntr
 		}
 		tr.mu.Unlock()
 
-		tr.logger.Info("trunk registered",
-			"trunk", trunk.Name,
-			"expires_in", expiry,
-		)
+		if grantedExpiry != expiry {
+			tr.logger.Info("trunk registered (server adjusted expiry)",
+				"trunk", trunk.Name,
+				"requested_expiry", expiry,
+				"granted_expiry", grantedExpiry,
+			)
+		} else {
+			tr.logger.Info("trunk registered",
+				"trunk", trunk.Name,
+				"expires_in", grantedExpiry,
+			)
+		}
 
-		// Re-register before expiry. Use 80% of expiry as the refresh interval
-		// to account for network delays.
-		refreshInterval := time.Duration(float64(expiry)*0.8) * time.Second
+		// Re-register before expiry. Use 80% of server-granted expiry as
+		// the refresh interval to account for network delays.
+		refreshInterval := time.Duration(float64(grantedExpiry)*0.8) * time.Second
 
 		select {
 		case <-ctx.Done():
@@ -235,14 +244,16 @@ func (tr *TrunkRegistrar) registrationLoop(ctx context.Context, entry *trunkEntr
 }
 
 // sendRegister sends a SIP REGISTER request with digest auth handling.
-func (tr *TrunkRegistrar) sendRegister(ctx context.Context, entry *trunkEntry, expiry int) error {
+// On success it returns the server-granted expiry (from the 200 OK response).
+// If the server does not include an expiry, the requested expiry is returned.
+func (tr *TrunkRegistrar) sendRegister(ctx context.Context, entry *trunkEntry, expiry int) (int, error) {
 	trunk := entry.trunk
 
 	// Build recipient URI (Request-URI for REGISTER).
 	recipientStr := fmt.Sprintf("sip:%s:%d", trunk.Host, trunk.Port)
 	var recipient sip.Uri
 	if err := sip.ParseUri(recipientStr, &recipient); err != nil {
-		return fmt.Errorf("parsing recipient uri: %w", err)
+		return 0, fmt.Errorf("parsing recipient uri: %w", err)
 	}
 
 	req := sip.NewRequest(sip.REGISTER, recipient)
@@ -259,13 +270,13 @@ func (tr *TrunkRegistrar) sendRegister(ctx context.Context, entry *trunkEntry, e
 	// Send initial request.
 	tx, err := entry.client.TransactionRequest(ctx, req, sipgo.ClientRequestRegisterBuild)
 	if err != nil {
-		return fmt.Errorf("sending register: %w", err)
+		return 0, fmt.Errorf("sending register: %w", err)
 	}
 
 	res, err := getResponse(ctx, tx)
 	tx.Terminate()
 	if err != nil {
-		return fmt.Errorf("waiting for register response: %w", err)
+		return 0, fmt.Errorf("waiting for register response: %w", err)
 	}
 
 	// Handle 401 Unauthorized — digest authentication.
@@ -279,12 +290,12 @@ func (tr *TrunkRegistrar) sendRegister(ctx context.Context, entry *trunkEntry, e
 
 		wwwAuth := res.GetHeader(authHeader)
 		if wwwAuth == nil {
-			return fmt.Errorf("received %d but no %s header", res.StatusCode, authHeader)
+			return 0, fmt.Errorf("received %d but no %s header", res.StatusCode, authHeader)
 		}
 
 		chal, err := digest.ParseChallenge(wwwAuth.Value())
 		if err != nil {
-			return fmt.Errorf("parsing auth challenge: %w", err)
+			return 0, fmt.Errorf("parsing auth challenge: %w", err)
 		}
 
 		// Use auth_username if configured, otherwise username.
@@ -300,7 +311,7 @@ func (tr *TrunkRegistrar) sendRegister(ctx context.Context, entry *trunkEntry, e
 			Password: trunk.Password,
 		})
 		if err != nil {
-			return fmt.Errorf("computing digest: %w", err)
+			return 0, fmt.Errorf("computing digest: %w", err)
 		}
 
 		// Build authenticated request.
@@ -313,21 +324,35 @@ func (tr *TrunkRegistrar) sendRegister(ctx context.Context, entry *trunkEntry, e
 			sipgo.ClientRequestAddVia,
 		)
 		if err != nil {
-			return fmt.Errorf("sending authenticated register: %w", err)
+			return 0, fmt.Errorf("sending authenticated register: %w", err)
 		}
 
 		res, err = getResponse(ctx, tx2)
 		tx2.Terminate()
 		if err != nil {
-			return fmt.Errorf("waiting for authenticated register response: %w", err)
+			return 0, fmt.Errorf("waiting for authenticated register response: %w", err)
 		}
 	}
 
 	if res.StatusCode != 200 {
-		return fmt.Errorf("register failed with status %d %s", res.StatusCode, res.Reason)
+		return 0, fmt.Errorf("register failed with status %d %s", res.StatusCode, res.Reason)
 	}
 
-	return nil
+	// Parse server-granted expiry from the 200 OK response.
+	// Per RFC 3261 §10.2.4, the registrar may shorten the requested expiry.
+	// Check Contact header expires param first, then Expires header.
+	grantedExpiry := expiry
+	if contactHdr := res.GetHeader("Contact"); contactHdr != nil {
+		if parsed := parseContactExpires(contactHdr.Value()); parsed > 0 {
+			grantedExpiry = parsed
+		}
+	} else if expiresHdr := res.GetHeader("Expires"); expiresHdr != nil {
+		if parsed := parseExpiresHeader(expiresHdr.Value()); parsed > 0 {
+			grantedExpiry = parsed
+		}
+	}
+
+	return grantedExpiry, nil
 }
 
 // SendOptions sends a SIP OPTIONS ping to a trunk and returns an error if
@@ -400,6 +425,41 @@ func getResponse(ctx context.Context, tx sip.ClientTransaction) (*sip.Response, 
 	case res := <-tx.Responses():
 		return res, nil
 	}
+}
+
+// parseContactExpires extracts the expires parameter from a Contact header value.
+// Contact headers may contain: <sip:user@host>;expires=3600
+// Returns 0 if no expires parameter is found or parsing fails.
+func parseContactExpires(contactValue string) int {
+	// Look for ;expires= parameter (case-insensitive).
+	lower := strings.ToLower(contactValue)
+	idx := strings.Index(lower, ";expires=")
+	if idx < 0 {
+		return 0
+	}
+	rest := contactValue[idx+len(";expires="):]
+
+	// The value ends at the next semicolon, comma, or end of string.
+	end := strings.IndexAny(rest, ";,> \t")
+	if end > 0 {
+		rest = rest[:end]
+	}
+
+	val, err := strconv.Atoi(strings.TrimSpace(rest))
+	if err != nil {
+		return 0
+	}
+	return val
+}
+
+// parseExpiresHeader parses an Expires header value (a plain integer of seconds).
+// Returns 0 if parsing fails.
+func parseExpiresHeader(value string) int {
+	val, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return 0
+	}
+	return val
 }
 
 // backoff implements exponential backoff for registration retries.

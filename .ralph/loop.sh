@@ -59,7 +59,7 @@ fi
 
 # Function to find current sprint (first with incomplete tasks)
 find_current_sprint() {
-    for i in $(seq -w 1 20); do
+    for i in $(seq -w 1 30); do
         sprint_file="$SPRINTS_DIR/sprint-$i.md"
         if [[ -f "$sprint_file" ]]; then
             # Check if there are incomplete tasks

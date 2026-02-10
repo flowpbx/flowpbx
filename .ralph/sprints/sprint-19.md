@@ -1,10 +1,10 @@
-# Sprint 19 — Push Gateway & Flutter App
+# Sprint 19 — Push Gateway & App API
 
 **Phase**: 1E (Mobile App & Push Gateway)
-**Focus**: Push gateway service, PBX integration, Flutter softphone app
+**Focus**: Push gateway service, PBX push integration, app-facing API endpoints
 **Dependencies**: Sprint 08, Sprint 14
 
-**PRD Reference**: Section 9 (Flutter Softphone App), Section 10 (Push Gateway & License Server)
+**PRD Reference**: Section 10 (Push Gateway & License Server), Section 7 (App API Endpoints)
 
 ## Tasks
 
@@ -27,29 +27,8 @@
 - [ ] If no registration within timeout: continue flow (voicemail, next node, etc.)
 - [ ] Implement push token management: store/update/invalidate via registration
 
-### Flutter Softphone App
-- [ ] Create Flutter project, configure state management (Riverpod or Bloc)
-- [ ] Create login screen: server URL + extension number + password
-- [ ] Evaluate and integrate SIP library (dart_sip_ua / native bridge)
-- [ ] Implement SIP registration over TLS/TCP
-- [ ] Implement outbound calls: dialpad, contact search
-- [ ] Implement inbound calls: full-screen incoming call UI
-- [ ] Implement iOS CallKit integration (native call UI, lock screen answering)
-- [ ] Implement Android ConnectionService integration
-- [ ] Create in-call screen: mute, speaker, hold, DTMF pad, transfer, hangup
-- [ ] Implement call history (from PBX API `/api/v1/app/history`, cached locally)
-- [ ] Implement voicemail list + playback (from `/api/v1/app/voicemail`, stream audio)
-- [ ] Implement DND toggle (update PBX via `/api/v1/app/me`)
-- [ ] Implement follow-me toggle
-- [ ] Set up FCM (Android) and APNs/PushKit (iOS) push notification handling
-- [ ] Implement push wake-up: on push received → wake SIP stack → register → receive INVITE
-- [ ] Implement SRTP support for encrypted media
-- [ ] Implement codec support: G.711, Opus
-- [ ] Handle background audio sessions (iOS/Android)
-- [ ] Create app authentication: `POST /api/v1/app/auth` → JWT + SIP config
-- [ ] Implement `POST /api/v1/app/push-token` — register push token with PBX
-
 ### App API Endpoints (PBX side)
+- [ ] Implement JWT auth middleware for app endpoints
 - [ ] Implement `POST /api/v1/app/auth` — extension login, return JWT + SIP config
 - [ ] Implement `GET /api/v1/app/me` — extension profile
 - [ ] Implement `PUT /api/v1/app/me` — update DND, follow-me
@@ -58,4 +37,3 @@
 - [ ] Implement `GET /api/v1/app/voicemail/:id/audio` — stream audio
 - [ ] Implement `GET /api/v1/app/history` — call history for this extension
 - [ ] Implement `POST /api/v1/app/push-token` — register FCM/APNs token
-- [ ] Implement JWT auth middleware for app endpoints

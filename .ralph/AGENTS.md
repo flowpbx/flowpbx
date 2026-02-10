@@ -39,6 +39,18 @@ npm run build        # production build → web/dist/
 npm run lint         # eslint
 ```
 
+## Flutter Mobile App
+
+```bash
+cd mobile/
+flutter pub get
+flutter run              # run on connected device/emulator
+flutter build apk        # Android release
+flutter build ios        # iOS release
+flutter test             # run tests
+flutter analyze          # lint
+```
+
 ## Full Build (Go + Embedded UI)
 
 ```bash
@@ -91,6 +103,16 @@ flowpbx/
 ├── web/                   # React admin UI (Vite + Tailwind + React Flow)
 ├── migrations/            # SQL migration files
 ├── prompts/               # Default audio prompts (embedded)
+├── mobile/                # Flutter softphone app (iOS + Android)
+│   ├── lib/               # Dart source
+│   │   ├── screens/       # UI screens
+│   │   ├── services/      # SIP, API, push services
+│   │   ├── models/        # Data models
+│   │   ├── widgets/       # Reusable widgets
+│   │   └── providers/     # State management
+│   ├── ios/               # iOS native config
+│   ├── android/           # Android native config
+│   └── pubspec.yaml
 ├── Makefile
 ├── go.mod
 └── go.sum

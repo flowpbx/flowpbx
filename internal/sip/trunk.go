@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +34,8 @@ type TrunkState struct {
 	Type         string
 	Status       TrunkStatus
 	LastError    string
+	RetryAttempt int
+	FailedAt     *time.Time
 	RegisteredAt *time.Time
 	ExpiresAt    *time.Time
 }
@@ -189,17 +192,30 @@ func (tr *TrunkRegistrar) registrationLoop(ctx context.Context, entry *trunkEntr
 				return
 			}
 
+			retryDelay := backoff.next()
 			tr.logger.Error("trunk registration failed",
 				"trunk", trunk.Name,
 				"error", err,
-				"retry_in", backoff.current().String(),
+				"attempt", backoff.attempt,
+				"retry_in", retryDelay.String(),
 			)
-			tr.setStatus(trunk.ID, trunk.Name, trunk.Type, TrunkStatusFailed, err.Error())
+
+			now := time.Now()
+			tr.mu.Lock()
+			if e, ok := tr.states[trunk.ID]; ok {
+				e.state.Status = TrunkStatusFailed
+				e.state.LastError = err.Error()
+				e.state.RetryAttempt = backoff.attempt
+				if e.state.FailedAt == nil {
+					e.state.FailedAt = &now
+				}
+			}
+			tr.mu.Unlock()
 
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(backoff.next()):
+			case <-time.After(retryDelay):
 				continue
 			}
 		}
@@ -212,6 +228,8 @@ func (tr *TrunkRegistrar) registrationLoop(ctx context.Context, entry *trunkEntr
 		if e, ok := tr.states[trunk.ID]; ok {
 			e.state.Status = TrunkStatusRegistered
 			e.state.LastError = ""
+			e.state.RetryAttempt = 0
+			e.state.FailedAt = nil
 			e.state.RegisteredAt = &now
 			e.state.ExpiresAt = &expiresAt
 		}
@@ -462,7 +480,8 @@ func parseExpiresHeader(value string) int {
 	return val
 }
 
-// backoff implements exponential backoff for registration retries.
+// backoff implements exponential backoff with jitter for registration retries.
+// Jitter prevents thundering herd when multiple trunks fail simultaneously.
 type backoff struct {
 	attempt   int
 	baseDelay time.Duration
@@ -490,6 +509,12 @@ func (b *backoff) current() time.Duration {
 			d = b.maxDelay
 			break
 		}
+	}
+	// Add ±20% jitter to prevent thundering herd.
+	jitter := float64(d) * 0.2 * (2*rand.Float64() - 1)
+	d += time.Duration(jitter)
+	if d < 0 {
+		d = b.baseDelay
 	}
 	return d
 }

@@ -10,7 +10,7 @@
 
 - [x] Create `internal/sip/trunk.go` — trunk registration client for register-type trunks
 - [x] Implement periodic re-registration with configurable expiry
-- [ ] Implement registration failure handling with exponential backoff retry
+- [x] Implement registration failure handling with exponential backoff retry
 - [ ] Implement trunk health check via OPTIONS ping
 - [ ] Track trunk status (registered / failed / disabled) in memory + expose via API
 - [ ] Implement IP-auth trunk support (ACL-based, match source IP/CIDR, no registration)

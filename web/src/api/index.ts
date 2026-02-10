@@ -9,6 +9,7 @@ export { listPrompts, uploadPrompt, deletePrompt, promptAudioURL } from './promp
 export { getSettings, updateSettings } from './settings'
 export { listFlows, getFlow, createFlow, updateFlow, deleteFlow, publishFlow, validateFlow } from './flows'
 export { listRingGroups, getRingGroup, createRingGroup, updateRingGroup, deleteRingGroup } from './ring_groups'
+export { listIVRMenus, getIVRMenu, createIVRMenu, updateIVRMenu, deleteIVRMenu } from './ivr_menus'
 export type {
   ApiEnvelope,
   PaginatedResponse,
@@ -31,6 +32,8 @@ export type {
   AudioPrompt,
   RingGroup,
   RingGroupRequest,
+  IVRMenu,
+  IVRMenuRequest,
   CDR,
   CallFlow,
   CallFlowRequest,

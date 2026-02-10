@@ -279,6 +279,31 @@ export interface RingGroupRequest {
   caller_id_mode?: string
 }
 
+/** IVR menu resource. */
+export interface IVRMenu {
+  id: number
+  name: string
+  greeting_file: string
+  greeting_tts: string
+  timeout: number
+  max_retries: number
+  digit_timeout: number
+  options: Record<string, string>
+  created_at: string
+  updated_at: string
+}
+
+/** IVR menu create/update request. */
+export interface IVRMenuRequest {
+  name: string
+  greeting_file?: string
+  greeting_tts?: string
+  timeout?: number
+  max_retries?: number
+  digit_timeout?: number
+  options: Record<string, string>
+}
+
 /** Call detail record resource. */
 export interface CDR {
   id: number

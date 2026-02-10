@@ -100,6 +100,7 @@ type Server struct {
 	voicemailBoxes    database.VoicemailBoxRepository
 	voicemailMessages database.VoicemailMessageRepository
 	ringGroups        database.RingGroupRepository
+	ivrMenus          database.IVRMenuRepository
 	encryptor         *database.Encryptor
 }
 
@@ -122,6 +123,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		voicemailBoxes:    database.NewVoicemailBoxRepository(db),
 		voicemailMessages: database.NewVoicemailMessageRepository(db),
 		ringGroups:        database.NewRingGroupRepository(db),
+		ivrMenus:          database.NewIVRMenuRepository(db),
 		flowValidator:     flow.NewValidator(nil),
 		trunkStatus:       trunkStatus,
 		trunkTester:       trunkTester,
@@ -227,12 +229,12 @@ func (s *Server) routes() {
 		})
 
 		r.Route("/ivr-menus", func(r chi.Router) {
-			r.Get("/", s.handleNotImplemented)
-			r.Post("/", s.handleNotImplemented)
+			r.Get("/", s.handleListIVRMenus)
+			r.Post("/", s.handleCreateIVRMenu)
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", s.handleNotImplemented)
-				r.Put("/", s.handleNotImplemented)
-				r.Delete("/", s.handleNotImplemented)
+				r.Get("/", s.handleGetIVRMenu)
+				r.Put("/", s.handleUpdateIVRMenu)
+				r.Delete("/", s.handleDeleteIVRMenu)
 			})
 		})
 

@@ -205,7 +205,7 @@ func (s *Server) routes() {
 				r.Put("/", s.handleUpdateVoicemailBox)
 				r.Delete("/", s.handleDeleteVoicemailBox)
 				r.Get("/messages", s.handleListVoicemailMessages)
-				r.Post("/greeting", s.handleNotImplemented)
+				r.Post("/greeting", s.handleUploadGreeting)
 				r.Route("/messages/{msgID}", func(r chi.Router) {
 					r.Delete("/", s.handleDeleteVoicemailMessage)
 					r.Put("/read", s.handleMarkVoicemailMessageRead)

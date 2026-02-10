@@ -1,12 +1,19 @@
 package api
 
 import (
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/flowpbx/flowpbx/internal/media"
+	"github.com/flowpbx/flowpbx/internal/prompts"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -280,6 +287,105 @@ func (s *Server) handleDeleteVoicemailBox(w http.ResponseWriter, r *http.Request
 	slog.Info("voicemail box deleted", "box_id", id, "name", existing.Name)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// maxGreetingUploadSize is the upper limit for greeting file uploads (10 MB).
+const maxGreetingUploadSize = 10 << 20
+
+// handleUploadGreeting handles custom greeting WAV upload for a voicemail box.
+func (s *Server) handleUploadGreeting(w http.ResponseWriter, r *http.Request) {
+	id, err := parseVoicemailBoxID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid voicemail box id")
+		return
+	}
+
+	box, err := s.voicemailBoxes.GetByID(r.Context(), id)
+	if err != nil {
+		slog.Error("upload greeting: failed to query box", "error", err, "box_id", id)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if box == nil {
+		writeError(w, http.StatusNotFound, "voicemail box not found")
+		return
+	}
+
+	// Limit request body size.
+	r.Body = http.MaxBytesReader(w, r.Body, maxGreetingUploadSize)
+
+	if err := r.ParseMultipartForm(maxGreetingUploadSize); err != nil {
+		writeError(w, http.StatusBadRequest, "file too large or invalid multipart form")
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "file field is required")
+		return
+	}
+	defer file.Close()
+
+	// Validate file extension.
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext != ".wav" {
+		writeError(w, http.StatusBadRequest, "unsupported audio format; only .wav files are accepted for greetings")
+		return
+	}
+
+	// Read file data for validation and storage.
+	data, err := io.ReadAll(file)
+	if err != nil {
+		slog.Error("upload greeting: failed to read file", "error", err, "box_id", id)
+		writeError(w, http.StatusInternalServerError, "failed to read uploaded file")
+		return
+	}
+
+	// Validate WAV format: must be G.711 (alaw/ulaw), 8kHz, mono, 8-bit.
+	if err := media.ValidateWAVData(data); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid wav file: %s", err))
+		return
+	}
+
+	// Write greeting to standard path: $DATA_DIR/greetings/box_{id}.wav
+	greetingPath := prompts.GreetingPath(s.cfg.DataDir, id)
+
+	// Ensure greetings directory exists.
+	if err := os.MkdirAll(filepath.Dir(greetingPath), 0750); err != nil {
+		slog.Error("upload greeting: failed to create directory", "error", err, "box_id", id)
+		writeError(w, http.StatusInternalServerError, "failed to save greeting")
+		return
+	}
+
+	if err := os.WriteFile(greetingPath, data, 0640); err != nil {
+		slog.Error("upload greeting: failed to write file", "error", err, "box_id", id, "path", greetingPath)
+		writeError(w, http.StatusInternalServerError, "failed to save greeting")
+		return
+	}
+
+	// Update box to use the custom greeting.
+	box.GreetingFile = greetingPath
+	box.GreetingType = "custom"
+
+	if err := s.voicemailBoxes.Update(r.Context(), box); err != nil {
+		// Clean up file on database failure.
+		os.Remove(greetingPath)
+		slog.Error("upload greeting: failed to update box", "error", err, "box_id", id)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Re-fetch to get updated timestamp.
+	updated, err := s.voicemailBoxes.GetByID(r.Context(), id)
+	if err != nil || updated == nil {
+		slog.Error("upload greeting: failed to re-fetch box", "error", err, "box_id", id)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	slog.Info("voicemail greeting uploaded", "box_id", id, "name", updated.Name)
+
+	writeJSON(w, http.StatusOK, toVoicemailBoxResponse(updated))
 }
 
 // parseVoicemailBoxID extracts and parses the voicemail box ID from the URL parameter.

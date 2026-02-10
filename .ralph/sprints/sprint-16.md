@@ -21,6 +21,6 @@
 - [x] Create Recordings browser page: list, search, play, download, delete
 - [x] Create Recordings API: `GET /api/v1/recordings`, `GET .../download`, `DELETE`
 - [x] Create Settings page: SIP ports, TLS certs, codecs, recording storage, SMTP, license key, push gateway URL
-- [ ] Implement `GET/PUT /api/v1/settings` — system config API
-- [ ] Implement `GET /api/v1/system/status` — SIP stack status, trunk registrations
+- [x] Implement `GET/PUT /api/v1/settings` — system config API
+- [x] Implement `GET /api/v1/system/status` — SIP stack status, trunk registrations
 - [ ] Implement `POST /api/v1/system/reload` — hot-reload config without restart

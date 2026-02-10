@@ -83,6 +83,7 @@ type Server struct {
 	db                *database.DB
 	cfg               *config.Config
 	sessions          *middleware.SessionStore
+	startTime         time.Time
 	adminUsers        database.AdminUserRepository
 	systemConfig      database.SystemConfigRepository
 	extensions        database.ExtensionRepository
@@ -113,6 +114,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		db:                db,
 		cfg:               cfg,
 		sessions:          sessions,
+		startTime:         time.Now(),
 		adminUsers:        database.NewAdminUserRepository(db),
 		systemConfig:      sysConfig,
 		extensions:        database.NewExtensionRepository(db),
@@ -297,7 +299,7 @@ func (s *Server) routes() {
 		r.Put("/settings", s.handleUpdateSettings)
 
 		r.Route("/system", func(r chi.Router) {
-			r.Get("/status", s.handleNotImplemented)
+			r.Get("/status", s.handleSystemStatus)
 			r.Post("/reload", s.handleNotImplemented)
 		})
 

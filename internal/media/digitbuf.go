@@ -21,7 +21,8 @@ const (
 
 // DigitBufferResult holds the outcome of a digit collection operation.
 type DigitBufferResult struct {
-	// Digits is the collected string of DTMF digits.
+	// Digits is the collected string of DTMF digits. If collection was
+	// terminated by a terminator digit, the terminator is not included.
 	Digits string
 
 	// TimedOut is true if no digit was received before the first-digit
@@ -29,6 +30,11 @@ type DigitBufferResult struct {
 	// were reached. When TimedOut is true and Digits is non-empty, the
 	// inter-digit timeout fired (partial input delivered).
 	TimedOut bool
+
+	// Terminated is true if collection ended because the terminator
+	// digit was received (e.g., "#"). The terminator itself is not
+	// included in Digits.
+	Terminated bool
 }
 
 // DigitBuffer accumulates DTMF digits from a source channel and applies
@@ -42,6 +48,8 @@ type DigitBufferResult struct {
 //     before delivering the accumulated input.
 //
 // Collection ends when any of these conditions is met:
+//   - The max digits limit is reached
+//   - A terminator digit is received (e.g., "#")
 //   - The inter-digit timeout expires after receiving at least one digit
 //   - The first-digit timeout expires with no input
 //   - The context is cancelled
@@ -49,6 +57,8 @@ type DigitBuffer struct {
 	source            <-chan string
 	firstDigitTimeout time.Duration
 	interDigitTimeout time.Duration
+	maxDigits         int    // 0 means unlimited
+	terminator        string // empty means no terminator
 	logger            *slog.Logger
 
 	mu     sync.Mutex
@@ -79,9 +89,26 @@ func (b *DigitBuffer) SetInterDigitTimeout(d time.Duration) {
 	b.interDigitTimeout = d
 }
 
+// SetMaxDigits sets the maximum number of digits to collect. When the
+// limit is reached, collection returns immediately with TimedOut=false.
+// A value of 0 means unlimited (collect until timeout or terminator).
+func (b *DigitBuffer) SetMaxDigits(n int) {
+	b.maxDigits = n
+}
+
+// SetTerminator sets the digit that ends collection early. When
+// received, the terminator digit is not included in the result and
+// Terminated is set to true. Common value is "#". An empty string
+// disables terminator detection.
+func (b *DigitBuffer) SetTerminator(digit string) {
+	b.terminator = digit
+}
+
 // Collect blocks until digit collection is complete, returning the
 // accumulated digits and whether the operation timed out. Collection
 // completes when:
+//   - The max digits limit is reached (TimedOut=false, Terminated=false)
+//   - The terminator digit is received (TimedOut=false, Terminated=true)
 //   - The first-digit timeout expires (TimedOut=true, Digits="")
 //   - The inter-digit timeout expires after receiving digits (TimedOut=true, Digits=partial)
 //   - The source channel is closed (returns whatever was collected)
@@ -114,15 +141,41 @@ func (b *DigitBuffer) Collect(ctx context.Context) *DigitBufferResult {
 				}
 			}
 
+			// Check for terminator digit — return immediately without
+			// including the terminator in the collected digits.
+			if b.terminator != "" && digit == b.terminator {
+				b.logger.Debug("terminator digit received",
+					"terminator", digit,
+					"buffer", b.collected(),
+				)
+				return &DigitBufferResult{
+					Digits:     b.collected(),
+					Terminated: true,
+				}
+			}
+
 			b.mu.Lock()
 			b.digits = append(b.digits, digit[0])
 			b.lastAt = time.Now()
+			count := len(b.digits)
 			b.mu.Unlock()
 
 			b.logger.Debug("digit buffered",
 				"digit", digit,
 				"buffer", b.collected(),
 			)
+
+			// If max digits reached, return immediately.
+			if b.maxDigits > 0 && count >= b.maxDigits {
+				b.logger.Debug("max digits reached",
+					"max", b.maxDigits,
+					"buffer", b.collected(),
+				)
+				return &DigitBufferResult{
+					Digits:   b.collected(),
+					TimedOut: false,
+				}
+			}
 
 			// Switch to inter-digit timeout after the first digit.
 			if !timer.Stop() {

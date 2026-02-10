@@ -229,3 +229,270 @@ func TestDigitBuffer_DefaultTimeouts(t *testing.T) {
 		t.Errorf("default interDigitTimeout = %v, want %v", buf.interDigitTimeout, DefaultInterDigitTimeout)
 	}
 }
+
+func TestDigitBuffer_MaxDigits(t *testing.T) {
+	ch := make(chan string, 32)
+	buf := NewDigitBuffer(ch, slog.Default())
+	buf.SetFirstDigitTimeout(2 * time.Second)
+	buf.SetInterDigitTimeout(2 * time.Second)
+	buf.SetMaxDigits(4)
+
+	// Send exactly 4 digits — should return immediately after the 4th.
+	go func() {
+		ch <- "1"
+		ch <- "2"
+		ch <- "3"
+		ch <- "4"
+	}()
+
+	start := time.Now()
+	result := buf.Collect(context.Background())
+	elapsed := time.Since(start)
+
+	if result.Digits != "1234" {
+		t.Errorf("Digits = %q, want %q", result.Digits, "1234")
+	}
+	if result.TimedOut {
+		t.Error("expected TimedOut = false (max digits reached)")
+	}
+	if result.Terminated {
+		t.Error("expected Terminated = false (max digits, not terminator)")
+	}
+	// Should return almost immediately, not wait for inter-digit timeout.
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("took %v, expected immediate return on max digits", elapsed)
+	}
+}
+
+func TestDigitBuffer_MaxDigitsExcessIgnored(t *testing.T) {
+	ch := make(chan string, 32)
+	buf := NewDigitBuffer(ch, slog.Default())
+	buf.SetFirstDigitTimeout(2 * time.Second)
+	buf.SetInterDigitTimeout(2 * time.Second)
+	buf.SetMaxDigits(2)
+
+	// Send more digits than max — only first 2 should be collected.
+	go func() {
+		ch <- "5"
+		ch <- "6"
+		ch <- "7" // should not be collected
+		ch <- "8" // should not be collected
+	}()
+
+	result := buf.Collect(context.Background())
+	if result.Digits != "56" {
+		t.Errorf("Digits = %q, want %q", result.Digits, "56")
+	}
+	if result.TimedOut {
+		t.Error("expected TimedOut = false")
+	}
+}
+
+func TestDigitBuffer_MaxDigitsOne(t *testing.T) {
+	ch := make(chan string, 32)
+	buf := NewDigitBuffer(ch, slog.Default())
+	buf.SetFirstDigitTimeout(2 * time.Second)
+	buf.SetInterDigitTimeout(2 * time.Second)
+	buf.SetMaxDigits(1)
+
+	go func() {
+		ch <- "9"
+	}()
+
+	start := time.Now()
+	result := buf.Collect(context.Background())
+	elapsed := time.Since(start)
+
+	if result.Digits != "9" {
+		t.Errorf("Digits = %q, want %q", result.Digits, "9")
+	}
+	if result.TimedOut {
+		t.Error("expected TimedOut = false")
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("took %v, expected immediate return for single max digit", elapsed)
+	}
+}
+
+func TestDigitBuffer_TerminatorHash(t *testing.T) {
+	ch := make(chan string, 32)
+	buf := NewDigitBuffer(ch, slog.Default())
+	buf.SetFirstDigitTimeout(2 * time.Second)
+	buf.SetInterDigitTimeout(2 * time.Second)
+	buf.SetTerminator("#")
+
+	go func() {
+		ch <- "1"
+		ch <- "2"
+		ch <- "3"
+		ch <- "#"
+	}()
+
+	start := time.Now()
+	result := buf.Collect(context.Background())
+	elapsed := time.Since(start)
+
+	if result.Digits != "123" {
+		t.Errorf("Digits = %q, want %q", result.Digits, "123")
+	}
+	if result.TimedOut {
+		t.Error("expected TimedOut = false")
+	}
+	if !result.Terminated {
+		t.Error("expected Terminated = true (terminator digit received)")
+	}
+	// Should return immediately, not wait for timeout.
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("took %v, expected immediate return on terminator", elapsed)
+	}
+}
+
+func TestDigitBuffer_TerminatorOnly(t *testing.T) {
+	ch := make(chan string, 32)
+	buf := NewDigitBuffer(ch, slog.Default())
+	buf.SetFirstDigitTimeout(2 * time.Second)
+	buf.SetInterDigitTimeout(2 * time.Second)
+	buf.SetTerminator("#")
+
+	// Send terminator with no preceding digits.
+	go func() {
+		ch <- "#"
+	}()
+
+	result := buf.Collect(context.Background())
+	if result.Digits != "" {
+		t.Errorf("Digits = %q, want empty", result.Digits)
+	}
+	if result.TimedOut {
+		t.Error("expected TimedOut = false")
+	}
+	if !result.Terminated {
+		t.Error("expected Terminated = true")
+	}
+}
+
+func TestDigitBuffer_TerminatorStar(t *testing.T) {
+	ch := make(chan string, 32)
+	buf := NewDigitBuffer(ch, slog.Default())
+	buf.SetFirstDigitTimeout(2 * time.Second)
+	buf.SetInterDigitTimeout(2 * time.Second)
+	buf.SetTerminator("*")
+
+	go func() {
+		ch <- "5"
+		ch <- "5"
+		ch <- "*"
+	}()
+
+	result := buf.Collect(context.Background())
+	if result.Digits != "55" {
+		t.Errorf("Digits = %q, want %q", result.Digits, "55")
+	}
+	if !result.Terminated {
+		t.Error("expected Terminated = true")
+	}
+}
+
+func TestDigitBuffer_TerminatorBeforeMaxDigits(t *testing.T) {
+	ch := make(chan string, 32)
+	buf := NewDigitBuffer(ch, slog.Default())
+	buf.SetFirstDigitTimeout(2 * time.Second)
+	buf.SetInterDigitTimeout(2 * time.Second)
+	buf.SetMaxDigits(10)
+	buf.SetTerminator("#")
+
+	// Terminator should take priority even though max is 10.
+	go func() {
+		ch <- "4"
+		ch <- "2"
+		ch <- "#"
+	}()
+
+	result := buf.Collect(context.Background())
+	if result.Digits != "42" {
+		t.Errorf("Digits = %q, want %q", result.Digits, "42")
+	}
+	if !result.Terminated {
+		t.Error("expected Terminated = true (terminator before max)")
+	}
+	if result.TimedOut {
+		t.Error("expected TimedOut = false")
+	}
+}
+
+func TestDigitBuffer_MaxDigitsBeforeTerminator(t *testing.T) {
+	ch := make(chan string, 32)
+	buf := NewDigitBuffer(ch, slog.Default())
+	buf.SetFirstDigitTimeout(2 * time.Second)
+	buf.SetInterDigitTimeout(2 * time.Second)
+	buf.SetMaxDigits(3)
+	buf.SetTerminator("#")
+
+	// Max digits reached before terminator is sent.
+	go func() {
+		ch <- "1"
+		ch <- "2"
+		ch <- "3"
+		ch <- "#" // should not be processed
+	}()
+
+	result := buf.Collect(context.Background())
+	if result.Digits != "123" {
+		t.Errorf("Digits = %q, want %q", result.Digits, "123")
+	}
+	if result.Terminated {
+		t.Error("expected Terminated = false (max digits reached first)")
+	}
+	if result.TimedOut {
+		t.Error("expected TimedOut = false")
+	}
+}
+
+func TestDigitBuffer_NoTerminatorFallsBackToTimeout(t *testing.T) {
+	ch := make(chan string, 32)
+	buf := NewDigitBuffer(ch, slog.Default())
+	buf.SetFirstDigitTimeout(2 * time.Second)
+	buf.SetInterDigitTimeout(200 * time.Millisecond)
+	buf.SetTerminator("#")
+
+	// Send digits without terminator — inter-digit timeout should fire.
+	go func() {
+		ch <- "7"
+		ch <- "8"
+	}()
+
+	result := buf.Collect(context.Background())
+	if result.Digits != "78" {
+		t.Errorf("Digits = %q, want %q", result.Digits, "78")
+	}
+	if !result.TimedOut {
+		t.Error("expected TimedOut = true (no terminator, inter-digit timeout)")
+	}
+	if result.Terminated {
+		t.Error("expected Terminated = false")
+	}
+}
+
+func TestDigitBuffer_MaxDigitsZeroMeansUnlimited(t *testing.T) {
+	ch := make(chan string, 32)
+	buf := NewDigitBuffer(ch, slog.Default())
+	buf.SetFirstDigitTimeout(2 * time.Second)
+	buf.SetInterDigitTimeout(200 * time.Millisecond)
+	buf.SetMaxDigits(0) // explicit zero = unlimited
+
+	go func() {
+		ch <- "1"
+		ch <- "2"
+		ch <- "3"
+		ch <- "4"
+		ch <- "5"
+	}()
+
+	result := buf.Collect(context.Background())
+	if result.Digits != "12345" {
+		t.Errorf("Digits = %q, want %q", result.Digits, "12345")
+	}
+	if !result.TimedOut {
+		t.Error("expected TimedOut = true (no max, inter-digit timeout)")
+	}
+}

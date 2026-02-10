@@ -65,6 +65,7 @@ type InviteHandler struct {
 	pendingMgr     *PendingCallManager
 	sessionMgr     *media.SessionManager
 	cdrs           database.CDRRepository
+	systemConfig   database.SystemConfigRepository
 	flowEngine     *flow.Engine
 	proxyIP        string
 	dataDir        string
@@ -85,6 +86,7 @@ func NewInviteHandler(
 	pendingMgr *PendingCallManager,
 	sessionMgr *media.SessionManager,
 	cdrs database.CDRRepository,
+	sysConfig database.SystemConfigRepository,
 	flowEngine *flow.Engine,
 	proxyIP string,
 	dataDir string,
@@ -105,6 +107,7 @@ func NewInviteHandler(
 		pendingMgr:     pendingMgr,
 		sessionMgr:     sessionMgr,
 		cdrs:           cdrs,
+		systemConfig:   sysConfig,
 		flowEngine:     flowEngine,
 		proxyIP:        proxyIP,
 		dataDir:        dataDir,
@@ -445,8 +448,8 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		dialog.Callee.RemoteTarget = uri
 	}
 
-	// Start call recording if either extension has recording_mode "always".
-	if shouldRecord(ic.CallerExtension, ic.TargetExtension, nil) && mediaSession != nil {
+	// Start call recording based on global policy and per-extension recording_mode.
+	if shouldRecord(h.globalRecordingPolicy(), ic.CallerExtension, ic.TargetExtension, nil) && mediaSession != nil {
 		dialog.Recorder = h.startCallRecording(callID, mediaSession)
 	}
 
@@ -799,8 +802,8 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 		dialog.Callee.RemoteTarget = uri
 	}
 
-	// Start call recording if the target extension or inbound trunk has recording_mode "always".
-	if shouldRecord(nil, ic.TargetExtension, inboundTrunk) && mediaSession != nil {
+	// Start call recording based on global policy and per-extension/trunk recording_mode.
+	if shouldRecord(h.globalRecordingPolicy(), nil, ic.TargetExtension, inboundTrunk) && mediaSession != nil {
 		dialog.Recorder = h.startCallRecording(callID, mediaSession)
 	}
 
@@ -1068,10 +1071,27 @@ func (h *InviteHandler) createInitialCDR(ic *InviteContext, callID string) {
 	)
 }
 
+// globalRecordingPolicy returns the system-wide recording policy from config.
+// Returns an empty string if no policy is set (equivalent to "on_demand").
+func (h *InviteHandler) globalRecordingPolicy() string {
+	val, _ := h.systemConfig.Get(context.Background(), "recording_policy")
+	return val
+}
+
 // shouldRecord determines whether a call should be recorded based on the
-// recording_mode of the caller extension, callee extension, and/or trunk.
-// Returns true if any party has recording_mode set to "always".
-func shouldRecord(caller, callee *models.Extension, trunk *models.Trunk) bool {
+// global recording policy and the recording_mode of the caller extension,
+// callee extension, and/or trunk. The global policy acts as a system-wide
+// override: "always" forces all calls to be recorded, "off" disables
+// recording entirely. When the policy is empty or "on_demand", the
+// per-extension and per-trunk recording_mode settings are respected.
+func shouldRecord(globalPolicy string, caller, callee *models.Extension, trunk *models.Trunk) bool {
+	if globalPolicy == "always" {
+		return true
+	}
+	if globalPolicy == "off" {
+		return false
+	}
+	// Global policy is empty or "on_demand" — defer to per-entity settings.
 	if caller != nil && caller.RecordingMode == "always" {
 		return true
 	}

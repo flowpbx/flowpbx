@@ -34,6 +34,7 @@ type codecsSettingsResponse struct {
 }
 
 type recordingSettingsResponse struct {
+	Policy      string `json:"policy"` // "off", "always", "on_demand"
 	StoragePath string `json:"storage_path"`
 	Format      string `json:"format"`
 	MaxDays     string `json:"max_days"`
@@ -83,6 +84,7 @@ type codecsSettingsRequest struct {
 }
 
 type recordingSettingsRequest struct {
+	Policy      string `json:"policy"` // "off", "always", "on_demand"
 	StoragePath string `json:"storage_path"`
 	Format      string `json:"format"`
 	MaxDays     string `json:"max_days"`
@@ -134,6 +136,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 			Audio: get("codecs_audio"),
 		},
 		Recording: recordingSettingsResponse{
+			Policy:      get("recording_policy"),
 			StoragePath: get("recording_storage_path"),
 			Format:      get("recording_format"),
 			MaxDays:     get("recording_max_days"),
@@ -242,6 +245,14 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if req.Recording != nil {
 		rec := req.Recording
 
+		if rec.Policy != "" {
+			validPolicies := map[string]bool{"off": true, "always": true, "on_demand": true}
+			if !validPolicies[rec.Policy] {
+				writeError(w, http.StatusBadRequest, "recording policy must be off, always, or on_demand")
+				return
+			}
+		}
+
 		if rec.Format != "" {
 			validFormats := map[string]bool{"wav": true, "mp3": true}
 			if !validFormats[rec.Format] {
@@ -259,6 +270,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := save(map[string]string{
+			"recording_policy":       rec.Policy,
 			"recording_storage_path": rec.StoragePath,
 			"recording_format":       rec.Format,
 			"recording_max_days":     rec.MaxDays,

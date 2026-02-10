@@ -108,7 +108,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sys
 	flowSIPActions := NewFlowSIPActions(extensions, registrations, forker, dialogMgr, pendingMgr, sessionMgr, dtmfMgr, conferenceMgr, cdrs, proxyIP, logger)
 	nodes.RegisterAll(flowEngine, flowSIPActions, extensions, voicemailMessages, sysConfig, enc, emailSend, cfg.DataDir, logger)
 
-	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, flowEngine, proxyIP, cfg.DataDir, logger)
+	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, sysConfig, flowEngine, proxyIP, cfg.DataDir, logger)
 
 	s := &Server{
 		cfg:            cfg,

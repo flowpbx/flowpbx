@@ -186,6 +186,16 @@ type Registration struct {
 	DeviceID     string
 }
 
+// AdminUser represents an admin panel user.
+type AdminUser struct {
+	ID           int64
+	Username     string
+	PasswordHash string
+	TOTPSecret   *string // nullable, for Phase 2 TOTP 2FA
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 // ConferenceBridge represents a conference bridge configuration.
 type ConferenceBridge struct {
 	ID            int64

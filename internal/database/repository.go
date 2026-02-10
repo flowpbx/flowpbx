@@ -13,6 +13,17 @@ type SystemConfigRepository interface {
 	GetAll(ctx context.Context) ([]models.SystemConfig, error)
 }
 
+// AdminUserRepository manages admin panel users.
+type AdminUserRepository interface {
+	Create(ctx context.Context, user *models.AdminUser) error
+	GetByID(ctx context.Context, id int64) (*models.AdminUser, error)
+	GetByUsername(ctx context.Context, username string) (*models.AdminUser, error)
+	List(ctx context.Context) ([]models.AdminUser, error)
+	Update(ctx context.Context, user *models.AdminUser) error
+	Delete(ctx context.Context, id int64) error
+	Count(ctx context.Context) (int64, error)
+}
+
 // ExtensionRepository manages PBX extensions/users.
 type ExtensionRepository interface {
 	Create(ctx context.Context, ext *models.Extension) error

@@ -23,6 +23,7 @@ type FlowSIPActions struct {
 	dialogMgr     *DialogManager
 	pendingMgr    *PendingCallManager
 	sessionMgr    *media.SessionManager
+	dtmfMgr       *media.CallDTMFManager
 	cdrs          database.CDRRepository
 	proxyIP       string
 	logger        *slog.Logger
@@ -36,6 +37,7 @@ func NewFlowSIPActions(
 	dialogMgr *DialogManager,
 	pendingMgr *PendingCallManager,
 	sessionMgr *media.SessionManager,
+	dtmfMgr *media.CallDTMFManager,
 	cdrs database.CDRRepository,
 	proxyIP string,
 	logger *slog.Logger,
@@ -47,6 +49,7 @@ func NewFlowSIPActions(
 		dialogMgr:     dialogMgr,
 		pendingMgr:    pendingMgr,
 		sessionMgr:    sessionMgr,
+		dtmfMgr:       dtmfMgr,
 		cdrs:          cdrs,
 		proxyIP:       proxyIP,
 		logger:        logger.With("subsystem", "flow_sip_actions"),
@@ -565,9 +568,13 @@ func (a *FlowSIPActions) RingGroup(ctx context.Context, callCtx *flow.CallContex
 // PlayAndCollect plays an audio prompt and collects DTMF digits from the caller.
 // This is used by the IVR menu handler for interactive voice menus.
 //
-// TODO(sprint-14): Full media implementation — play audio file via RTP, listen
-// for RFC 2833 DTMF events. Current implementation collects DTMF from the
-// call context buffer with timing logic.
+// It acquires a per-call DTMF buffer from the CallDTMFManager, configures a
+// DigitBuffer with the requested timing, and blocks until collection completes.
+// DTMF digits arrive from both SIP INFO (injected by handleInfo) and RFC 2833
+// (injected by the DTMFCollector bridge).
+//
+// TODO(sprint-14): Full media implementation — play audio file via RTP while
+// collecting. Current implementation collects DTMF without playing audio.
 func (a *FlowSIPActions) PlayAndCollect(ctx context.Context, callCtx *flow.CallContext, prompt string, isTTS bool, timeout int, digitTimeout int, maxDigits int) (*flow.CollectResult, error) {
 	callID := callCtx.CallID
 	a.logger.Info("play and collect starting",
@@ -586,42 +593,32 @@ func (a *FlowSIPActions) PlayAndCollect(ctx context.Context, callCtx *flow.CallC
 		maxDigits = 1
 	}
 
-	overallTimeout := time.Duration(timeout) * time.Second
-	interDigitTimeout := time.Duration(digitTimeout) * time.Second
+	// Acquire a per-call digit channel from the DTMF manager.
+	// This channel receives digits from both SIP INFO and RFC 2833 sources.
+	digitCh := a.dtmfMgr.Acquire(callID)
+	defer a.dtmfMgr.Release(callID)
 
-	// Wait for first digit with overall timeout.
-	timer := time.NewTimer(overallTimeout)
-	defer timer.Stop()
+	// Configure the digit buffer with the requested timing parameters.
+	buf := media.NewDigitBuffer(digitCh, a.logger)
+	buf.SetFirstDigitTimeout(time.Duration(timeout) * time.Second)
+	buf.SetInterDigitTimeout(time.Duration(digitTimeout) * time.Second)
+	buf.SetMaxDigits(maxDigits)
+	buf.SetTerminator("#")
 
-	collected := ""
-	for {
-		select {
-		case <-ctx.Done():
-			return &flow.CollectResult{Digits: collected, TimedOut: true}, nil
-		case <-timer.C:
-			if collected == "" {
-				return &flow.CollectResult{TimedOut: true}, nil
-			}
-			return &flow.CollectResult{Digits: collected}, nil
-		default:
-			digits := callCtx.GetDTMF()
-			if len(digits) > len(collected) {
-				collected = digits
-				// Check for terminator (#).
-				if len(collected) > 0 && collected[len(collected)-1] == '#' {
-					collected = collected[:len(collected)-1]
-					return &flow.CollectResult{Digits: collected}, nil
-				}
-				if len(collected) >= maxDigits {
-					return &flow.CollectResult{Digits: collected}, nil
-				}
-				// Reset timer for inter-digit timeout.
-				timer.Reset(interDigitTimeout)
-			}
-			// Small sleep to avoid busy-waiting.
-			time.Sleep(50 * time.Millisecond)
-		}
-	}
+	// Block until collection completes (max digits, terminator, timeout, or cancel).
+	result := buf.Collect(ctx)
+
+	a.logger.Info("play and collect completed",
+		"call_id", callID,
+		"digits", result.Digits,
+		"timed_out", result.TimedOut,
+		"terminated", result.Terminated,
+	)
+
+	return &flow.CollectResult{
+		Digits:   result.Digits,
+		TimedOut: result.TimedOut,
+	}, nil
 }
 
 // updateCDROnAnswer updates the CDR with the answer time.

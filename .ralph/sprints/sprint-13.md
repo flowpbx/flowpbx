@@ -14,7 +14,7 @@
 - [x] Create `internal/media/dtmf.go` — DTMF digit collection from RFC 2833 events during playback
 - [x] Implement inter-digit timeout handling for multi-digit input
 - [x] Implement max digits and terminator digit (#) support
-- [ ] Implement per-call DTMF buffer management
+- [x] Implement per-call DTMF buffer management
 - [ ] Create audio prompts CRUD API: `POST /api/v1/prompts` (upload), `GET /api/v1/prompts`, `GET /api/v1/prompts/:id/audio`, `DELETE /api/v1/prompts/:id`
 - [ ] Implement audio format validation on upload (WAV, G.711 alaw/ulaw)
 - [ ] Store custom prompts in `$DATA_DIR/prompts/custom/`

@@ -30,6 +30,7 @@ type Server struct {
 	dialogMgr      *DialogManager
 	pendingMgr     *PendingCallManager
 	sessionMgr     *media.SessionManager
+	dtmfMgr        *media.CallDTMFManager
 	cdrs           database.CDRRepository
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
@@ -91,6 +92,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor) (*S
 
 	dialogMgr := NewDialogManager(logger)
 	pendingMgr := NewPendingCallManager(logger)
+	dtmfMgr := media.NewCallDTMFManager(logger)
 	cdrs := database.NewCDRRepository(db)
 	callFlows := database.NewCallFlowRepository(db)
 	outboundRouter := NewOutboundRouter(trunks, trunkRegistrar, enc, logger)
@@ -98,7 +100,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor) (*S
 	// Create the flow engine for inbound call routing via visual flow graphs.
 	voicemailMessages := database.NewVoicemailMessageRepository(db)
 	flowEngine := flow.NewEngine(callFlows, cdrs, nil, logger)
-	flowSIPActions := NewFlowSIPActions(extensions, registrations, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, proxyIP, logger)
+	flowSIPActions := NewFlowSIPActions(extensions, registrations, forker, dialogMgr, pendingMgr, sessionMgr, dtmfMgr, cdrs, proxyIP, logger)
 	nodes.RegisterAll(flowEngine, flowSIPActions, extensions, voicemailMessages, cfg.DataDir, logger)
 
 	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, flowEngine, proxyIP, logger)
@@ -115,6 +117,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor) (*S
 		dialogMgr:      dialogMgr,
 		pendingMgr:     pendingMgr,
 		sessionMgr:     sessionMgr,
+		dtmfMgr:        dtmfMgr,
 		cdrs:           cdrs,
 		logger:         logger,
 	}
@@ -212,6 +215,10 @@ func (s *Server) Stop() {
 		s.cancel()
 	}
 	s.wg.Wait()
+	// Drain per-call DTMF buffers.
+	if s.dtmfMgr != nil {
+		s.dtmfMgr.Drain()
+	}
 	// Stop the session reaper and release all active media sessions.
 	if s.sessionMgr != nil {
 		s.sessionMgr.StopReaper()
@@ -651,6 +658,12 @@ func (s *Server) PendingCallManager() *PendingCallManager {
 	return s.pendingMgr
 }
 
+// CallDTMFManager returns the per-call DTMF buffer manager for injecting
+// and collecting DTMF digits during IVR operations.
+func (s *Server) CallDTMFManager() *media.CallDTMFManager {
+	return s.dtmfMgr
+}
+
 // handleOptions responds to SIP OPTIONS requests (keepalive pings from
 // trunks and phones).
 func (s *Server) handleOptions(req *sip.Request, tx sip.ServerTransaction) {
@@ -712,8 +725,10 @@ func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 		"source", req.Source(),
 	)
 
-	// TODO: Route the DTMF event to the call's flow engine for IVR processing.
-	// This will be connected in Phase 1C when the IVR DTMF collection is implemented.
+	// Route the DTMF digit to the call's per-call buffer for IVR collection.
+	if s.dtmfMgr != nil {
+		s.dtmfMgr.Inject(callID, dtmfInfo.Signal)
+	}
 
 	res := sip.NewResponseFromRequest(req, 200, "OK", nil)
 	if err := tx.Respond(res); err != nil {

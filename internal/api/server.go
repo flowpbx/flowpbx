@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -224,13 +225,46 @@ func (s *Server) routes() {
 	slog.Info("api routes mounted")
 }
 
-// handleHealth returns basic health status. Unauthenticated.
+// handleHealth returns basic health status including first-boot detection.
+// Unauthenticated so the SPA can determine whether to show setup wizard or login.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	needsSetup, err := s.isFirstBoot(r.Context())
+	if err != nil {
+		slog.Error("health: failed to check first-boot status", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":      "ok",
+		"needs_setup": needsSetup,
+	})
+}
+
+// isFirstBoot returns true when the admin_users table is empty, indicating
+// the system has not been configured yet and the setup wizard should run.
+func (s *Server) isFirstBoot(ctx context.Context) (bool, error) {
+	count, err := s.adminUsers.Count(ctx)
+	if err != nil {
+		return false, err
+	}
+	return count == 0, nil
 }
 
 // handleSetup is a placeholder for the first-boot setup wizard endpoint.
+// Only allowed when the system is in first-boot state (no admin users exist).
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
+	needsSetup, err := s.isFirstBoot(r.Context())
+	if err != nil {
+		slog.Error("setup: failed to check first-boot status", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if !needsSetup {
+		writeError(w, http.StatusForbidden, "setup already completed")
+		return
+	}
+
 	writeError(w, http.StatusNotImplemented, "setup not implemented")
 }
 

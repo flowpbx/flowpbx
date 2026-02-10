@@ -48,8 +48,14 @@ func toInboundNumberResponse(n *models.InboundNumber) inboundNumberResponse {
 	}
 }
 
-// handleListInboundNumbers returns all inbound numbers.
+// handleListInboundNumbers returns inbound numbers with pagination.
 func (s *Server) handleListInboundNumbers(w http.ResponseWriter, r *http.Request) {
+	pg, errMsg := parsePagination(r)
+	if errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
 	numbers, err := s.inboundNumbers.List(r.Context())
 	if err != nil {
 		slog.Error("list inbound numbers: failed to query", "error", err)
@@ -57,12 +63,27 @@ func (s *Server) handleListInboundNumbers(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	items := make([]inboundNumberResponse, len(numbers))
+	all := make([]inboundNumberResponse, len(numbers))
 	for i := range numbers {
-		items[i] = toInboundNumberResponse(&numbers[i])
+		all[i] = toInboundNumberResponse(&numbers[i])
 	}
 
-	writeJSON(w, http.StatusOK, items)
+	total := len(all)
+	start := pg.Offset
+	if start > total {
+		start = total
+	}
+	end := start + pg.Limit
+	if end > total {
+		end = total
+	}
+
+	writeJSON(w, http.StatusOK, PaginatedResponse{
+		Items:  all[start:end],
+		Total:  total,
+		Limit:  pg.Limit,
+		Offset: pg.Offset,
+	})
 }
 
 // handleCreateInboundNumber creates a new inbound number.

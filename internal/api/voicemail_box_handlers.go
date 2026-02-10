@@ -71,8 +71,14 @@ func toVoicemailBoxResponse(b *models.VoicemailBox) voicemailBoxResponse {
 	}
 }
 
-// handleListVoicemailBoxes returns all voicemail boxes.
+// handleListVoicemailBoxes returns voicemail boxes with pagination.
 func (s *Server) handleListVoicemailBoxes(w http.ResponseWriter, r *http.Request) {
+	pg, errMsg := parsePagination(r)
+	if errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
 	boxes, err := s.voicemailBoxes.List(r.Context())
 	if err != nil {
 		slog.Error("list voicemail boxes: failed to query", "error", err)
@@ -80,12 +86,27 @@ func (s *Server) handleListVoicemailBoxes(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	items := make([]voicemailBoxResponse, len(boxes))
+	all := make([]voicemailBoxResponse, len(boxes))
 	for i := range boxes {
-		items[i] = toVoicemailBoxResponse(&boxes[i])
+		all[i] = toVoicemailBoxResponse(&boxes[i])
 	}
 
-	writeJSON(w, http.StatusOK, items)
+	total := len(all)
+	start := pg.Offset
+	if start > total {
+		start = total
+	}
+	end := start + pg.Limit
+	if end > total {
+		end = total
+	}
+
+	writeJSON(w, http.StatusOK, PaginatedResponse{
+		Items:  all[start:end],
+		Total:  total,
+		Limit:  pg.Limit,
+		Offset: pg.Offset,
+	})
 }
 
 // handleCreateVoicemailBox creates a new voicemail box.

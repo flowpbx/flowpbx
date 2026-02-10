@@ -133,8 +133,14 @@ func encodeJSONStringArray(arr []string) string {
 	return string(b)
 }
 
-// handleListTrunks returns all trunks with pagination.
+// handleListTrunks returns trunks with pagination.
 func (s *Server) handleListTrunks(w http.ResponseWriter, r *http.Request) {
+	pg, errMsg := parsePagination(r)
+	if errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
 	trunks, err := s.trunks.List(r.Context())
 	if err != nil {
 		slog.Error("list trunks: failed to query", "error", err)
@@ -142,12 +148,27 @@ func (s *Server) handleListTrunks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items := make([]trunkResponse, len(trunks))
+	all := make([]trunkResponse, len(trunks))
 	for i := range trunks {
-		items[i] = toTrunkResponse(&trunks[i])
+		all[i] = toTrunkResponse(&trunks[i])
 	}
 
-	writeJSON(w, http.StatusOK, items)
+	total := len(all)
+	start := pg.Offset
+	if start > total {
+		start = total
+	}
+	end := start + pg.Limit
+	if end > total {
+		end = total
+	}
+
+	writeJSON(w, http.StatusOK, PaginatedResponse{
+		Items:  all[start:end],
+		Total:  total,
+		Limit:  pg.Limit,
+		Offset: pg.Offset,
+	})
 }
 
 // handleCreateTrunk creates a new trunk.

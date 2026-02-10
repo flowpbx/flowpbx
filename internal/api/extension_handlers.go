@@ -81,8 +81,14 @@ func toExtensionResponse(e *models.Extension) extensionResponse {
 	return resp
 }
 
-// handleListExtensions returns all extensions.
+// handleListExtensions returns extensions with pagination.
 func (s *Server) handleListExtensions(w http.ResponseWriter, r *http.Request) {
+	pg, errMsg := parsePagination(r)
+	if errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
 	exts, err := s.extensions.List(r.Context())
 	if err != nil {
 		slog.Error("list extensions: failed to query", "error", err)
@@ -90,12 +96,27 @@ func (s *Server) handleListExtensions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items := make([]extensionResponse, len(exts))
+	all := make([]extensionResponse, len(exts))
 	for i := range exts {
-		items[i] = toExtensionResponse(&exts[i])
+		all[i] = toExtensionResponse(&exts[i])
 	}
 
-	writeJSON(w, http.StatusOK, items)
+	total := len(all)
+	start := pg.Offset
+	if start > total {
+		start = total
+	}
+	end := start + pg.Limit
+	if end > total {
+		end = total
+	}
+
+	writeJSON(w, http.StatusOK, PaginatedResponse{
+		Items:  all[start:end],
+		Total:  total,
+		Limit:  pg.Limit,
+		Offset: pg.Offset,
+	})
 }
 
 // handleCreateExtension creates a new extension.

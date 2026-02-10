@@ -8,7 +8,7 @@
 
 ## Tasks
 
-- [ ] Create `internal/voicemail/voicemail.go` — voicemail recording: capture incoming RTP → write to WAV file
+- [x] Create `internal/voicemail/voicemail.go` — voicemail recording: capture incoming RTP → write to WAV file
 - [ ] Implement configurable max recording duration (per voicemail box setting)
 - [ ] Play custom greeting per voicemail box (uploaded WAV) or default greeting fallback
 - [ ] Store voicemail message metadata in `voicemail_messages` table (caller ID, timestamp, duration, file_path)

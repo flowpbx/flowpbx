@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"sync"
 	"sync/atomic"
 
@@ -145,6 +146,8 @@ func (h *RingGroupHandler) Execute(ctx context.Context, callCtx *flow.CallContex
 	switch rg.Strategy {
 	case "round_robin":
 		return h.executeRoundRobin(ctx, callCtx, node, rg, members, ringTimeout)
+	case "random":
+		return h.executeRandom(ctx, callCtx, node, rg, members, ringTimeout)
 	default:
 		// ring_all is the default strategy (also used for unrecognized values).
 		return h.executeRingAll(ctx, callCtx, node, rg, members, ringTimeout)
@@ -241,6 +244,89 @@ func (h *RingGroupHandler) executeRoundRobin(ctx context.Context, callCtx *flow.
 	)
 
 	return "no_answer", nil
+}
+
+// executeRandom shuffles the member list and rings each member sequentially.
+// Unlike round_robin, the order is fully randomized on every call with no
+// persistent state. Each member gets the full ring timeout before the next
+// member is tried.
+func (h *RingGroupHandler) executeRandom(ctx context.Context, callCtx *flow.CallContext, node flow.Node, rg *models.RingGroup, members []*models.Extension, ringTimeout int) (string, error) {
+	// Shuffle a copy to avoid mutating the original slice.
+	shuffled := make([]*models.Extension, len(members))
+	copy(shuffled, members)
+	rand.Shuffle(len(shuffled), func(i, j int) {
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	})
+
+	h.logger.Debug("random strategy member order",
+		"call_id", callCtx.CallID,
+		"ring_group", rg.Name,
+		"order", extensionNumbers(shuffled),
+	)
+
+	for _, member := range shuffled {
+		h.logger.Debug("random ringing member",
+			"call_id", callCtx.CallID,
+			"ring_group", rg.Name,
+			"extension", member.Extension,
+		)
+
+		result, err := h.sip.RingExtension(ctx, callCtx, member, ringTimeout)
+		if err != nil {
+			h.logger.Error("random ring extension failed",
+				"call_id", callCtx.CallID,
+				"ring_group", rg.Name,
+				"extension", member.Extension,
+				"error", err,
+			)
+			continue
+		}
+
+		if result.Answered {
+			h.logger.Info("ring group answered",
+				"call_id", callCtx.CallID,
+				"node_id", node.ID,
+				"ring_group", rg.Name,
+				"answered_by", member.Extension,
+				"strategy", "random",
+			)
+			return "answered", nil
+		}
+
+		// If the member was busy or had DND, move to next member immediately.
+		if result.AllBusy || result.DND || result.NoRegistrations {
+			h.logger.Debug("random member unavailable, trying next",
+				"call_id", callCtx.CallID,
+				"ring_group", rg.Name,
+				"extension", member.Extension,
+				"busy", result.AllBusy,
+				"dnd", result.DND,
+				"no_registrations", result.NoRegistrations,
+			)
+			continue
+		}
+
+		// Timed out — try next member.
+	}
+
+	h.logger.Info("ring group not answered",
+		"call_id", callCtx.CallID,
+		"node_id", node.ID,
+		"ring_group", rg.Name,
+		"reason", "all_members_tried",
+		"strategy", "random",
+	)
+
+	return "no_answer", nil
+}
+
+// extensionNumbers returns a slice of extension numbers for logging.
+func extensionNumbers(exts []*models.Extension) []string {
+	nums := make([]string, len(exts))
+	for i, ext := range exts {
+		nums[i] = ext.Extension
+	}
+	return nums
 }
 
 // evaluateResult maps a RingResult to the appropriate output edge and logs

@@ -12,7 +12,7 @@
 - [x] Implement Extension node handler (ring extension with timeout, outputs: answered / no-answer)
 - [x] Implement Ring Group node handler — ring_all strategy
 - [x] Implement Ring Group node handler — round_robin strategy
-- [ ] Implement Ring Group node handler — random strategy
+- [x] Implement Ring Group node handler — random strategy
 - [ ] Implement Ring Group node handler — longest_idle strategy
 - [ ] Implement Time Switch node handler (evaluate rules against current time + timezone, follow matching edge or default)
 - [ ] Implement IVR Menu node handler (play prompt, collect DTMF digits, route by digit match, handle timeout + invalid)

@@ -223,6 +223,10 @@ type Mixer struct {
 	toneMu     sync.Mutex
 	toneFrames []int16 // pre-generated linear PCM tone samples
 	tonePos    int     // current read position in toneFrames
+
+	// recorder captures the full conference mix to a WAV file.
+	// When non-nil, every mix cycle writes the summed audio to the recorder.
+	recorder *ConferenceRecorder
 }
 
 // NewMixer creates a new conference audio mixer backed by the given proxy
@@ -233,6 +237,12 @@ func NewMixer(proxy *Proxy, logger *slog.Logger) *Mixer {
 		logger:       logger.With("subsystem", "conference-mixer"),
 		participants: make(map[string]*MixerParticipant),
 	}
+}
+
+// SetRecorder attaches a conference recorder to capture the full mix.
+// Must be called before Start or while no mix cycles are running.
+func (m *Mixer) SetRecorder(rec *ConferenceRecorder) {
+	m.recorder = rec
 }
 
 // AddParticipant allocates an RTP socket pair for a new participant and
@@ -479,6 +489,28 @@ func (m *Mixer) mixCycle(readBuf, outPkt []byte) {
 	// every participant's output so all hear the join/leave notification.
 	var toneBuf [samplesPerPacket]int16
 	hasTone := m.drainTone(toneBuf[:], samplesPerPacket) > 0
+
+	// Recording: compute the full mix (all participants summed) and write
+	// to the recorder. This captures what a listener would hear if they
+	// could hear everyone, including tones. Silence frames are written
+	// to maintain timing continuity in the WAV file.
+	if m.recorder != nil {
+		var fullMix [samplesPerPacket]int32
+		for _, p := range parts {
+			if !p.hasAudio {
+				continue
+			}
+			for i := 0; i < samplesPerPacket; i++ {
+				fullMix[i] += int32(p.lastAudio[i])
+			}
+		}
+		if hasTone {
+			for i := 0; i < samplesPerPacket; i++ {
+				fullMix[i] += int32(toneBuf[i])
+			}
+		}
+		m.recorder.WriteSamples(fullMix[:])
+	}
 
 	// Phase 2: For each participant, compute the N-1 mix (sum of all others)
 	// and send the mixed packet.

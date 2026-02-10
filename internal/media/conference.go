@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
+	"time"
 )
 
 // ConferenceRoom represents an active conference room backed by an audio Mixer.
@@ -17,6 +20,11 @@ type ConferenceRoom struct {
 	Mixer         *Mixer
 	MaxMembers    int
 	AnnounceJoins bool
+	Recorder      *ConferenceRecorder
+
+	// RecordingFile is the path to the recording file, set when recording
+	// is active and retained after the room is destroyed.
+	RecordingFile string
 
 	// done is closed when the room is empty and should be removed.
 	done chan struct{}
@@ -35,20 +43,23 @@ type ConferenceParticipant struct {
 // live Mixer instances. It handles the full lifecycle: create room on first
 // join, add/remove participants, kick, and destroy room when empty.
 type ConferenceManager struct {
-	proxy  *Proxy
-	logger *slog.Logger
+	proxy   *Proxy
+	dataDir string
+	logger  *slog.Logger
 
 	mu    sync.Mutex
 	rooms map[int64]*ConferenceRoom
 }
 
 // NewConferenceManager creates a conference manager backed by the given proxy
-// for RTP port allocation.
-func NewConferenceManager(proxy *Proxy, logger *slog.Logger) *ConferenceManager {
+// for RTP port allocation. dataDir is the application data directory used for
+// storing conference recordings under dataDir/recordings/.
+func NewConferenceManager(proxy *Proxy, dataDir string, logger *slog.Logger) *ConferenceManager {
 	return &ConferenceManager{
-		proxy:  proxy,
-		logger: logger.With("subsystem", "conference-manager"),
-		rooms:  make(map[int64]*ConferenceRoom),
+		proxy:   proxy,
+		dataDir: dataDir,
+		logger:  logger.With("subsystem", "conference-manager"),
+		rooms:   make(map[int64]*ConferenceRoom),
 	}
 }
 
@@ -77,11 +88,12 @@ const conferenceJoinToneDurationMs = 200
 const conferenceLeaveToneDurationMs = 100
 
 // Join adds a participant to a conference room. If the room does not exist,
-// it is created and the mixer is started. Returns the allocated RTP socket pair
-// for SDP rewriting.
+// it is created and the mixer is started. When record is true, the mixed
+// audio is captured to a WAV file under the recordings directory. Returns
+// the allocated RTP socket pair for SDP rewriting.
 //
 // The caller must call Leave when the participant exits the conference.
-func (cm *ConferenceManager) Join(ctx context.Context, bridgeID int64, bridgeName string, maxMembers int, announceJoins bool, participantID string, remote *net.UDPAddr, payloadType int) (*JoinResult, error) {
+func (cm *ConferenceManager) Join(ctx context.Context, bridgeID int64, bridgeName string, maxMembers int, announceJoins bool, record bool, participantID string, remote *net.UDPAddr, payloadType int) (*JoinResult, error) {
 	cm.mu.Lock()
 
 	room, exists := cm.rooms[bridgeID]
@@ -95,6 +107,26 @@ func (cm *ConferenceManager) Join(ctx context.Context, bridgeID int64, bridgeNam
 			AnnounceJoins: announceJoins,
 			done:          make(chan struct{}),
 		}
+
+		// Start recording if enabled.
+		if record {
+			recDir := filepath.Join(cm.dataDir, "recordings")
+			if err := os.MkdirAll(recDir, 0750); err != nil {
+				cm.mu.Unlock()
+				return nil, fmt.Errorf("creating recordings directory: %w", err)
+			}
+			filename := fmt.Sprintf("conference_%d_%d.wav", bridgeID, time.Now().UnixMilli())
+			recPath := filepath.Join(recDir, filename)
+			rec, err := NewConferenceRecorder(recPath, cm.logger)
+			if err != nil {
+				cm.mu.Unlock()
+				return nil, fmt.Errorf("starting conference recording: %w", err)
+			}
+			room.Recorder = rec
+			room.RecordingFile = filename
+			mixer.SetRecorder(rec)
+		}
+
 		cm.rooms[bridgeID] = room
 		mixer.Start(ctx)
 
@@ -103,6 +135,7 @@ func (cm *ConferenceManager) Join(ctx context.Context, bridgeID int64, bridgeNam
 			"bridge_name", bridgeName,
 			"max_members", maxMembers,
 			"announce_joins", announceJoins,
+			"recording", record,
 		)
 	}
 
@@ -178,6 +211,18 @@ func (cm *ConferenceManager) Leave(bridgeID int64, participantID string) error {
 		cm.mu.Unlock()
 
 		room.Mixer.Release()
+
+		// Stop recording if active.
+		if room.Recorder != nil {
+			filePath, duration := room.Recorder.Stop()
+			cm.logger.Info("conference recording finalized",
+				"bridge_id", bridgeID,
+				"bridge_name", room.BridgeName,
+				"file", filePath,
+				"duration_secs", duration,
+			)
+		}
+
 		close(room.done)
 
 		cm.logger.Info("conference room destroyed (empty)",
@@ -282,6 +327,9 @@ func (cm *ConferenceManager) ReleaseAll() {
 
 	for _, room := range rooms {
 		room.Mixer.Release()
+		if room.Recorder != nil {
+			room.Recorder.Stop()
+		}
 		close(room.done)
 	}
 

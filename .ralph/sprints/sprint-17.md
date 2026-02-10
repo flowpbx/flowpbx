@@ -14,8 +14,8 @@
 - [x] Implement mute/unmute per participant
 - [x] Implement mute_on_join option (join muted by default)
 - [x] Implement announce_joins option (play tone or announcement on join/leave)
-- [ ] Enforce max_members limit per conference bridge
-- [ ] Implement conference recording (mix all participant audio → single WAV output)
+- [x] Enforce max_members limit per conference bridge
+- [x] Implement conference recording (mix all participant audio → single WAV output)
 - [ ] Track active conference participants in memory
 - [ ] Expose active participants via API: `GET /api/v1/conferences/:id/participants`
 - [ ] Add conference management UI: view active participants, mute/kick controls

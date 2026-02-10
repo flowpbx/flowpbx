@@ -100,7 +100,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sys
 	outboundRouter := NewOutboundRouter(trunks, trunkRegistrar, enc, logger)
 
 	// Create conference manager for active conference room lifecycle.
-	conferenceMgr := media.NewConferenceManager(rtpProxy, logger)
+	conferenceMgr := media.NewConferenceManager(rtpProxy, cfg.DataDir, logger)
 
 	// Create the flow engine for inbound call routing via visual flow graphs.
 	voicemailMessages := database.NewVoicemailMessageRepository(db)

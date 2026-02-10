@@ -15,6 +15,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/flowpbx/flowpbx/internal/prompts"
 	sipserver "github.com/flowpbx/flowpbx/internal/sip"
 )
 
@@ -42,6 +43,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+
+	// Extract embedded system prompts to data directory on first boot.
+	if err := prompts.ExtractToDataDir(cfg.DataDir); err != nil {
+		slog.Error("failed to extract system prompts", "error", err)
+		os.Exit(1)
+	}
 
 	// Initialize encryptor for sensitive database fields (trunk passwords).
 	var enc *database.Encryptor

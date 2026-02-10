@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -34,9 +35,40 @@ func rtpPayloadType(pkt []byte) int {
 	return int(pkt[1] & 0x7F)
 }
 
+// atomicAddr provides thread-safe storage for a UDP address.
+// Used for symmetric RTP where the remote address is learned from the
+// first incoming packet rather than relying solely on the SDP-signaled address.
+type atomicAddr struct {
+	v atomic.Pointer[net.UDPAddr]
+}
+
+func newAtomicAddr(addr *net.UDPAddr) *atomicAddr {
+	a := &atomicAddr{}
+	a.v.Store(addr)
+	return a
+}
+
+func (a *atomicAddr) load() *net.UDPAddr {
+	return a.v.Load()
+}
+
+// update atomically replaces the stored address and returns true if it changed.
+func (a *atomicAddr) update(addr *net.UDPAddr) bool {
+	old := a.v.Load()
+	if old.IP.Equal(addr.IP) && old.Port == addr.Port {
+		return false
+	}
+	a.v.Store(addr)
+	return true
+}
+
 // Relay manages bidirectional RTP forwarding between two legs of a session.
 // It reads packets from each leg's RTP socket and forwards them to the
 // other leg's remote endpoint, filtering by allowed payload types.
+//
+// Symmetric RTP: The relay learns the actual remote address from the first
+// valid RTP packet received on each leg. This handles NAT traversal because
+// the real source address (post-NAT) may differ from the SDP-signaled address.
 type Relay struct {
 	session *Session
 	logger  *slog.Logger
@@ -44,17 +76,20 @@ type Relay struct {
 	// allowedPT is the set of payload types to relay.
 	allowedPT map[int]struct{}
 
-	// callerRemote is the remote RTP address for the caller leg.
-	callerRemote *net.UDPAddr
-	// calleeRemote is the remote RTP address for the callee leg.
-	calleeRemote *net.UDPAddr
+	// callerRemote is the learned remote RTP address for the caller leg.
+	// Initialized from SDP and updated on first packet (symmetric RTP).
+	callerRemote *atomicAddr
+	// calleeRemote is the learned remote RTP address for the callee leg.
+	// Initialized from SDP and updated on first packet (symmetric RTP).
+	calleeRemote *atomicAddr
 
 	wg sync.WaitGroup
 }
 
 // NewRelay creates a relay for the given session with the specified allowed
 // payload types. callerRemote and calleeRemote are the far-end RTP addresses
-// learned from SDP negotiation.
+// learned from SDP negotiation. These addresses serve as initial targets and
+// are updated via symmetric RTP when the first packet arrives from each endpoint.
 func NewRelay(session *Session, callerRemote, calleeRemote *net.UDPAddr, allowedPayloadTypes []int, logger *slog.Logger) *Relay {
 	pt := make(map[int]struct{}, len(allowedPayloadTypes))
 	for _, p := range allowedPayloadTypes {
@@ -64,27 +99,29 @@ func NewRelay(session *Session, callerRemote, calleeRemote *net.UDPAddr, allowed
 		session:      session,
 		logger:       logger.With("subsystem", "rtp-relay", "session_id", session.ID),
 		allowedPT:    pt,
-		callerRemote: callerRemote,
-		calleeRemote: calleeRemote,
+		callerRemote: newAtomicAddr(callerRemote),
+		calleeRemote: newAtomicAddr(calleeRemote),
 	}
 }
 
 // Start begins bidirectional RTP relay between the two legs.
 // Caller→Callee: reads from CallerLeg.RTPConn, writes to CalleeLeg.RTPConn → calleeRemote.
 // Callee→Caller: reads from CalleeLeg.RTPConn, writes to CallerLeg.RTPConn → callerRemote.
+// Symmetric RTP: each direction learns the actual remote address from the first
+// valid RTP packet, handling NAT traversal transparently.
 // This method is non-blocking; relay runs in background goroutines.
 func (r *Relay) Start() {
 	r.session.SetState(SessionStateActive)
 
 	r.wg.Add(2)
-	go r.forward("caller→callee", r.session.CallerLeg.RTPConn, r.session.CalleeLeg.RTPConn, r.calleeRemote)
-	go r.forward("callee→caller", r.session.CalleeLeg.RTPConn, r.session.CallerLeg.RTPConn, r.callerRemote)
+	go r.forward("caller→callee", r.session.CallerLeg.RTPConn, r.session.CalleeLeg.RTPConn, r.calleeRemote, r.callerRemote)
+	go r.forward("callee→caller", r.session.CalleeLeg.RTPConn, r.session.CallerLeg.RTPConn, r.callerRemote, r.calleeRemote)
 
 	r.logger.Info("rtp relay started",
 		"caller_local_port", r.session.CallerLeg.Ports.RTP,
 		"callee_local_port", r.session.CalleeLeg.Ports.RTP,
-		"caller_remote", r.callerRemote.String(),
-		"callee_remote", r.calleeRemote.String(),
+		"caller_remote", r.callerRemote.load().String(),
+		"callee_remote", r.calleeRemote.load().String(),
 	)
 }
 
@@ -95,23 +132,41 @@ func (r *Relay) Stop() {
 	r.logger.Info("rtp relay stopped", "session_id", r.session.ID)
 }
 
+// CallerAddr returns the current remote address for the caller leg.
+// After symmetric RTP learning, this may differ from the SDP-signaled address.
+func (r *Relay) CallerAddr() *net.UDPAddr {
+	return r.callerRemote.load()
+}
+
+// CalleeAddr returns the current remote address for the callee leg.
+// After symmetric RTP learning, this may differ from the SDP-signaled address.
+func (r *Relay) CalleeAddr() *net.UDPAddr {
+	return r.calleeRemote.load()
+}
+
 // readTimeout is the read deadline for UDP sockets in the relay loop.
 // This allows goroutines to periodically check the stopped flag.
 const readTimeout = 100 * time.Millisecond
 
 // forward reads RTP packets from src and writes them to dst toward the
 // given remote address. Only packets with allowed payload types are forwarded.
-func (r *Relay) forward(direction string, src, dst *net.UDPConn, remote *net.UDPAddr) {
+//
+// Symmetric RTP: writeRemote is the destination for outgoing packets (the far end
+// of the opposite leg). learnRemote is updated with the actual source address of
+// the first valid RTP packet received on this leg. This allows the opposite
+// direction's forward goroutine to send replies back to the real (post-NAT) address.
+func (r *Relay) forward(direction string, src, dst *net.UDPConn, writeRemote, learnRemote *atomicAddr) {
 	defer r.wg.Done()
 
 	buf := make([]byte, maxRTPPacket)
+	learned := false
 	for {
 		if r.session.IsStopped() {
 			return
 		}
 
 		src.SetReadDeadline(time.Now().Add(readTimeout))
-		n, _, err := src.ReadFromUDP(buf)
+		n, srcAddr, err := src.ReadFromUDP(buf)
 		if err != nil {
 			if r.session.IsStopped() {
 				return
@@ -140,7 +195,20 @@ func (r *Relay) forward(direction string, src, dst *net.UDPConn, remote *net.UDP
 			continue
 		}
 
-		_, err = dst.WriteToUDP(pkt, remote)
+		// Symmetric RTP: learn the actual remote address from the first
+		// valid RTP packet. This handles NAT where the real source differs
+		// from the SDP-signaled address.
+		if !learned {
+			if learnRemote.update(srcAddr) {
+				r.logger.Info("symmetric rtp: learned remote address",
+					"direction", direction,
+					"address", srcAddr.String(),
+				)
+			}
+			learned = true
+		}
+
+		_, err = dst.WriteToUDP(pkt, writeRemote.load())
 		if err != nil {
 			if r.session.IsStopped() {
 				return

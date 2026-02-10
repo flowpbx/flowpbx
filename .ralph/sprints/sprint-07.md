@@ -17,7 +17,7 @@
 - [x] Implement Opus (payload 111) passthrough relay
 - [x] Create `internal/media/dtmf.go` — RFC 2833 telephone-event relay
 - [x] Implement SIP INFO DTMF fallback detection
-- [ ] Implement symmetric RTP / NAT handling (learn remote port from first packet)
+- [x] Implement symmetric RTP / NAT handling (learn remote port from first packet)
 - [ ] Implement session timeout and cleanup for orphaned RTP streams
 - [ ] Create media session lifecycle: create → start relay → stop → release ports
 - [ ] Add RTP packet counters and basic stats per session (for future metrics)

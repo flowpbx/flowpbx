@@ -1,6 +1,7 @@
 package media
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -51,10 +52,10 @@ type wavHeader struct {
 
 // parseWAVHeader reads and validates a WAV file header, returning the
 // format information and positioning the reader at the start of audio data.
-func parseWAVHeader(f *os.File) (*wavHeader, error) {
+func parseWAVHeader(r io.ReadSeeker) (*wavHeader, error) {
 	// RIFF header: "RIFF" + size + "WAVE"
 	var riffHeader [12]byte
-	if _, err := io.ReadFull(f, riffHeader[:]); err != nil {
+	if _, err := io.ReadFull(r, riffHeader[:]); err != nil {
 		return nil, fmt.Errorf("reading riff header: %w", err)
 	}
 	if string(riffHeader[0:4]) != "RIFF" {
@@ -73,13 +74,13 @@ func parseWAVHeader(f *os.File) (*wavHeader, error) {
 		var chunkID [4]byte
 		var chunkSize uint32
 
-		if _, err := io.ReadFull(f, chunkID[:]); err != nil {
+		if _, err := io.ReadFull(r, chunkID[:]); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				break
 			}
 			return nil, fmt.Errorf("reading chunk id: %w", err)
 		}
-		if err := binary.Read(f, binary.LittleEndian, &chunkSize); err != nil {
+		if err := binary.Read(r, binary.LittleEndian, &chunkSize); err != nil {
 			return nil, fmt.Errorf("reading chunk size: %w", err)
 		}
 
@@ -88,27 +89,27 @@ func parseWAVHeader(f *os.File) (*wavHeader, error) {
 			if chunkSize < 16 {
 				return nil, fmt.Errorf("fmt chunk too small: %d bytes", chunkSize)
 			}
-			if err := binary.Read(f, binary.LittleEndian, &hdr.AudioFormat); err != nil {
+			if err := binary.Read(r, binary.LittleEndian, &hdr.AudioFormat); err != nil {
 				return nil, fmt.Errorf("reading audio format: %w", err)
 			}
-			if err := binary.Read(f, binary.LittleEndian, &hdr.NumChannels); err != nil {
+			if err := binary.Read(r, binary.LittleEndian, &hdr.NumChannels); err != nil {
 				return nil, fmt.Errorf("reading num channels: %w", err)
 			}
-			if err := binary.Read(f, binary.LittleEndian, &hdr.SampleRate); err != nil {
+			if err := binary.Read(r, binary.LittleEndian, &hdr.SampleRate); err != nil {
 				return nil, fmt.Errorf("reading sample rate: %w", err)
 			}
-			if err := binary.Read(f, binary.LittleEndian, &hdr.ByteRate); err != nil {
+			if err := binary.Read(r, binary.LittleEndian, &hdr.ByteRate); err != nil {
 				return nil, fmt.Errorf("reading byte rate: %w", err)
 			}
-			if err := binary.Read(f, binary.LittleEndian, &hdr.BlockAlign); err != nil {
+			if err := binary.Read(r, binary.LittleEndian, &hdr.BlockAlign); err != nil {
 				return nil, fmt.Errorf("reading block align: %w", err)
 			}
-			if err := binary.Read(f, binary.LittleEndian, &hdr.BitsPerSample); err != nil {
+			if err := binary.Read(r, binary.LittleEndian, &hdr.BitsPerSample); err != nil {
 				return nil, fmt.Errorf("reading bits per sample: %w", err)
 			}
 			// Skip any extra fmt bytes.
 			if chunkSize > 16 {
-				if _, err := f.Seek(int64(chunkSize-16), io.SeekCurrent); err != nil {
+				if _, err := r.Seek(int64(chunkSize-16), io.SeekCurrent); err != nil {
 					return nil, fmt.Errorf("skipping extra fmt data: %w", err)
 				}
 			}
@@ -125,7 +126,7 @@ func parseWAVHeader(f *os.File) (*wavHeader, error) {
 			if chunkSize%2 != 0 {
 				skip++
 			}
-			if _, err := f.Seek(skip, io.SeekCurrent); err != nil {
+			if _, err := r.Seek(skip, io.SeekCurrent); err != nil {
 				return nil, fmt.Errorf("skipping chunk %q: %w", string(chunkID[:]), err)
 			}
 		}
@@ -188,6 +189,33 @@ func ValidateWAVFile(path string) (payloadType int, duration time.Duration, err 
 	dur := time.Duration(hdr.DataSize) * time.Second / time.Duration(hdr.SampleRate)
 
 	return pt, dur, nil
+}
+
+// ValidateWAVData validates in-memory WAV data is in a supported G.711
+// format (alaw or ulaw, 8kHz, mono, 8-bit). Returns an error describing
+// the validation failure, or nil if the data is valid.
+func ValidateWAVData(data []byte) error {
+	r := bytes.NewReader(data)
+
+	hdr, err := parseWAVHeader(r)
+	if err != nil {
+		return fmt.Errorf("invalid wav: %w", err)
+	}
+
+	if _, err := payloadTypeForWAV(hdr.AudioFormat); err != nil {
+		return err
+	}
+	if hdr.NumChannels != 1 {
+		return fmt.Errorf("wav file must be mono, got %d channels", hdr.NumChannels)
+	}
+	if hdr.SampleRate != 8000 {
+		return fmt.Errorf("wav file must be 8000 Hz, got %d Hz", hdr.SampleRate)
+	}
+	if hdr.BitsPerSample != 8 {
+		return fmt.Errorf("wav file must be 8-bit, got %d-bit", hdr.BitsPerSample)
+	}
+
+	return nil
 }
 
 // buildRTPHeader writes a 12-byte RTP header into buf.

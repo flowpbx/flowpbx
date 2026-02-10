@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/flowpbx/flowpbx/internal/media"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -110,10 +111,17 @@ func (s *Server) handleUploadPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Basic WAV header validation.
+	// Validate audio format: WAV files must be G.711 (alaw/ulaw), 8kHz, mono, 8-bit.
+	// Raw alaw/ulaw files are validated for minimum size.
 	if format == "wav" {
-		if errMsg := validateWAVHeader(data); errMsg != "" {
-			writeError(w, http.StatusBadRequest, errMsg)
+		if err := media.ValidateWAVData(data); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid wav file: %s", err))
+			return
+		}
+	} else {
+		// Raw G.711 files must contain at least one RTP packet worth of data (160 bytes).
+		if len(data) < 160 {
+			writeError(w, http.StatusBadRequest, "raw audio file too small; must contain at least 160 bytes")
 			return
 		}
 	}
@@ -250,20 +258,6 @@ func (s *Server) handleDeletePrompt(w http.ResponseWriter, r *http.Request) {
 // parsePromptID extracts and parses the prompt ID from the URL parameter.
 func parsePromptID(r *http.Request) (int64, error) {
 	return strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-}
-
-// validateWAVHeader checks that the data starts with a valid RIFF/WAVE header.
-func validateWAVHeader(data []byte) string {
-	if len(data) < 12 {
-		return "file too small to be a valid WAV"
-	}
-	if string(data[0:4]) != "RIFF" {
-		return "invalid WAV file: missing RIFF header"
-	}
-	if string(data[8:12]) != "WAVE" {
-		return "invalid WAV file: missing WAVE format identifier"
-	}
-	return ""
 }
 
 // sanitizeFilename removes path separators and non-printable characters

@@ -370,6 +370,93 @@ func TestPlayer_PlayData(t *testing.T) {
 	}
 }
 
+// buildTestWAVData creates minimal WAV file data in memory for testing.
+func buildTestWAVData(format uint16, sampleRate uint32, channels uint16, bitsPerSample uint16, numSamples int) []byte {
+	data := make([]byte, numSamples)
+	for i := range data {
+		data[i] = 0x80
+	}
+
+	var fmtBuf bytes.Buffer
+	binary.Write(&fmtBuf, binary.LittleEndian, format)
+	binary.Write(&fmtBuf, binary.LittleEndian, channels)
+	binary.Write(&fmtBuf, binary.LittleEndian, sampleRate)
+	byteRate := sampleRate * uint32(channels) * uint32(bitsPerSample) / 8
+	binary.Write(&fmtBuf, binary.LittleEndian, byteRate)
+	blockAlign := channels * bitsPerSample / 8
+	binary.Write(&fmtBuf, binary.LittleEndian, blockAlign)
+	binary.Write(&fmtBuf, binary.LittleEndian, bitsPerSample)
+
+	riffSize := uint32(4 + 8 + fmtBuf.Len() + 8 + len(data))
+
+	var buf bytes.Buffer
+	buf.WriteString("RIFF")
+	binary.Write(&buf, binary.LittleEndian, riffSize)
+	buf.WriteString("WAVE")
+	buf.WriteString("fmt ")
+	binary.Write(&buf, binary.LittleEndian, uint32(fmtBuf.Len()))
+	buf.Write(fmtBuf.Bytes())
+	buf.WriteString("data")
+	binary.Write(&buf, binary.LittleEndian, uint32(numSamples))
+	buf.Write(data)
+
+	return buf.Bytes()
+}
+
+func TestValidateWAVData_ValidPCMU(t *testing.T) {
+	data := buildTestWAVData(wavFormatPCMU, 8000, 1, 8, 1600)
+	if err := ValidateWAVData(data); err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+func TestValidateWAVData_ValidPCMA(t *testing.T) {
+	data := buildTestWAVData(wavFormatPCMA, 8000, 1, 8, 800)
+	if err := ValidateWAVData(data); err != nil {
+		t.Errorf("expected no error, got: %v", err)
+	}
+}
+
+func TestValidateWAVData_WrongSampleRate(t *testing.T) {
+	data := buildTestWAVData(wavFormatPCMU, 16000, 1, 8, 1600)
+	if err := ValidateWAVData(data); err == nil {
+		t.Error("expected error for 16kHz file")
+	}
+}
+
+func TestValidateWAVData_Stereo(t *testing.T) {
+	data := buildTestWAVData(wavFormatPCMU, 8000, 2, 8, 1600)
+	if err := ValidateWAVData(data); err == nil {
+		t.Error("expected error for stereo file")
+	}
+}
+
+func TestValidateWAVData_16Bit(t *testing.T) {
+	data := buildTestWAVData(wavFormatPCMU, 8000, 1, 16, 1600)
+	if err := ValidateWAVData(data); err == nil {
+		t.Error("expected error for 16-bit file")
+	}
+}
+
+func TestValidateWAVData_UnsupportedFormat(t *testing.T) {
+	data := buildTestWAVData(1, 8000, 1, 16, 1600) // PCM linear
+	if err := ValidateWAVData(data); err == nil {
+		t.Error("expected error for PCM linear format")
+	}
+}
+
+func TestValidateWAVData_NotWAV(t *testing.T) {
+	if err := ValidateWAVData([]byte("not a wav file")); err == nil {
+		t.Error("expected error for non-WAV data")
+	}
+}
+
+func TestValidateWAVData_TooShort(t *testing.T) {
+	if err := ValidateWAVData([]byte("RIFF")); err == nil {
+		t.Error("expected error for truncated data")
+	}
+}
+
 func TestPayloadTypeForWAV(t *testing.T) {
 	tests := []struct {
 		format  uint16

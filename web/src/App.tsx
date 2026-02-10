@@ -1,8 +1,10 @@
 function App() {
   return (
-    <div>
-      <h1>FlowPBX</h1>
-      <p>Admin UI loading...</p>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <h1 className="text-3xl font-bold text-gray-900">FlowPBX</h1>
+        <p className="mt-2 text-gray-600">Admin UI loading...</p>
+      </div>
     </div>
   )
 }

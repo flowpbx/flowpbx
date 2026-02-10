@@ -48,11 +48,13 @@ type Server struct {
 	sessions     *middleware.SessionStore
 	adminUsers   database.AdminUserRepository
 	systemConfig database.SystemConfigRepository
+	trunks       database.TrunkRepository
 	trunkStatus  TrunkStatusProvider
+	encryptor    *database.Encryptor
 }
 
 // NewServer creates the HTTP handler with all routes mounted.
-func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider) *Server {
+func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, enc *database.Encryptor) *Server {
 	s := &Server{
 		router:       chi.NewRouter(),
 		db:           db,
@@ -60,7 +62,9 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		sessions:     sessions,
 		adminUsers:   database.NewAdminUserRepository(db),
 		systemConfig: sysConfig,
+		trunks:       database.NewTrunkRepository(db),
 		trunkStatus:  trunkStatus,
+		encryptor:    enc,
 	}
 
 	s.routes()
@@ -111,13 +115,13 @@ func (s *Server) routes() {
 		})
 
 		r.Route("/trunks", func(r chi.Router) {
-			r.Get("/", s.handleNotImplemented)
-			r.Post("/", s.handleNotImplemented)
+			r.Get("/", s.handleListTrunks)
+			r.Post("/", s.handleCreateTrunk)
 			r.Get("/status", s.handleListTrunkStatus)
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", s.handleNotImplemented)
-				r.Put("/", s.handleNotImplemented)
-				r.Delete("/", s.handleNotImplemented)
+				r.Get("/", s.handleGetTrunk)
+				r.Put("/", s.handleUpdateTrunk)
+				r.Delete("/", s.handleDeleteTrunk)
 				r.Post("/test", s.handleNotImplemented)
 			})
 		})

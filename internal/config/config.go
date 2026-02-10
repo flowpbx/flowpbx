@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -12,14 +13,15 @@ import (
 // Config holds all runtime configuration for the FlowPBX server.
 // Precedence: CLI flags > env vars > defaults.
 type Config struct {
-	DataDir     string
-	HTTPPort    int
-	SIPPort     int
-	SIPTLSPort  int
-	TLSCert     string
-	TLSKey      string
-	LogLevel    string
-	CORSOrigins string
+	DataDir       string
+	HTTPPort      int
+	SIPPort       int
+	SIPTLSPort    int
+	TLSCert       string
+	TLSKey        string
+	LogLevel      string
+	CORSOrigins   string
+	EncryptionKey string // 32-byte hex-encoded key for AES-256-GCM
 }
 
 // defaults
@@ -49,6 +51,7 @@ func Load() (*Config, error) {
 	fs.StringVar(&cfg.TLSKey, "tls-key", "", "path to TLS private key file")
 	fs.StringVar(&cfg.LogLevel, "log-level", defaultLogLevel, "log level (debug, info, warn, error)")
 	fs.StringVar(&cfg.CORSOrigins, "cors-origins", "", "comma-separated list of allowed CORS origins (use * for all)")
+	fs.StringVar(&cfg.EncryptionKey, "encryption-key", "", "hex-encoded 32-byte key for AES-256-GCM encryption of sensitive fields")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return nil, fmt.Errorf("parsing flags: %w", err)
@@ -77,14 +80,15 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 
 	// Map of flag name to env var name.
 	envMap := map[string]string{
-		"data-dir":     envPrefix + "DATA_DIR",
-		"http-port":    envPrefix + "HTTP_PORT",
-		"sip-port":     envPrefix + "SIP_PORT",
-		"sip-tls-port": envPrefix + "SIP_TLS_PORT",
-		"tls-cert":     envPrefix + "TLS_CERT",
-		"tls-key":      envPrefix + "TLS_KEY",
-		"log-level":    envPrefix + "LOG_LEVEL",
-		"cors-origins": envPrefix + "CORS_ORIGINS",
+		"data-dir":       envPrefix + "DATA_DIR",
+		"http-port":      envPrefix + "HTTP_PORT",
+		"sip-port":       envPrefix + "SIP_PORT",
+		"sip-tls-port":   envPrefix + "SIP_TLS_PORT",
+		"tls-cert":       envPrefix + "TLS_CERT",
+		"tls-key":        envPrefix + "TLS_KEY",
+		"log-level":      envPrefix + "LOG_LEVEL",
+		"cors-origins":   envPrefix + "CORS_ORIGINS",
+		"encryption-key": envPrefix + "ENCRYPTION_KEY",
 	}
 
 	for flagName, envVar := range envMap {
@@ -118,6 +122,8 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 			cfg.LogLevel = val
 		case "cors-origins":
 			cfg.CORSOrigins = val
+		case "encryption-key":
+			cfg.EncryptionKey = val
 		}
 	}
 }
@@ -145,6 +151,22 @@ func (c *Config) validate() error {
 	}
 
 	return nil
+}
+
+// EncryptionKeyBytes returns the decoded 32-byte encryption key, or nil if
+// no key is configured.
+func (c *Config) EncryptionKeyBytes() ([]byte, error) {
+	if c.EncryptionKey == "" {
+		return nil, nil
+	}
+	key, err := hex.DecodeString(c.EncryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("decoding encryption key: %w", err)
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("encryption key must decode to 32 bytes, got %d", len(key))
+	}
+	return key, nil
 }
 
 // SIPHost returns the hostname to use for the SIP User-Agent. It defaults

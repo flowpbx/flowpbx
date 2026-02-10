@@ -13,6 +13,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/flowpbx/flowpbx/internal/flow"
 	"github.com/flowpbx/flowpbx/internal/web"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -89,6 +90,8 @@ type Server struct {
 	inboundNumbers database.InboundNumberRepository
 	registrations  database.RegistrationRepository
 	cdrs           database.CDRRepository
+	callFlows      database.CallFlowRepository
+	flowValidator  *flow.Validator
 	trunkStatus    TrunkStatusProvider
 	trunkTester    TrunkTester
 	trunkLifecycle TrunkLifecycleManager
@@ -110,6 +113,8 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		inboundNumbers: database.NewInboundNumberRepository(db),
 		registrations:  database.NewRegistrationRepository(db),
 		cdrs:           database.NewCDRRepository(db),
+		callFlows:      database.NewCallFlowRepository(db),
+		flowValidator:  flow.NewValidator(nil),
 		trunkStatus:    trunkStatus,
 		trunkTester:    trunkTester,
 		trunkLifecycle: trunkLifecycle,
@@ -244,14 +249,14 @@ func (s *Server) routes() {
 		})
 
 		r.Route("/flows", func(r chi.Router) {
-			r.Get("/", s.handleNotImplemented)
-			r.Post("/", s.handleNotImplemented)
+			r.Get("/", s.handleListFlows)
+			r.Post("/", s.handleCreateFlow)
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", s.handleNotImplemented)
-				r.Put("/", s.handleNotImplemented)
-				r.Delete("/", s.handleNotImplemented)
-				r.Post("/publish", s.handleNotImplemented)
-				r.Post("/validate", s.handleNotImplemented)
+				r.Get("/", s.handleGetFlow)
+				r.Put("/", s.handleUpdateFlow)
+				r.Delete("/", s.handleDeleteFlow)
+				r.Post("/publish", s.handlePublishFlow)
+				r.Post("/validate", s.handleValidateFlow)
 			})
 		})
 

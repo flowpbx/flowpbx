@@ -9,6 +9,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/flowpbx/flowpbx/internal/flow"
 	"github.com/flowpbx/flowpbx/internal/media"
 )
 
@@ -64,6 +65,7 @@ type InviteHandler struct {
 	pendingMgr     *PendingCallManager
 	sessionMgr     *media.SessionManager
 	cdrs           database.CDRRepository
+	flowEngine     *flow.Engine
 	proxyIP        string
 	logger         *slog.Logger
 }
@@ -82,6 +84,7 @@ func NewInviteHandler(
 	pendingMgr *PendingCallManager,
 	sessionMgr *media.SessionManager,
 	cdrs database.CDRRepository,
+	flowEngine *flow.Engine,
 	proxyIP string,
 	logger *slog.Logger,
 ) *InviteHandler {
@@ -100,6 +103,7 @@ func NewInviteHandler(
 		pendingMgr:     pendingMgr,
 		sessionMgr:     sessionMgr,
 		cdrs:           cdrs,
+		flowEngine:     flowEngine,
 		proxyIP:        proxyIP,
 		logger:         logger.With("subsystem", "invite"),
 	}
@@ -488,15 +492,46 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 	}
 
 	// If the inbound number matched a DID but we have no target extension,
-	// that means the DID is mapped to a flow. Flow engine is not yet
-	// implemented, so return 501 for now.
+	// that means the DID is mapped to a flow. Spawn the flow engine.
 	if ic.TargetExtension == nil && ic.InboundNumber != nil {
-		h.logger.Warn("inbound call matched did but flow routing not yet implemented",
+		if ic.InboundNumber.FlowID == nil || h.flowEngine == nil {
+			h.logger.Warn("inbound call matched did but no flow configured",
+				"call_id", callID,
+				"did", ic.InboundNumber.Number,
+				"flow_id", ic.InboundNumber.FlowID,
+			)
+			h.respondErrorWithCDR(req, tx, 501, "Not Implemented", callID)
+			return
+		}
+
+		h.logger.Info("inbound call entering flow engine",
 			"call_id", callID,
 			"did", ic.InboundNumber.Number,
-			"flow_id", ic.InboundNumber.FlowID,
+			"flow_id", *ic.InboundNumber.FlowID,
+			"entry_node", ic.InboundNumber.FlowEntryNode,
 		)
-		h.respondErrorWithCDR(req, tx, 501, "Not Implemented", callID)
+
+		callCtx := flow.NewCallContext(
+			callID,
+			ic.CallerIDName,
+			ic.CallerIDNum,
+			ic.RequestURI,
+			ic.InboundNumber,
+			ic.TrunkID,
+			req,
+			tx,
+		)
+
+		// Spawn the flow walker goroutine so we don't block the SIP handler.
+		go func() {
+			if err := h.flowEngine.ExecuteFlow(callCtx, *ic.InboundNumber.FlowID, ic.InboundNumber.FlowEntryNode); err != nil {
+				h.logger.Error("flow execution failed",
+					"call_id", callID,
+					"flow_id", *ic.InboundNumber.FlowID,
+					"error", err,
+				)
+			}
+		}()
 		return
 	}
 

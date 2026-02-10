@@ -12,6 +12,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
+	"github.com/flowpbx/flowpbx/internal/flow"
 	"github.com/flowpbx/flowpbx/internal/media"
 )
 
@@ -90,8 +91,13 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor) (*S
 	dialogMgr := NewDialogManager(logger)
 	pendingMgr := NewPendingCallManager(logger)
 	cdrs := database.NewCDRRepository(db)
+	callFlows := database.NewCallFlowRepository(db)
 	outboundRouter := NewOutboundRouter(trunks, trunkRegistrar, enc, logger)
-	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, proxyIP, logger)
+
+	// Create the flow engine for inbound call routing via visual flow graphs.
+	flowEngine := flow.NewEngine(callFlows, cdrs, nil, logger)
+
+	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, flowEngine, proxyIP, logger)
 
 	s := &Server{
 		cfg:            cfg,

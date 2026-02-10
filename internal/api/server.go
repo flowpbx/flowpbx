@@ -85,6 +85,7 @@ type Server struct {
 	adminUsers     database.AdminUserRepository
 	systemConfig   database.SystemConfigRepository
 	trunks         database.TrunkRepository
+	inboundNumbers database.InboundNumberRepository
 	trunkStatus    TrunkStatusProvider
 	trunkTester    TrunkTester
 	trunkLifecycle TrunkLifecycleManager
@@ -102,6 +103,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		adminUsers:     database.NewAdminUserRepository(db),
 		systemConfig:   sysConfig,
 		trunks:         database.NewTrunkRepository(db),
+		inboundNumbers: database.NewInboundNumberRepository(db),
 		trunkStatus:    trunkStatus,
 		trunkTester:    trunkTester,
 		trunkLifecycle: trunkLifecycle,
@@ -169,12 +171,12 @@ func (s *Server) routes() {
 		})
 
 		r.Route("/numbers", func(r chi.Router) {
-			r.Get("/", s.handleNotImplemented)
-			r.Post("/", s.handleNotImplemented)
+			r.Get("/", s.handleListInboundNumbers)
+			r.Post("/", s.handleCreateInboundNumber)
 			r.Route("/{id}", func(r chi.Router) {
-				r.Get("/", s.handleNotImplemented)
-				r.Put("/", s.handleNotImplemented)
-				r.Delete("/", s.handleNotImplemented)
+				r.Get("/", s.handleGetInboundNumber)
+				r.Put("/", s.handleUpdateInboundNumber)
+				r.Delete("/", s.handleDeleteInboundNumber)
 			})
 		})
 

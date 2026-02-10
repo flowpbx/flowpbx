@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/flowpbx/flowpbx/internal/pushgw"
+	"github.com/flowpbx/flowpbx/internal/pushgw/pgstore"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
 func main() {
 	httpPort := flag.Int("http-port", 8081, "HTTP server listen port")
+	dbDSN := flag.String("db-dsn", "", "PostgreSQL connection string (e.g. postgres://user:pass@host/pushgw)")
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
 	flag.Parse()
 
@@ -38,10 +40,30 @@ func main() {
 
 	slog.Info("starting pushgw", "http_port", *httpPort)
 
-	// Create the push gateway server with nil dependencies for now.
-	// The PostgreSQL store, FCM/APNs sender, and push logger will be
-	// wired up in subsequent sprint tasks.
-	gwServer := pushgw.NewServer(nil, nil, nil)
+	// Open PostgreSQL store if DSN is provided; otherwise handlers
+	// that require the store will return 503.
+	var store *pgstore.Store
+	if *dbDSN != "" {
+		var err error
+		store, err = pgstore.New(*dbDSN)
+		if err != nil {
+			slog.Error("failed to open postgresql store", "error", err)
+			os.Exit(1)
+		}
+		defer store.Close()
+	} else {
+		slog.Warn("no --db-dsn provided, license and push logging endpoints will be unavailable")
+	}
+
+	// Create the push gateway server.
+	// The FCM/APNs sender will be wired up in a subsequent sprint task.
+	var licenseStore pushgw.LicenseStore
+	var pushLog pushgw.PushLogger
+	if store != nil {
+		licenseStore = store
+		pushLog = store
+	}
+	gwServer := pushgw.NewServer(licenseStore, nil, pushLog)
 
 	// HTTP router with global middleware.
 	r := chi.NewRouter()

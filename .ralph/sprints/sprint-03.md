@@ -13,7 +13,7 @@
 - [x] Create logging middleware (request ID, method, path, status, duration)
 - [x] Create recovery middleware (panic recovery, log stack trace)
 - [x] Create CORS middleware (configurable origins)
-- [ ] Implement Argon2id password hashing utility
+- [x] Implement Argon2id password hashing utility
 - [ ] Create admin user table (migration) — username, password_hash, totp_secret (nullable, for Phase 2)
 - [ ] Implement `POST /api/v1/auth/login` — validate credentials, create session
 - [ ] Implement `POST /api/v1/auth/logout` — destroy session

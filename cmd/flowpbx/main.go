@@ -43,12 +43,28 @@ func main() {
 	}
 	defer db.Close()
 
+	// Initialize encryptor for sensitive database fields (trunk passwords).
+	var enc *database.Encryptor
+	if keyBytes, err := cfg.EncryptionKeyBytes(); err != nil {
+		slog.Error("failed to decode encryption key", "error", err)
+		os.Exit(1)
+	} else if keyBytes != nil {
+		enc, err = database.NewEncryptor(keyBytes)
+		if err != nil {
+			slog.Error("failed to create encryptor", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("field encryption enabled")
+	} else {
+		slog.Warn("no encryption key configured, trunk passwords will be stored in plaintext")
+	}
+
 	// Application context for background goroutines.
 	appCtx, appCancel := context.WithCancel(context.Background())
 	defer appCancel()
 
 	// Initialize SIP server.
-	sipSrv, err := sipserver.NewServer(cfg, db)
+	sipSrv, err := sipserver.NewServer(cfg, db, enc)
 	if err != nil {
 		slog.Error("failed to create sip server", "error", err)
 		os.Exit(1)
@@ -71,22 +87,6 @@ func main() {
 
 	// Create adapter for trunk status so the API can query SIP trunk state.
 	trunkStatus := &trunkStatusAdapter{registrar: sipSrv.TrunkRegistrar()}
-
-	// Initialize encryptor for sensitive database fields (trunk passwords).
-	var enc *database.Encryptor
-	if keyBytes, err := cfg.EncryptionKeyBytes(); err != nil {
-		slog.Error("failed to decode encryption key", "error", err)
-		os.Exit(1)
-	} else if keyBytes != nil {
-		enc, err = database.NewEncryptor(keyBytes)
-		if err != nil {
-			slog.Error("failed to create encryptor", "error", err)
-			os.Exit(1)
-		}
-		slog.Info("field encryption enabled")
-	} else {
-		slog.Warn("no encryption key configured, trunk passwords will be stored in plaintext")
-	}
 
 	// Load all enabled trunks and begin registration / health checks.
 	loadTrunks(appCtx, db, sipSrv.TrunkRegistrar(), enc)

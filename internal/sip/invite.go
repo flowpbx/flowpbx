@@ -57,6 +57,7 @@ type InviteHandler struct {
 	trunkRegistrar *TrunkRegistrar
 	auth           *Authenticator
 	router         *CallRouter
+	outboundRouter *OutboundRouter
 	forker         *Forker
 	dialogMgr      *DialogManager
 	pendingMgr     *PendingCallManager
@@ -72,6 +73,7 @@ func NewInviteHandler(
 	inboundNumbers database.InboundNumberRepository,
 	trunkRegistrar *TrunkRegistrar,
 	auth *Authenticator,
+	outboundRouter *OutboundRouter,
 	forker *Forker,
 	dialogMgr *DialogManager,
 	pendingMgr *PendingCallManager,
@@ -87,6 +89,7 @@ func NewInviteHandler(
 		trunkRegistrar: trunkRegistrar,
 		auth:           auth,
 		router:         router,
+		outboundRouter: outboundRouter,
 		forker:         forker,
 		dialogMgr:      dialogMgr,
 		pendingMgr:     pendingMgr,
@@ -151,11 +154,7 @@ func (h *InviteHandler) HandleInvite(req *sip.Request, tx sip.ServerTransaction)
 	case CallTypeInbound:
 		h.handleInboundCall(req, tx, ic, callID)
 	case CallTypeOutbound:
-		// TODO: match outbound route, send INVITE to trunk.
-		h.logger.Warn("outbound call routing not yet implemented",
-			"call_id", callID,
-		)
-		h.respondError(req, tx, 501, "Not Implemented")
+		h.handleOutboundCall(req, tx, ic, callID)
 	default:
 		h.logger.Error("unknown call type",
 			"call_id", callID,

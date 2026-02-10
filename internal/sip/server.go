@@ -36,7 +36,7 @@ type Server struct {
 }
 
 // NewServer creates a SIP server with all handlers registered.
-func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
+func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor) (*Server, error) {
 	logger := slog.Default().With("component", "sip")
 
 	ua, err := sipgo.NewUA(
@@ -58,6 +58,7 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 	extensions := database.NewExtensionRepository(db)
 	registrations := database.NewRegistrationRepository(db)
 	inboundNumbers := database.NewInboundNumberRepository(db)
+	trunks := database.NewTrunkRepository(db)
 
 	auth := NewAuthenticator(extensions, logger)
 	registrar := NewRegistrar(extensions, registrations, auth, logger)
@@ -90,7 +91,8 @@ func NewServer(cfg *config.Config, db *database.DB) (*Server, error) {
 	dialogMgr := NewDialogManager(logger)
 	pendingMgr := NewPendingCallManager(logger)
 	cdrs := database.NewCDRRepository(db)
-	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunkRegistrar, auth, forker, dialogMgr, pendingMgr, sessionMgr, proxyIP, logger)
+	outboundRouter := NewOutboundRouter(trunks, enc, logger)
+	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, proxyIP, logger)
 
 	s := &Server{
 		cfg:            cfg,

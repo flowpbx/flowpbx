@@ -5,12 +5,14 @@
 ### Build
 ```bash
 go build -o bin/flowpbx ./cmd/flowpbx
+go build -o bin/pushgw ./cmd/pushgw
 ```
 
 ### Run
 ```bash
 go run ./cmd/flowpbx
 go run ./cmd/flowpbx --sip-port 5060 --http-port 8080 --data-dir ./data
+go run ./cmd/pushgw
 ```
 
 ### Test
@@ -69,7 +71,8 @@ Migrations are embedded SQL files, run automatically on startup.
 
 ```
 flowpbx/
-├── cmd/flowpbx/           # Entry point (main.go)
+├── cmd/flowpbx/           # PBX entry point
+├── cmd/pushgw/            # Push gateway / license server entry point
 ├── internal/
 │   ├── config/            # Config loading
 │   ├── database/          # SQLite, migrations, models

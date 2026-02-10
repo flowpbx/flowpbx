@@ -74,7 +74,7 @@ A single-binary, self-hosted PBX system for small-to-medium businesses (5–100 
 - [ ] **SIP in Flutter:** Evaluate `dart_sip_ua` / native bridge — must support TLS, SRTP, Opus, push wake-up
 - [ ] **Media:** Custom RTP proxy — G.711a/u, Opus transcoding
 - [ ] **Build:** GitHub Actions — cross-compile Linux/amd64, arm64
-- [ ] **Push Gateway:** Go service (separate repo) — FCM + APNs, multi-tenant
+- [ ] **Push Gateway:** Go service (`cmd/pushgw`) — FCM + APNs, multi-tenant, same repo
 
 ---
 
@@ -819,7 +819,7 @@ POST   /api/v1/app/push-token             -- register FCM/APNs token
 
 ### 10.2 Architecture
 
-- [ ] Separate Go service, separate repo
+- [ ] Separate binary in same repo (`cmd/pushgw`), shares Go module
 - [ ] PostgreSQL for license management (multi-tenant)
 - [ ] Stateless — can be horizontally scaled
 - [ ] `POST /v1/push` — send push notification (requires license key header)
@@ -1273,8 +1273,10 @@ FLOWPBX_PUSH_GATEWAY_URL=https://push.flowpbx.io
 ```
 flowpbx/
 ├── cmd/
-│   └── flowpbx/
-│       └── main.go                    # Entry point
+│   ├── flowpbx/
+│   │   └── main.go                    # PBX entry point
+│   └── pushgw/
+│       └── main.go                    # Push gateway / license server entry point
 ├── internal/
 │   ├── config/                        # Config loading, env vars, CLI flags
 │   ├── database/                      # SQLite connection, migrations

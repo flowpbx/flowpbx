@@ -13,6 +13,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/config"
 	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/flow"
+	"github.com/flowpbx/flowpbx/internal/flow/nodes"
 	"github.com/flowpbx/flowpbx/internal/media"
 )
 
@@ -96,6 +97,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor) (*S
 
 	// Create the flow engine for inbound call routing via visual flow graphs.
 	flowEngine := flow.NewEngine(callFlows, cdrs, nil, logger)
+	nodes.RegisterAll(flowEngine, logger)
 
 	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, flowEngine, proxyIP, logger)
 

@@ -8,9 +8,9 @@
 
 ## Tasks
 
-- [ ] Implement inbound call matching: INVITE To/Request-URI → match against `inbound_numbers` table
-- [ ] Route matched inbound call to destination extension (direct routing, before flow engine)
-- [ ] Pass through caller ID from trunk on inbound calls
+- [x] Implement inbound call matching: INVITE To/Request-URI → match against `inbound_numbers` table
+- [x] Route matched inbound call to destination extension (direct routing, before flow engine)
+- [x] Pass through caller ID from trunk on inbound calls
 - [ ] Implement outbound dialling: extension sends INVITE to external number
 - [ ] Implement outbound trunk selection: ordered by priority field, skip failed/disabled trunks
 - [ ] Implement prefix manipulation: strip N leading digits (`prefix_strip`), add prefix (`prefix_add`)

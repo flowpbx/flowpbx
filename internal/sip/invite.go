@@ -149,11 +149,7 @@ func (h *InviteHandler) HandleInvite(req *sip.Request, tx sip.ServerTransaction)
 	case CallTypeInternal:
 		h.handleInternalCall(req, tx, ic, callID)
 	case CallTypeInbound:
-		// TODO: look up flow from InboundNumber, walk graph.
-		h.logger.Warn("inbound call routing not yet implemented",
-			"call_id", callID,
-		)
-		h.respondError(req, tx, 501, "Not Implemented")
+		h.handleInboundCall(req, tx, ic, callID)
 	case CallTypeOutbound:
 		// TODO: match outbound route, send INVITE to trunk.
 		h.logger.Warn("outbound call routing not yet implemented",
@@ -440,6 +436,291 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 		"call_id", callID,
 		"caller", ic.CallerIDNum,
 		"callee", ic.RequestURI,
+		"active_calls", h.dialogMgr.ActiveCallCount(),
+		"media_bridged", mediaSession != nil,
+	)
+}
+
+// handleInboundCall routes a call arriving from an external trunk to a local
+// extension. This handles two sub-cases:
+//
+//  1. The Request-URI matched a local extension directly (ic.TargetExtension set).
+//  2. The Request-URI matched an inbound_numbers DID entry (ic.InboundNumber set).
+//     For now, until the flow engine is implemented, this returns 501.
+//
+// Caller ID is passed through from the trunk (From header values set during
+// classifyInboundCall).
+func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransaction, ic *InviteContext, callID string) {
+	ctx := context.Background()
+
+	// If the inbound number matched a DID but we have no target extension,
+	// that means the DID is mapped to a flow. Flow engine is not yet
+	// implemented, so return 501 for now.
+	if ic.TargetExtension == nil && ic.InboundNumber != nil {
+		h.logger.Warn("inbound call matched did but flow routing not yet implemented",
+			"call_id", callID,
+			"did", ic.InboundNumber.Number,
+			"flow_id", ic.InboundNumber.FlowID,
+		)
+		h.respondError(req, tx, 501, "Not Implemented")
+		return
+	}
+
+	// No target extension and no InboundNumber — nowhere to route.
+	if ic.TargetExtension == nil {
+		h.logger.Info("inbound call has no matching destination",
+			"call_id", callID,
+			"request_uri", ic.RequestURI,
+			"trunk_id", ic.TrunkID,
+		)
+		h.respondError(req, tx, 404, "Not Found")
+		return
+	}
+
+	// Route to the target extension using the same logic as internal calls.
+	route, err := h.router.RouteInternalCall(ctx, ic)
+	if err != nil {
+		switch err {
+		case ErrDND:
+			h.logger.Info("inbound call rejected: dnd enabled",
+				"call_id", callID,
+				"target", ic.TargetExtension.Extension,
+			)
+			h.respondError(req, tx, 486, "Busy Here")
+			return
+		case ErrAllBusy:
+			h.logger.Info("inbound call rejected: all devices busy",
+				"call_id", callID,
+				"target", ic.TargetExtension.Extension,
+			)
+			h.respondError(req, tx, 486, "Busy Here")
+			return
+		case ErrNoRegistrations:
+			h.logger.Info("inbound call failed: no registrations",
+				"call_id", callID,
+				"target", ic.TargetExtension.Extension,
+			)
+			h.respondError(req, tx, 480, "Temporarily Unavailable")
+			return
+		case ErrExtensionNotFound:
+			h.logger.Info("inbound call failed: extension not found",
+				"call_id", callID,
+				"request_uri", ic.RequestURI,
+			)
+			h.respondError(req, tx, 404, "Not Found")
+			return
+		default:
+			h.logger.Error("inbound call routing error",
+				"call_id", callID,
+				"error", err,
+			)
+			h.respondError(req, tx, 500, "Internal Server Error")
+			return
+		}
+	}
+
+	h.logger.Info("inbound call routed, forking to contacts",
+		"call_id", callID,
+		"target", route.TargetExtension.Extension,
+		"contacts", len(route.Contacts),
+		"trunk_id", ic.TrunkID,
+	)
+
+	// Allocate media bridge for NAT traversal.
+	var bridge *MediaBridge
+	var calleeSDP []byte
+	if len(req.Body()) > 0 && h.sessionMgr != nil {
+		var err error
+		bridge, calleeSDP, err = AllocateMediaBridge(h.sessionMgr, req.Body(), callID, h.proxyIP, h.logger)
+		if err != nil {
+			h.logger.Error("failed to allocate media bridge",
+				"call_id", callID,
+				"error", err,
+			)
+			h.respondError(req, tx, 500, "Internal Server Error")
+			return
+		}
+	}
+
+	// Determine ring timeout from the target extension's settings.
+	ringTimeout := time.Duration(route.TargetExtension.RingTimeout) * time.Second
+	if ringTimeout <= 0 {
+		ringTimeout = 30 * time.Second
+	}
+
+	forkCtx, cancelFork := context.WithTimeout(ctx, ringTimeout)
+
+	h.logger.Debug("forking inbound call with ring timeout",
+		"call_id", callID,
+		"ring_timeout_s", int(ringTimeout.Seconds()),
+	)
+
+	// Register as pending so CANCEL handler can find it.
+	h.pendingMgr.Add(&PendingCall{
+		CallID:     callID,
+		CallerTx:   tx,
+		CallerReq:  req,
+		CancelFork: cancelFork,
+		Bridge:     bridge,
+	})
+
+	// Fork INVITE to all registered contacts.
+	result := h.forker.Fork(forkCtx, req, tx, route.Contacts, nil, callID, calleeSDP)
+
+	pc := h.pendingMgr.Remove(callID)
+	cancelFork()
+
+	if pc == nil {
+		h.logger.Info("inbound fork completed but call was already cancelled",
+			"call_id", callID,
+		)
+		if result.Answered && result.AnsweringTx != nil {
+			result.AnsweringTx.Terminate()
+		}
+		return
+	}
+
+	if result.Error != nil {
+		h.logger.Error("inbound fork failed",
+			"call_id", callID,
+			"error", result.Error,
+		)
+		if bridge != nil {
+			bridge.Release()
+		}
+		h.respondError(req, tx, 500, "Internal Server Error")
+		return
+	}
+
+	if result.AllBusy {
+		h.logger.Info("inbound call all devices busy",
+			"call_id", callID,
+			"target", route.TargetExtension.Extension,
+		)
+		if bridge != nil {
+			bridge.Release()
+		}
+		h.respondError(req, tx, 486, "Busy Here")
+		return
+	}
+
+	if !result.Answered {
+		h.logger.Info("inbound call no device answered (ring timeout)",
+			"call_id", callID,
+			"target", route.TargetExtension.Extension,
+			"ring_timeout_s", int(ringTimeout.Seconds()),
+		)
+		if bridge != nil {
+			bridge.Release()
+		}
+		h.respondError(req, tx, 480, "Temporarily Unavailable")
+		return
+	}
+
+	// A device answered — relay the 200 OK to the trunk.
+	h.logger.Info("inbound call answered, relaying 200 ok",
+		"call_id", callID,
+		"target", route.TargetExtension.Extension,
+		"contact", result.AnsweringContact.ContactURI,
+	)
+
+	// Send ACK to the answering callee device.
+	ackReq := buildACKFor2xx(result.AnsweringLeg.req, result.AnswerResponse)
+	if err := h.forker.Client().WriteRequest(ackReq); err != nil {
+		h.logger.Error("failed to send ack to callee",
+			"call_id", callID,
+			"contact", result.AnsweringContact.ContactURI,
+			"error", err,
+		)
+		result.AnsweringTx.Terminate()
+		if bridge != nil {
+			bridge.Release()
+		}
+		h.respondError(req, tx, 500, "Internal Server Error")
+		return
+	}
+
+	// Complete media bridge with callee's SDP.
+	var mediaSession *media.MediaSession
+	okBody := result.AnswerResponse.Body()
+	if bridge != nil && len(result.AnswerResponse.Body()) > 0 {
+		rewrittenForCaller, err := bridge.CompleteMediaBridge(result.AnswerResponse.Body())
+		if err != nil {
+			h.logger.Error("failed to complete media bridge",
+				"call_id", callID,
+				"error", err,
+			)
+		} else {
+			okBody = rewrittenForCaller
+			mediaSession = bridge.Session()
+		}
+	}
+
+	// Forward the 200 OK back to the trunk.
+	okResponse := sip.NewResponseFromRequest(req, 200, "OK", okBody)
+	if len(okBody) > 0 {
+		okResponse.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+	}
+
+	if err := tx.Respond(okResponse); err != nil {
+		h.logger.Error("failed to relay 200 ok to trunk",
+			"call_id", callID,
+			"error", err,
+		)
+		result.AnsweringTx.Terminate()
+		if mediaSession != nil {
+			mediaSession.Release()
+		}
+		return
+	}
+
+	// Track the active call as a dialog.
+	dialog := &Dialog{
+		CallID:       callID,
+		Direction:    ic.CallType,
+		CallerIDName: ic.CallerIDName,
+		CallerIDNum:  ic.CallerIDNum,
+		CalledNum:    ic.RequestURI,
+		StartTime:    time.Now(),
+		CallerTx:     tx,
+		CallerReq:    req,
+		CalleeTx:     result.AnsweringTx,
+		CalleeReq:    result.AnsweringLeg.req,
+		CalleeRes:    result.AnswerResponse,
+		Media:        mediaSession,
+		Caller:       CallLeg{},
+		Callee: CallLeg{
+			Extension:    ic.TargetExtension,
+			Registration: result.AnsweringContact,
+			ContactURI:   result.AnsweringContact.ContactURI,
+		},
+	}
+
+	// Extract dialog tags.
+	if from := req.From(); from != nil {
+		if tag, ok := from.Params.Get("tag"); ok {
+			dialog.Caller.FromTag = tag
+		}
+	}
+	if to := result.AnswerResponse.To(); to != nil {
+		if tag, ok := to.Params.Get("tag"); ok {
+			dialog.Callee.ToTag = tag
+		}
+	}
+
+	// Extract callee remote target from Contact header in 200 OK.
+	if contact := result.AnswerResponse.Contact(); contact != nil {
+		uri := contact.Address.Clone()
+		dialog.Callee.RemoteTarget = uri
+	}
+
+	h.dialogMgr.CreateDialog(dialog)
+
+	h.logger.Info("inbound call dialog established",
+		"call_id", callID,
+		"caller", ic.CallerIDNum,
+		"callee", ic.RequestURI,
+		"trunk_id", ic.TrunkID,
 		"active_calls", h.dialogMgr.ActiveCallCount(),
 		"media_bridged", mediaSession != nil,
 	)

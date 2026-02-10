@@ -417,6 +417,66 @@ func parseRtpmap(value string) (Codec, error) {
 	return codec, nil
 }
 
+// RewriteSDP rewrites an SDP body so that media endpoints point to the proxy.
+// It replaces the connection address at both session and media level with
+// proxyIP, and replaces the port on each audio media line with proxyPort.
+// The origin address is also updated to the proxy IP.
+// A new copy of the SessionDescription is returned; the original is not modified.
+func RewriteSDP(sd *SessionDescription, proxyIP string, proxyPort int) *SessionDescription {
+	rewritten := *sd
+
+	// Update origin address to proxy.
+	rewritten.Origin.Address = proxyIP
+
+	// Replace session-level connection.
+	if rewritten.Connection != nil {
+		conn := *rewritten.Connection
+		conn.Address = proxyIP
+		if net.ParseIP(proxyIP).To4() != nil {
+			conn.AddrType = "IP4"
+		} else {
+			conn.AddrType = "IP6"
+		}
+		rewritten.Connection = &conn
+	}
+
+	// Copy and rewrite media descriptions.
+	rewritten.Media = make([]MediaDescription, len(sd.Media))
+	for i, m := range sd.Media {
+		rewritten.Media[i] = m
+
+		// Replace the port on audio media lines.
+		if m.Type == "audio" {
+			rewritten.Media[i].Port = proxyPort
+		}
+
+		// Replace media-level connection if present.
+		if m.Connection != nil {
+			conn := *m.Connection
+			conn.Address = proxyIP
+			if net.ParseIP(proxyIP).To4() != nil {
+				conn.AddrType = "IP4"
+			} else {
+				conn.AddrType = "IP6"
+			}
+			rewritten.Media[i].Connection = &conn
+		}
+	}
+
+	return &rewritten
+}
+
+// RewriteSDPBytes is a convenience function that parses raw SDP bytes,
+// rewrites addresses/ports for the proxy, and returns the marshaled result.
+func RewriteSDPBytes(sdpBody []byte, proxyIP string, proxyPort int) ([]byte, error) {
+	sd, err := ParseSDP(sdpBody)
+	if err != nil {
+		return nil, fmt.Errorf("parsing sdp for rewrite: %w", err)
+	}
+	rewritten := RewriteSDP(sd, proxyIP, proxyPort)
+	return rewritten.Marshal(), nil
+}
+
 // parseFmtp parses an fmtp attribute value: <payload type> <params>
 func parseFmtp(value string) (int, string, bool) {
 	parts := strings.SplitN(value, " ", 2)

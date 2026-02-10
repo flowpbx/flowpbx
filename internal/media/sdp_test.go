@@ -430,6 +430,241 @@ func TestCodecString(t *testing.T) {
 	}
 }
 
+func TestRewriteSDP(t *testing.T) {
+	sd, err := ParseSDP([]byte(testSDPOffer))
+	if err != nil {
+		t.Fatalf("ParseSDP failed: %v", err)
+	}
+
+	rewritten := RewriteSDP(sd, "203.0.113.5", 20000)
+
+	// Origin should be updated.
+	if rewritten.Origin.Address != "203.0.113.5" {
+		t.Errorf("origin address = %q, want %q", rewritten.Origin.Address, "203.0.113.5")
+	}
+
+	// Session-level connection should be updated.
+	if rewritten.Connection == nil {
+		t.Fatal("session-level connection is nil")
+	}
+	if rewritten.Connection.Address != "203.0.113.5" {
+		t.Errorf("connection address = %q, want %q", rewritten.Connection.Address, "203.0.113.5")
+	}
+	if rewritten.Connection.AddrType != "IP4" {
+		t.Errorf("connection addr type = %q, want %q", rewritten.Connection.AddrType, "IP4")
+	}
+
+	// Audio media port should be updated.
+	audio := rewritten.AudioMedia()
+	if audio == nil {
+		t.Fatal("audio media not found")
+	}
+	if audio.Port != 20000 {
+		t.Errorf("audio port = %d, want 20000", audio.Port)
+	}
+
+	// Original should not be modified.
+	if sd.Connection.Address != "192.168.1.100" {
+		t.Errorf("original connection address modified: %q", sd.Connection.Address)
+	}
+	if sd.Origin.Address != "192.168.1.100" {
+		t.Errorf("original origin address modified: %q", sd.Origin.Address)
+	}
+	origAudio := sd.AudioMedia()
+	if origAudio.Port != 49170 {
+		t.Errorf("original audio port modified: %d", origAudio.Port)
+	}
+}
+
+func TestRewriteSDP_MediaLevelConnection(t *testing.T) {
+	sdp := `v=0
+o=- 1 1 IN IP4 10.0.0.1
+s=-
+c=IN IP4 10.0.0.1
+t=0 0
+m=audio 5004 RTP/AVP 0
+c=IN IP4 172.16.0.5
+a=rtpmap:0 PCMU/8000
+`
+	sd, err := ParseSDP([]byte(sdp))
+	if err != nil {
+		t.Fatalf("ParseSDP failed: %v", err)
+	}
+
+	rewritten := RewriteSDP(sd, "203.0.113.5", 30000)
+
+	// Session-level connection should be updated.
+	if rewritten.Connection.Address != "203.0.113.5" {
+		t.Errorf("session connection = %q, want %q", rewritten.Connection.Address, "203.0.113.5")
+	}
+
+	// Media-level connection should also be updated.
+	m := rewritten.Media[0]
+	if m.Connection == nil {
+		t.Fatal("media-level connection is nil")
+	}
+	if m.Connection.Address != "203.0.113.5" {
+		t.Errorf("media connection = %q, want %q", m.Connection.Address, "203.0.113.5")
+	}
+	if m.Port != 30000 {
+		t.Errorf("media port = %d, want 30000", m.Port)
+	}
+
+	// Original media connection should be untouched.
+	if sd.Media[0].Connection.Address != "172.16.0.5" {
+		t.Errorf("original media connection modified: %q", sd.Media[0].Connection.Address)
+	}
+}
+
+func TestRewriteSDP_IPv6Proxy(t *testing.T) {
+	sd, err := ParseSDP([]byte(testSDPOffer))
+	if err != nil {
+		t.Fatalf("ParseSDP failed: %v", err)
+	}
+
+	rewritten := RewriteSDP(sd, "2001:db8::1", 20000)
+
+	if rewritten.Connection.Address != "2001:db8::1" {
+		t.Errorf("connection address = %q, want %q", rewritten.Connection.Address, "2001:db8::1")
+	}
+	if rewritten.Connection.AddrType != "IP6" {
+		t.Errorf("connection addr type = %q, want %q", rewritten.Connection.AddrType, "IP6")
+	}
+}
+
+func TestRewriteSDP_NonAudioNotRewritten(t *testing.T) {
+	sdp := `v=0
+o=- 1 1 IN IP4 10.0.0.1
+s=-
+c=IN IP4 10.0.0.1
+t=0 0
+m=audio 5004 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+m=video 5006 RTP/AVP 96
+a=rtpmap:96 H264/90000
+`
+	sd, err := ParseSDP([]byte(sdp))
+	if err != nil {
+		t.Fatalf("ParseSDP failed: %v", err)
+	}
+
+	rewritten := RewriteSDP(sd, "203.0.113.5", 30000)
+
+	// Audio port should be rewritten.
+	if rewritten.Media[0].Port != 30000 {
+		t.Errorf("audio port = %d, want 30000", rewritten.Media[0].Port)
+	}
+
+	// Video port should be unchanged (only audio is rewritten).
+	if rewritten.Media[1].Port != 5006 {
+		t.Errorf("video port = %d, want 5006 (unchanged)", rewritten.Media[1].Port)
+	}
+}
+
+func TestRewriteSDPBytes(t *testing.T) {
+	result, err := RewriteSDPBytes([]byte(testSDPOffer), "203.0.113.5", 20000)
+	if err != nil {
+		t.Fatalf("RewriteSDPBytes failed: %v", err)
+	}
+
+	// Re-parse the result to verify.
+	sd, err := ParseSDP(result)
+	if err != nil {
+		t.Fatalf("ParseSDP(rewritten) failed: %v", err)
+	}
+
+	if sd.Connection.Address != "203.0.113.5" {
+		t.Errorf("connection address = %q, want %q", sd.Connection.Address, "203.0.113.5")
+	}
+	if sd.Origin.Address != "203.0.113.5" {
+		t.Errorf("origin address = %q, want %q", sd.Origin.Address, "203.0.113.5")
+	}
+
+	audio := sd.AudioMedia()
+	if audio.Port != 20000 {
+		t.Errorf("audio port = %d, want 20000", audio.Port)
+	}
+
+	// Should use CRLF line endings.
+	if !strings.Contains(string(result), "\r\n") {
+		t.Error("rewritten SDP should use CRLF line endings")
+	}
+}
+
+func TestRewriteSDPBytes_InvalidInput(t *testing.T) {
+	_, err := RewriteSDPBytes([]byte(""), "203.0.113.5", 20000)
+	if err == nil {
+		t.Error("expected error for empty SDP input")
+	}
+}
+
+func TestRewriteSDP_PreservesCodecs(t *testing.T) {
+	sd, err := ParseSDP([]byte(testSDPOffer))
+	if err != nil {
+		t.Fatalf("ParseSDP failed: %v", err)
+	}
+
+	rewritten := RewriteSDP(sd, "203.0.113.5", 20000)
+
+	audio := rewritten.AudioMedia()
+	if audio == nil {
+		t.Fatal("no audio media")
+	}
+
+	// All codecs should be preserved.
+	if len(audio.Codecs) != 4 {
+		t.Fatalf("codec count = %d, want 4", len(audio.Codecs))
+	}
+	if !audio.HasCodec("PCMU") {
+		t.Error("missing PCMU codec")
+	}
+	if !audio.HasCodec("PCMA") {
+		t.Error("missing PCMA codec")
+	}
+	if !audio.HasCodec("opus") {
+		t.Error("missing opus codec")
+	}
+	if !audio.HasCodec("telephone-event") {
+		t.Error("missing telephone-event codec")
+	}
+
+	// Direction should be preserved.
+	if audio.Direction != "sendrecv" {
+		t.Errorf("direction = %q, want %q", audio.Direction, "sendrecv")
+	}
+}
+
+func TestRewriteSDP_NoSessionConnection(t *testing.T) {
+	// SDP with no session-level connection (only media-level)
+	sdp := `v=0
+o=- 1 1 IN IP4 10.0.0.1
+s=-
+t=0 0
+m=audio 5004 RTP/AVP 0
+c=IN IP4 172.16.0.5
+a=rtpmap:0 PCMU/8000
+`
+	sd, err := ParseSDP([]byte(sdp))
+	if err != nil {
+		t.Fatalf("ParseSDP failed: %v", err)
+	}
+
+	rewritten := RewriteSDP(sd, "203.0.113.5", 30000)
+
+	// Session-level connection should remain nil.
+	if rewritten.Connection != nil {
+		t.Error("session-level connection should remain nil")
+	}
+
+	// Media-level connection should be updated.
+	if rewritten.Media[0].Connection.Address != "203.0.113.5" {
+		t.Errorf("media connection = %q, want %q", rewritten.Media[0].Connection.Address, "203.0.113.5")
+	}
+	if rewritten.Media[0].Port != 30000 {
+		t.Errorf("media port = %d, want 30000", rewritten.Media[0].Port)
+	}
+}
+
 func TestParseSDP_IPv6(t *testing.T) {
 	sdp := `v=0
 o=- 1 1 IN IP6 2001:db8::1

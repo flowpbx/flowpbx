@@ -12,7 +12,7 @@
 - [x] Create Flutter project in `mobile/` directory within monorepo
 - [x] Configure state management (Riverpod or Bloc)
 - [x] Set up project structure: screens, services, models, widgets, providers
-- [ ] Configure app icon and branding assets
+- [x] Configure app icon and branding assets
 - [x] Set up linting rules (flutter_lints)
 - [x] Add `mobile/` build commands to root Makefile
 

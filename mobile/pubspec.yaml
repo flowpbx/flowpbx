@@ -26,8 +26,29 @@ dev_dependencies:
   freezed: ^2.4.6
   json_serializable: ^6.7.1
   riverpod_generator: ^2.3.9
+  flutter_launcher_icons: ^0.14.3
+  flutter_native_splash: ^2.4.4
 
 flutter:
   uses-material-design: true
   assets:
     - assets/
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/app_icon.png"
+  adaptive_icon_background: "#2563EB"
+  adaptive_icon_foreground: "assets/app_icon_foreground.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+
+flutter_native_splash:
+  color: "#2563EB"
+  image: "assets/app_icon_foreground.png"
+  android_12:
+    color: "#2563EB"
+    icon_background_color: "#2563EB"
+    image: "assets/app_icon_foreground.png"
+  ios: true
+  android: true

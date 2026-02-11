@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/models/call_history_entry.dart';
 import 'package:flowpbx_mobile/providers/call_history_provider.dart';
@@ -6,6 +7,9 @@ import 'package:flowpbx_mobile/providers/call_provider.dart';
 import 'package:flowpbx_mobile/providers/missed_call_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
 import 'package:flowpbx_mobile/services/app_error.dart';
+import 'package:flowpbx_mobile/theme/color_tokens.dart';
+import 'package:flowpbx_mobile/theme/dimensions.dart';
+import 'package:flowpbx_mobile/theme/typography.dart';
 import 'package:flowpbx_mobile/widgets/error_banner.dart';
 import 'package:flowpbx_mobile/widgets/skeleton_loader.dart';
 
@@ -18,13 +22,17 @@ class CallHistoryScreen extends ConsumerStatefulWidget {
 
 class _CallHistoryScreenState extends ConsumerState<CallHistoryScreen> {
   final _scrollController = ScrollController();
+  bool _firstLoad = true;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
     // Mark all missed calls as seen so the badge clears.
-    ref.read(lastSeenMissedCallProvider.notifier).markAllSeen();
+    // Deferred to avoid modifying providers during widget tree build.
+    Future(() {
+      ref.read(lastSeenMissedCallProvider.notifier).markAllSeen();
+    });
   }
 
   @override
@@ -47,6 +55,21 @@ class _CallHistoryScreenState extends ConsumerState<CallHistoryScreen> {
     }
   }
 
+  String _dateGroup(DateTime dt) {
+    final localDt = dt.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final entryDate = DateTime(localDt.year, localDt.month, localDt.day);
+
+    if (entryDate == today) return 'Today';
+    if (entryDate == today.subtract(const Duration(days: 1))) {
+      return 'Yesterday';
+    }
+    final daysAgo = today.difference(entryDate).inDays;
+    if (daysAgo < 7) return 'This Week';
+    return 'Older';
+  }
+
   @override
   Widget build(BuildContext context) {
     final historyAsync = ref.watch(callHistoryProvider);
@@ -54,7 +77,7 @@ class _CallHistoryScreenState extends ConsumerState<CallHistoryScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Call History'),
+        title: const Text('Recents'),
       ),
       body: historyAsync.when(
         loading: () => const CallHistorySkeleton(),
@@ -77,7 +100,7 @@ class _CallHistoryScreenState extends ConsumerState<CallHistoryScreen> {
                         .onSurfaceVariant
                         .withOpacity(0.4),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: Dimensions.space16),
                   Text(
                     'No call history',
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
@@ -85,25 +108,79 @@ class _CallHistoryScreenState extends ConsumerState<CallHistoryScreen> {
                         ),
                   ),
                 ],
-              ),
+              )
+                  .animate()
+                  .fadeIn(duration: 400.ms)
+                  .scale(begin: const Offset(0.95, 0.95), duration: 400.ms),
             );
           }
+
+          // Build grouped list with section headers.
+          final items = <_ListItem>[];
+          String? lastGroup;
+          for (final entry in entries) {
+            final group = _dateGroup(entry.startTime);
+            if (group != lastGroup) {
+              items.add(_ListItem.header(group));
+              lastGroup = group;
+            }
+            items.add(_ListItem.entry(entry));
+          }
+          if (notifier.hasMore) {
+            items.add(_ListItem.loading());
+          }
+
+          final animate = _firstLoad;
+          if (_firstLoad) _firstLoad = false;
+
           return RefreshIndicator(
             onRefresh: () => notifier.refresh(),
-            child: ListView.separated(
+            child: ListView.builder(
               controller: _scrollController,
-              // Extra item at end for loading indicator when more pages exist.
-              itemCount: entries.length + (notifier.hasMore ? 1 : 0),
-              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemCount: items.length,
               itemBuilder: (context, index) {
-                if (index == entries.length) {
-                  // Loading indicator at the bottom.
+                final item = items[index];
+                if (item.isHeader) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      Dimensions.space16,
+                      Dimensions.space16,
+                      Dimensions.space16,
+                      Dimensions.space4,
+                    ),
+                    child: Text(
+                      item.headerTitle!,
+                      style:
+                          Theme.of(context).textTheme.labelLarge?.copyWith(
+                                color: Theme.of(context).colorScheme.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                    ),
+                  );
+                }
+                if (item.isLoading) {
                   return const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
                     child: Center(child: CircularProgressIndicator()),
                   );
                 }
-                return _CallHistoryTile(entry: entries[index]);
+                Widget tile = _CallHistoryTile(entry: item.entry!);
+                if (animate && index < 20) {
+                  tile = tile
+                      .animate()
+                      .fadeIn(
+                        duration: 200.ms,
+                        delay: (30 * index).ms,
+                      )
+                      .slideX(
+                        begin: 0.05,
+                        end: 0,
+                        duration: 200.ms,
+                        delay: (30 * index).ms,
+                        curve: Curves.easeOut,
+                      );
+                }
+                return tile;
               },
             ),
           );
@@ -111,6 +188,23 @@ class _CallHistoryScreenState extends ConsumerState<CallHistoryScreen> {
       ),
     );
   }
+}
+
+/// Union type for list items: section header, entry, or loading indicator.
+class _ListItem {
+  final String? headerTitle;
+  final CallHistoryEntry? entry;
+  final bool isLoading;
+
+  _ListItem._({this.headerTitle, this.entry, this.isLoading = false});
+
+  factory _ListItem.header(String title) =>
+      _ListItem._(headerTitle: title);
+  factory _ListItem.entry(CallHistoryEntry entry) =>
+      _ListItem._(entry: entry);
+  factory _ListItem.loading() => _ListItem._(isLoading: true);
+
+  bool get isHeader => headerTitle != null;
 }
 
 class _CallHistoryTile extends ConsumerWidget {
@@ -150,8 +244,13 @@ class _CallHistoryTile extends ConsumerWidget {
     final hasActiveCall = callAsync.valueOrNull?.isActive ?? false;
 
     return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: iconColor.withOpacity(0.12),
+      leading: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: iconColor.withOpacity(0.12),
+          borderRadius: Dimensions.borderRadiusSmall,
+        ),
         child: Icon(icon, color: iconColor, size: 20),
       ),
       title: Text(
@@ -165,14 +264,15 @@ class _CallHistoryTile extends ConsumerWidget {
           const SizedBox(width: 4),
           Text(
             _directionLabel(),
-            style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
+            style:
+                TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
           ),
           if (entry.duration != null && entry.duration! > 0) ...[
             const SizedBox(width: 8),
             Text(
               _formatDuration(entry.duration!),
-              style:
-                  TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
+              style: TextStyle(
+                  color: colorScheme.onSurfaceVariant, fontSize: 12),
             ),
           ],
         ],
@@ -186,9 +286,10 @@ class _CallHistoryTile extends ConsumerWidget {
             children: [
               Text(
                 _formatTime(context, entry.startTime),
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
+                style: AppTypography.mono(
+                  fontSize: 12,
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 2),
               Text(
@@ -205,7 +306,7 @@ class _CallHistoryTile extends ConsumerWidget {
             size: 20,
             color: hasActiveCall
                 ? colorScheme.onSurfaceVariant.withOpacity(0.3)
-                : Colors.green,
+                : ColorTokens.callGreen,
           ),
         ],
       ),
@@ -226,8 +327,8 @@ class _CallHistoryTile extends ConsumerWidget {
 
   Color _iconColor(ColorScheme colorScheme) {
     if (entry.isMissed) return colorScheme.error;
-    if (entry.isOutbound) return Colors.blue;
-    return Colors.green;
+    if (entry.isOutbound) return colorScheme.primary;
+    return ColorTokens.callGreen;
   }
 
   String _directionLabel() {

@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:flowpbx_mobile/models/directory_entry.dart';
 import 'package:flowpbx_mobile/providers/call_provider.dart';
 import 'package:flowpbx_mobile/providers/directory_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
 import 'package:flowpbx_mobile/services/app_error.dart';
+import 'package:flowpbx_mobile/theme/color_tokens.dart';
+import 'package:flowpbx_mobile/theme/dimensions.dart';
+import 'package:flowpbx_mobile/theme/typography.dart';
+import 'package:flowpbx_mobile/widgets/gradient_avatar.dart';
+import 'package:flowpbx_mobile/widgets/sip_status_indicator.dart';
 
 class DialpadScreen extends ConsumerStatefulWidget {
   final String? initialNumber;
@@ -155,32 +160,45 @@ class _DialpadScreenState extends ConsumerState<DialpadScreen> {
     final hasActiveCall = callState.isActive;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Dialpad'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.contacts_outlined),
-            tooltip: 'Contacts',
-            onPressed: () => context.push('/contacts'),
-          ),
-        ],
-      ),
       body: SafeArea(
         child: Column(
           children: [
-            const SizedBox(height: 24),
+            // SIP status bar at top.
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: Dimensions.space16,
+                vertical: Dimensions.space8,
+              ),
+              child: const Align(
+                alignment: Alignment.centerRight,
+                child: SipStatusIndicator(),
+              ),
+            ),
+            const SizedBox(height: Dimensions.space8),
             // Number display.
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
+              padding: const EdgeInsets.symmetric(horizontal: Dimensions.space32),
               child: TextField(
                 controller: _numberController,
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                      letterSpacing: 2,
-                    ),
-                decoration: const InputDecoration(
+                style: AppTypography.mono(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w500,
+                  color: colorScheme.onSurface,
+                  letterSpacing: 2,
+                ),
+                decoration: InputDecoration(
                   border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
                   hintText: 'Enter number',
+                  hintStyle: AppTypography.mono(
+                    fontSize: 32,
+                    fontWeight: FontWeight.w400,
+                    color: colorScheme.onSurfaceVariant.withOpacity(0.4),
+                    letterSpacing: 2,
+                  ),
+                  filled: false,
                 ),
                 keyboardType: TextInputType.none,
                 showCursor: true,
@@ -193,54 +211,69 @@ class _DialpadScreenState extends ConsumerState<DialpadScreen> {
                 constraints: const BoxConstraints(maxHeight: 160),
                 child: ListView.builder(
                   shrinkWrap: true,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: Dimensions.space16),
                   itemCount: _matchingContacts.length,
                   itemBuilder: (context, index) {
                     final entry = _matchingContacts[index];
                     return _ContactMatchTile(
                       entry: entry,
                       onTap: () => _selectContact(entry),
-                    );
+                    )
+                        .animate()
+                        .fadeIn(
+                          duration: 200.ms,
+                          delay: (30 * index).ms,
+                        )
+                        .slideX(
+                          begin: 0.1,
+                          end: 0,
+                          duration: 200.ms,
+                          delay: (30 * index).ms,
+                          curve: Curves.easeOut,
+                        );
                   },
                 ),
               )
             else
-              const SizedBox(height: 16),
+              const SizedBox(height: Dimensions.space16),
             // Dialpad grid.
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 40),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: Dimensions.space40),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     _buildDialpadRow(['1', '2', '3']),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: Dimensions.space12),
                     _buildDialpadRow(['4', '5', '6']),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: Dimensions.space12),
                     _buildDialpadRow(['7', '8', '9']),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: Dimensions.space12),
                     _buildDialpadRow(['*', '0', '#']),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: Dimensions.space24),
                     // Action row: call button centered, backspace on right.
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         // Spacer to balance the backspace button.
-                        const SizedBox(width: 72),
+                        const SizedBox(width: Dimensions.dialpadButtonSize),
                         // Call button.
                         SizedBox(
-                          width: 72,
-                          height: 72,
+                          width: Dimensions.dialpadButtonSize,
+                          height: Dimensions.dialpadButtonSize,
                           child: FilledButton(
                             onPressed: (hasActiveCall || _isPlacingCall)
                                 ? null
                                 : _placeCall,
                             style: FilledButton.styleFrom(
-                              backgroundColor: Colors.green,
+                              backgroundColor: ColorTokens.callGreen,
                               disabledBackgroundColor:
-                                  Colors.green.withOpacity(0.3),
+                                  ColorTokens.callGreen.withOpacity(0.3),
                               shape: const CircleBorder(),
                               padding: EdgeInsets.zero,
+                              minimumSize: Size.zero,
                             ),
                             child: _isPlacingCall
                                 ? const SizedBox(
@@ -260,8 +293,8 @@ class _DialpadScreenState extends ConsumerState<DialpadScreen> {
                         ),
                         // Backspace button.
                         SizedBox(
-                          width: 72,
-                          height: 72,
+                          width: Dimensions.dialpadButtonSize,
+                          height: Dimensions.dialpadButtonSize,
                           child: IconButton(
                             onPressed: _backspace,
                             onLongPress: _clearAll,
@@ -287,11 +320,13 @@ class _DialpadScreenState extends ConsumerState<DialpadScreen> {
   Widget _buildDialpadRow(List<String> digits) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: digits.map((d) => _DialpadButton(
-        digit: d,
-        subtitle: _subtitleFor(d),
-        onTap: () => _appendDigit(d),
-      )).toList(),
+      children: digits
+          .map((d) => _DialpadButton(
+                digit: d,
+                subtitle: _subtitleFor(d),
+                onTap: () => _appendDigit(d),
+              ))
+          .toList(),
     );
   }
 
@@ -325,34 +360,21 @@ class _ContactMatchTile extends StatelessWidget {
     return ListTile(
       dense: true,
       visualDensity: VisualDensity.compact,
-      leading: CircleAvatar(
-        radius: 16,
-        backgroundColor: colorScheme.primaryContainer,
-        child: Text(
-          _initials(entry.name),
-          style: TextStyle(
-            fontSize: 11,
-            color: colorScheme.onPrimaryContainer,
-            fontWeight: FontWeight.w600,
-          ),
+      leading: GradientAvatar(name: entry.name, radius: Dimensions.avatarRadiusSmall),
+      title: Text(entry.name, style: const TextStyle(fontSize: 14)),
+      subtitle: Text(
+        'Ext. ${entry.extension_}',
+        style: AppTypography.mono(
+          fontSize: 12,
+          color: colorScheme.onSurfaceVariant,
         ),
       ),
-      title: Text(entry.name, style: const TextStyle(fontSize: 14)),
-      subtitle: Text('Ext. ${entry.extension_}',
-          style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
       onTap: onTap,
     );
   }
-
-  String _initials(String name) {
-    final parts = name.trim().split(RegExp(r'\s+'));
-    if (parts.length >= 2) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-    }
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
-  }
 }
 
+/// Frosted glass dialpad button with mono font digit.
 class _DialpadButton extends StatelessWidget {
   final String digit;
   final String? subtitle;
@@ -367,37 +389,53 @@ class _DialpadButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return SizedBox(
-      width: 72,
-      height: 72,
+      width: Dimensions.dialpadButtonSize,
+      height: Dimensions.dialpadButtonSize,
       child: Material(
-        color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
+        color: Colors.transparent,
         shape: const CircleBorder(),
         clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          customBorder: const CircleBorder(),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  digit,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w500,
-                      ),
-                ),
-                if (subtitle != null)
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isDark
+                ? Colors.white.withOpacity(0.06)
+                : Colors.white.withOpacity(0.8),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withOpacity(0.08)
+                  : colorScheme.outlineVariant.withOpacity(0.3),
+            ),
+          ),
+          child: InkWell(
+            onTap: onTap,
+            customBorder: const CircleBorder(),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Text(
-                    subtitle!,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                          letterSpacing: 1.5,
-                          fontSize: 10,
-                        ),
+                    digit,
+                    style: AppTypography.mono(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w500,
+                      color: colorScheme.onSurface,
+                    ),
                   ),
-              ],
+                  if (subtitle != null)
+                    Text(
+                      subtitle!,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                            letterSpacing: 1.5,
+                            fontSize: 10,
+                          ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),

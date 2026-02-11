@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/providers/auth_provider.dart';
 import 'package:flowpbx_mobile/services/app_error.dart';
+import 'package:flowpbx_mobile/theme/dimensions.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -55,63 +57,80 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(Dimensions.space24),
             child: Form(
               key: _formKey,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // Branding.
                   Icon(
                     Icons.phone_in_talk,
                     size: 64,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(height: 16),
+                    color: colorScheme.primary,
+                  )
+                      .animate()
+                      .fadeIn(duration: 400.ms)
+                      .scale(
+                        begin: const Offset(0.8, 0.8),
+                        duration: 400.ms,
+                        curve: Curves.easeOut,
+                      ),
+                  const SizedBox(height: Dimensions.space16),
                   Text(
                     'FlowPBX',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
-                  ),
-                  const SizedBox(height: 8),
+                  )
+                      .animate()
+                      .fadeIn(duration: 400.ms, delay: 100.ms),
+                  const SizedBox(height: Dimensions.space8),
                   Text(
                     'Sign in to your PBX',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          color: colorScheme.onSurfaceVariant,
                         ),
-                  ),
-                  const SizedBox(height: 32),
+                  )
+                      .animate()
+                      .fadeIn(duration: 400.ms, delay: 150.ms),
+                  const SizedBox(height: Dimensions.space32),
+                  // Error message.
                   if (_error != null) ...[
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(Dimensions.space12),
                       decoration: BoxDecoration(
-                        color:
-                            Theme.of(context).colorScheme.error.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
+                        color: colorScheme.errorContainer,
+                        borderRadius: Dimensions.borderRadiusMedium,
                       ),
                       child: Text(
                         _error!,
                         style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
+                          color: colorScheme.onErrorContainer,
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
+                    )
+                        .animate()
+                        .fadeIn(duration: 400.ms)
+                        .shake(hz: 2, offset: const Offset(3, 0), duration: 400.ms),
+                    const SizedBox(height: Dimensions.space16),
                   ],
+                  // Form fields with staggered entry.
                   TextFormField(
                     controller: _serverUrlController,
                     decoration: const InputDecoration(
                       labelText: 'Server URL',
                       hintText: 'https://pbx.example.com',
                       prefixIcon: Icon(Icons.dns),
-                      border: OutlineInputBorder(),
                     ),
                     keyboardType: TextInputType.url,
                     textInputAction: TextInputAction.next,
@@ -121,15 +140,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       }
                       return null;
                     },
-                  ),
-                  const SizedBox(height: 16),
+                  )
+                      .animate()
+                      .fadeIn(duration: 400.ms, delay: 200.ms)
+                      .slideY(begin: 0.1, end: 0, duration: 400.ms, delay: 200.ms),
+                  const SizedBox(height: Dimensions.space16),
                   TextFormField(
                     controller: _extensionController,
                     decoration: const InputDecoration(
                       labelText: 'Extension',
                       hintText: '101',
                       prefixIcon: Icon(Icons.dialpad),
-                      border: OutlineInputBorder(),
                     ),
                     keyboardType: TextInputType.number,
                     textInputAction: TextInputAction.next,
@@ -139,14 +160,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       }
                       return null;
                     },
-                  ),
-                  const SizedBox(height: 16),
+                  )
+                      .animate()
+                      .fadeIn(duration: 400.ms, delay: 280.ms)
+                      .slideY(begin: 0.1, end: 0, duration: 400.ms, delay: 280.ms),
+                  const SizedBox(height: Dimensions.space16),
                   TextFormField(
                     controller: _passwordController,
                     decoration: const InputDecoration(
                       labelText: 'SIP Password',
                       prefixIcon: Icon(Icons.lock),
-                      border: OutlineInputBorder(),
                     ),
                     obscureText: true,
                     textInputAction: TextInputAction.done,
@@ -157,8 +180,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       }
                       return null;
                     },
-                  ),
-                  const SizedBox(height: 24),
+                  )
+                      .animate()
+                      .fadeIn(duration: 400.ms, delay: 360.ms)
+                      .slideY(begin: 0.1, end: 0, duration: 400.ms, delay: 360.ms),
+                  const SizedBox(height: Dimensions.space24),
                   FilledButton(
                     onPressed: _isLoading ? null : _handleLogin,
                     child: _isLoading
@@ -168,7 +194,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Text('Sign In'),
-                  ),
+                  )
+                      .animate()
+                      .fadeIn(duration: 400.ms, delay: 440.ms)
+                      .slideY(begin: 0.1, end: 0, duration: 400.ms, delay: 440.ms),
                 ],
               ),
             ),

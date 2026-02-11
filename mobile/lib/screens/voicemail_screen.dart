@@ -1,11 +1,14 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/models/voicemail_entry.dart';
 import 'package:flowpbx_mobile/providers/voicemail_player_provider.dart';
 import 'package:flowpbx_mobile/providers/voicemail_provider.dart';
+import 'package:flowpbx_mobile/theme/color_tokens.dart';
+import 'package:flowpbx_mobile/theme/dimensions.dart';
+import 'package:flowpbx_mobile/theme/typography.dart';
 import 'package:flowpbx_mobile/widgets/error_banner.dart';
+import 'package:flowpbx_mobile/widgets/gradient_avatar.dart';
 import 'package:flowpbx_mobile/widgets/skeleton_loader.dart';
 
 class VoicemailScreen extends ConsumerWidget {
@@ -48,7 +51,7 @@ class VoicemailScreen extends ConsumerWidget {
                                 .onSurfaceVariant
                                 .withOpacity(0.4),
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: Dimensions.space16),
                           Text(
                             'No voicemails',
                             style:
@@ -59,7 +62,13 @@ class VoicemailScreen extends ConsumerWidget {
                                     ),
                           ),
                         ],
-                      ),
+                      )
+                          .animate()
+                          .fadeIn(duration: 400.ms)
+                          .scale(
+                            begin: const Offset(0.95, 0.95),
+                            duration: 400.ms,
+                          ),
                     ),
                   ),
                 ),
@@ -68,12 +77,15 @@ class VoicemailScreen extends ConsumerWidget {
           }
           return RefreshIndicator(
             onRefresh: () => notifier.refresh(),
-            child: ListView.separated(
+            child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(
+                horizontal: Dimensions.space12,
+                vertical: Dimensions.space8,
+              ),
               itemCount: entries.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, index) {
-                return _VoicemailTile(entry: entries[index]);
+                return _VoicemailCard(entry: entries[index]);
               },
             ),
           );
@@ -83,10 +95,11 @@ class VoicemailScreen extends ConsumerWidget {
   }
 }
 
-class _VoicemailTile extends ConsumerWidget {
+/// Card-based voicemail tile with inline player that slides in.
+class _VoicemailCard extends ConsumerWidget {
   final VoicemailEntry entry;
 
-  const _VoicemailTile({required this.entry});
+  const _VoicemailCard({required this.entry});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -95,87 +108,97 @@ class _VoicemailTile extends ConsumerWidget {
     final playerState = ref.watch(voicemailPlayerProvider);
     final isActive = playerState.currentId == entry.id;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ListTile(
-          onTap: () => _onTap(ref),
-          leading: CircleAvatar(
-            backgroundColor: isUnread
-                ? colorScheme.primary.withOpacity(0.12)
-                : colorScheme.surfaceContainerHighest,
-            child: Icon(
-              isActive && playerState.isPlaying
-                  ? Icons.pause
-                  : Icons.voicemail,
-              color:
-                  isUnread ? colorScheme.primary : colorScheme.onSurfaceVariant,
-              size: 20,
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: Dimensions.space4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            onTap: () => _onTap(ref),
+            leading: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                GradientAvatar(
+                  name: entry.callerName,
+                  radius: Dimensions.avatarRadiusMedium,
+                ),
+                if (isUnread)
+                  Positioned(
+                    right: -2,
+                    top: -2,
+                    child: Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: colorScheme.surface,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
-          ),
-          title: Text(
-            entry.callerName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: isUnread
-                ? const TextStyle(fontWeight: FontWeight.bold)
-                : null,
-          ),
-          subtitle: Row(
-            children: [
-              if (entry.callerIdNum.isNotEmpty &&
-                  entry.callerIdNum != entry.callerName) ...[
+            title: Text(
+              entry.callerName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: isUnread
+                  ? const TextStyle(fontWeight: FontWeight.bold)
+                  : null,
+            ),
+            subtitle: Row(
+              children: [
+                if (entry.callerIdNum.isNotEmpty &&
+                    entry.callerIdNum != entry.callerName) ...[
+                  Text(
+                    entry.callerIdNum,
+                    style: AppTypography.mono(
+                      fontSize: 12,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: Dimensions.space8),
+                ],
                 Text(
-                  entry.callerIdNum,
+                  _formatDuration(entry.duration),
                   style: TextStyle(
                     color: colorScheme.onSurfaceVariant,
                     fontSize: 12,
                   ),
                 ),
-                const SizedBox(width: 8),
               ],
-              Text(
-                _formatDuration(entry.duration),
-                style: TextStyle(
-                  color: colorScheme.onSurfaceVariant,
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-          trailing: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                _formatTime(entry.timestamp),
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                _formatDate(entry.timestamp),
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant.withOpacity(0.7),
-                    ),
-              ),
-              if (isUnread) ...[
-                const SizedBox(height: 4),
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: colorScheme.primary,
-                    shape: BoxShape.circle,
+            ),
+            trailing: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  _formatTime(entry.timestamp),
+                  style: AppTypography.mono(
+                    fontSize: 12,
+                    color: colorScheme.onSurfaceVariant,
                   ),
                 ),
+                const SizedBox(height: 2),
+                Text(
+                  _formatDate(entry.timestamp),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+                      ),
+                ),
               ],
-            ],
+            ),
           ),
-        ),
-        if (isActive) _PlayerControls(entry: entry),
-      ],
+          if (isActive)
+            _PlayerControls(entry: entry)
+                .animate()
+                .fadeIn(duration: 200.ms)
+                .slideY(begin: -0.2, end: 0, duration: 200.ms),
+        ],
+      ),
     );
   }
 
@@ -221,7 +244,7 @@ class _VoicemailTile extends ConsumerWidget {
   }
 }
 
-/// Inline playback controls shown beneath the active voicemail tile.
+/// Inline playback controls shown beneath the active voicemail card.
 class _PlayerControls extends ConsumerWidget {
   final VoicemailEntry entry;
 
@@ -237,94 +260,94 @@ class _PlayerControls extends ConsumerWidget {
     final duration =
         playerState.duration > Duration.zero ? playerState.duration : null;
 
-    return Container(
-      color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        Dimensions.space16,
+        0,
+        Dimensions.space16,
+        Dimensions.space12,
+      ),
+      child: Row(
         children: [
-          Row(
-            children: [
-              // Play/pause button.
-              SizedBox(
-                width: 40,
-                height: 40,
-                child: playerState.isLoading
-                    ? const Padding(
-                        padding: EdgeInsets.all(10),
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : IconButton(
-                        icon: Icon(
-                          playerState.isPlaying
-                              ? Icons.pause_rounded
-                              : Icons.play_arrow_rounded,
-                          size: 24,
-                        ),
-                        padding: EdgeInsets.zero,
-                        onPressed: () => player.play(entry.id),
-                      ),
-              ),
-
-              // Seek slider.
-              Expanded(
-                child: SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 3,
-                    thumbShape:
-                        const RoundSliderThumbShape(enabledThumbRadius: 6),
-                    overlayShape:
-                        const RoundSliderOverlayShape(overlayRadius: 14),
-                  ),
-                  child: Slider(
-                    value: duration != null
-                        ? position.inMilliseconds
-                            .clamp(0, duration.inMilliseconds)
-                            .toDouble()
-                        : 0,
-                    max: duration?.inMilliseconds.toDouble() ?? 1,
-                    onChanged: duration != null
-                        ? (value) {
-                            player
-                                .seek(Duration(milliseconds: value.toInt()));
-                          }
-                        : null,
-                  ),
-                ),
-              ),
-
-              // Position / duration label.
-              Text(
-                '${_formatPos(position)} / ${_formatPos(duration ?? Duration.zero)}',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                      fontFeatures: [const FontFeature.tabularFigures()],
+          // Play/pause button.
+          SizedBox(
+            width: 40,
+            height: 40,
+            child: playerState.isLoading
+                ? const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : IconButton(
+                    icon: Icon(
+                      playerState.isPlaying
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      size: 24,
                     ),
-              ),
-
-              const SizedBox(width: 8),
-
-              // Speed button.
-              SizedBox(
-                width: 44,
-                height: 32,
-                child: TextButton(
-                  style: TextButton.styleFrom(
                     padding: EdgeInsets.zero,
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onPressed: () => player.play(entry.id),
                   ),
-                  onPressed: () => player.cycleSpeed(),
-                  child: Text(
-                    '${playerState.speed}x',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: colorScheme.primary,
-                        ),
-                  ),
+          ),
+
+          // Seek slider.
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                thumbShape:
+                    const RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape:
+                    const RoundSliderOverlayShape(overlayRadius: 14),
+              ),
+              child: Slider(
+                value: duration != null
+                    ? position.inMilliseconds
+                        .clamp(0, duration.inMilliseconds)
+                        .toDouble()
+                    : 0,
+                max: duration?.inMilliseconds.toDouble() ?? 1,
+                onChanged: duration != null
+                    ? (value) {
+                        player
+                            .seek(Duration(milliseconds: value.toInt()));
+                      }
+                    : null,
+              ),
+            ),
+          ),
+
+          // Position / duration label.
+          Text(
+            '${_formatPos(position)} / ${_formatPos(duration ?? Duration.zero)}',
+            style: AppTypography.mono(
+              fontSize: 11,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+
+          const SizedBox(width: Dimensions.space8),
+
+          // Speed button.
+          SizedBox(
+            width: 44,
+            height: 32,
+            child: TextButton(
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () => player.cycleSpeed(),
+              child: Text(
+                '${playerState.speed}x',
+                style: AppTypography.mono(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: colorScheme.primary,
                 ),
               ),
-            ],
+            ),
           ),
         ],
       ),

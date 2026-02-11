@@ -3,16 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flowpbx_mobile/providers/auth_provider.dart';
 import 'package:flowpbx_mobile/providers/call_provider.dart';
+import 'package:flowpbx_mobile/screens/app_shell.dart';
 import 'package:flowpbx_mobile/screens/login_screen.dart';
-import 'package:flowpbx_mobile/screens/home_screen.dart';
-import 'package:flowpbx_mobile/screens/contacts_screen.dart';
 import 'package:flowpbx_mobile/screens/dialpad_screen.dart';
-import 'package:flowpbx_mobile/screens/call_screen.dart';
 import 'package:flowpbx_mobile/screens/call_history_screen.dart';
-import 'package:flowpbx_mobile/screens/incoming_call_screen.dart';
+import 'package:flowpbx_mobile/screens/contacts_screen.dart';
+import 'package:flowpbx_mobile/screens/voicemail_screen.dart';
 import 'package:flowpbx_mobile/screens/settings_screen.dart';
 import 'package:flowpbx_mobile/screens/sip_debug_screen.dart';
-import 'package:flowpbx_mobile/screens/voicemail_screen.dart';
+import 'package:flowpbx_mobile/screens/call_screen.dart';
+import 'package:flowpbx_mobile/screens/incoming_call_screen.dart';
+
+final _rootNavigatorKey = GlobalKey<NavigatorState>();
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authStateProvider);
@@ -24,7 +26,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       call.status == CallStatus.ringing;
 
   return GoRouter(
-    initialLocation: '/',
+    navigatorKey: _rootNavigatorKey,
+    initialLocation: '/dialpad',
     redirect: (context, state) {
       final isAuthenticated = authState.valueOrNull?.isAuthenticated ?? false;
       final isLoginRoute = state.matchedLocation == '/login';
@@ -35,7 +38,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         return '/login';
       }
       if (isAuthenticated && isLoginRoute) {
-        return '/';
+        return '/dialpad';
       }
 
       // Redirect to incoming call screen when ringing with an inbound call.
@@ -53,54 +56,130 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // Redirect away from call/incoming screens when no call is active.
       if ((isCallRoute || isIncomingRoute) && !hasActiveCall) {
-        return '/';
+        return '/dialpad';
       }
 
       return null;
     },
     routes: [
+      // Login — full-screen, no bottom nav.
       GoRoute(
         path: '/login',
-        builder: (context, state) => const LoginScreen(),
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => CustomTransitionPage(
+          key: state.pageKey,
+          child: const LoginScreen(),
+          transitionsBuilder: (context, animation, _, child) =>
+              FadeTransition(opacity: animation, child: child),
+        ),
       ),
-      GoRoute(
-        path: '/',
-        builder: (context, state) => const HomeScreen(),
-      ),
-      GoRoute(
-        path: '/dialpad',
-        builder: (context, state) {
-          final number = state.uri.queryParameters['number'];
-          return DialpadScreen(initialNumber: number);
-        },
-      ),
-      GoRoute(
-        path: '/contacts',
-        builder: (context, state) => const ContactsScreen(),
-      ),
-      GoRoute(
-        path: '/history',
-        builder: (context, state) => const CallHistoryScreen(),
-      ),
-      GoRoute(
-        path: '/voicemail',
-        builder: (context, state) => const VoicemailScreen(),
-      ),
-      GoRoute(
-        path: '/settings',
-        builder: (context, state) => const SettingsScreen(),
-      ),
-      GoRoute(
-        path: '/settings/sip',
-        builder: (context, state) => const SipDebugScreen(),
-      ),
+
+      // Call — full-screen overlay, slides up.
       GoRoute(
         path: '/call',
-        builder: (context, state) => const CallScreen(),
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => CustomTransitionPage(
+          key: state.pageKey,
+          child: const CallScreen(),
+          transitionsBuilder: (context, animation, _, child) =>
+              SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 1),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            )),
+            child: child,
+          ),
+        ),
       ),
+
+      // Incoming call — full-screen overlay, slides up.
       GoRoute(
         path: '/incoming',
-        builder: (context, state) => const IncomingCallScreen(),
+        parentNavigatorKey: _rootNavigatorKey,
+        pageBuilder: (context, state) => CustomTransitionPage(
+          key: state.pageKey,
+          child: const IncomingCallScreen(),
+          transitionsBuilder: (context, animation, _, child) =>
+              SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 1),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            )),
+            child: child,
+          ),
+        ),
+      ),
+
+      // Main tab shell with 5 branches.
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) =>
+            AppShell(navigationShell: navigationShell),
+        branches: [
+          // Tab 0: Keypad
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/dialpad',
+                builder: (context, state) {
+                  final number = state.uri.queryParameters['number'];
+                  return DialpadScreen(initialNumber: number);
+                },
+              ),
+            ],
+          ),
+
+          // Tab 1: Recents
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/history',
+                builder: (context, state) => const CallHistoryScreen(),
+              ),
+            ],
+          ),
+
+          // Tab 2: Contacts
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/contacts',
+                builder: (context, state) => const ContactsScreen(),
+              ),
+            ],
+          ),
+
+          // Tab 3: Voicemail
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/voicemail',
+                builder: (context, state) => const VoicemailScreen(),
+              ),
+            ],
+          ),
+
+          // Tab 4: Settings
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/settings',
+                builder: (context, state) => const SettingsScreen(),
+                routes: [
+                  GoRoute(
+                    path: 'sip',
+                    builder: (context, state) => const SipDebugScreen(),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
       ),
     ],
   );

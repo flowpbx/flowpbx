@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flowpbx_mobile/models/directory_entry.dart';
 import 'package:flowpbx_mobile/providers/directory_provider.dart';
+import 'package:flowpbx_mobile/theme/color_tokens.dart';
+import 'package:flowpbx_mobile/theme/dimensions.dart';
+import 'package:flowpbx_mobile/theme/typography.dart';
 import 'package:flowpbx_mobile/widgets/error_banner.dart';
+import 'package:flowpbx_mobile/widgets/gradient_avatar.dart';
 import 'package:flowpbx_mobile/widgets/skeleton_loader.dart';
 
 class ContactsScreen extends ConsumerWidget {
@@ -82,10 +87,14 @@ class _DirectoryListState extends State<_DirectoryList> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
+    // Sort and group alphabetically.
+    final sorted = List<DirectoryEntry>.from(_filtered)
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(Dimensions.space12),
           child: TextField(
             controller: _searchController,
             decoration: InputDecoration(
@@ -94,22 +103,16 @@ class _DirectoryListState extends State<_DirectoryList> {
               suffixIcon: _searchController.text.isNotEmpty
                   ? IconButton(
                       icon: const Icon(Icons.clear),
-                      onPressed: () {
-                        _searchController.clear();
-                      },
+                      onPressed: () => _searchController.clear(),
                     )
                   : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              filled: true,
-              fillColor: colorScheme.surfaceContainerHighest.withOpacity(0.3),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: Dimensions.space16),
             ),
           ),
         ),
         Expanded(
-          child: _filtered.isEmpty
+          child: sorted.isEmpty
               ? Center(
                   child: Text(
                     'No contacts found',
@@ -118,18 +121,69 @@ class _DirectoryListState extends State<_DirectoryList> {
                         ),
                   ),
                 )
-              : ListView.separated(
-                  itemCount: _filtered.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final entry = _filtered[index];
-                    return _ContactTile(entry: entry);
-                  },
-                ),
+              : _buildGroupedList(context, sorted),
         ),
       ],
     );
   }
+
+  Widget _buildGroupedList(
+      BuildContext context, List<DirectoryEntry> sorted) {
+    // Build items with sticky section headers.
+    final items = <_ListItem>[];
+    String? lastLetter;
+    for (final entry in sorted) {
+      final letter = entry.name.isNotEmpty
+          ? entry.name[0].toUpperCase()
+          : '#';
+      if (letter != lastLetter) {
+        items.add(_ListItem.header(letter));
+        lastLetter = letter;
+      }
+      items.add(_ListItem.entry(entry));
+    }
+
+    return ListView.builder(
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final item = items[index];
+        if (item.isHeader) {
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(
+              Dimensions.space16,
+              Dimensions.space12,
+              Dimensions.space16,
+              Dimensions.space4,
+            ),
+            color: Theme.of(context).scaffoldBackgroundColor,
+            child: Text(
+              item.headerTitle!,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          );
+        }
+        return _ContactTile(entry: item.entry!);
+      },
+    );
+  }
+}
+
+class _ListItem {
+  final String? headerTitle;
+  final DirectoryEntry? entry;
+
+  _ListItem._({this.headerTitle, this.entry});
+
+  factory _ListItem.header(String title) =>
+      _ListItem._(headerTitle: title);
+  factory _ListItem.entry(DirectoryEntry entry) =>
+      _ListItem._(entry: entry);
+
+  bool get isHeader => headerTitle != null;
 }
 
 class _ContactTile extends StatelessWidget {
@@ -145,31 +199,11 @@ class _ContactTile extends StatelessWidget {
       leading: Stack(
         clipBehavior: Clip.none,
         children: [
-          CircleAvatar(
-            backgroundColor: colorScheme.primaryContainer,
-            child: Text(
-              _initials(entry.name),
-              style: TextStyle(
-                color: colorScheme.onPrimaryContainer,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
+          GradientAvatar(name: entry.name, radius: Dimensions.avatarRadiusMedium),
           Positioned(
             right: -2,
             bottom: -2,
-            child: Container(
-              width: 14,
-              height: 14,
-              decoration: BoxDecoration(
-                color: entry.online ? Colors.green : Colors.grey,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: colorScheme.surface,
-                  width: 2,
-                ),
-              ),
-            ),
+            child: _PresenceDot(online: entry.online),
           ),
         ],
       ),
@@ -178,9 +212,13 @@ class _ContactTile extends StatelessWidget {
         entry.online
             ? 'Ext. ${entry.extension_} — Online'
             : 'Ext. ${entry.extension_} — Offline',
+        style: TextStyle(
+          fontSize: 13,
+          color: colorScheme.onSurfaceVariant,
+        ),
       ),
       trailing: IconButton(
-        icon: const Icon(Icons.call, color: Colors.green),
+        icon: Icon(Icons.call, color: ColorTokens.callGreen),
         tooltip: 'Call ${entry.extension_}',
         onPressed: () {
           context.go('/dialpad?number=${entry.extension_}');
@@ -188,12 +226,37 @@ class _ContactTile extends StatelessWidget {
       ),
     );
   }
+}
 
-  String _initials(String name) {
-    final parts = name.trim().split(RegExp(r'\s+'));
-    if (parts.length >= 2) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+/// Online presence dot with pulse animation when online.
+class _PresenceDot extends StatelessWidget {
+  final bool online;
+
+  const _PresenceDot({required this.online});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    Widget dot = Container(
+      width: 14,
+      height: 14,
+      decoration: BoxDecoration(
+        color: online ? ColorTokens.registeredGreen : ColorTokens.offlineGrey,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: colorScheme.surface,
+          width: 2,
+        ),
+      ),
+    );
+
+    if (online) {
+      dot = dot
+          .animate(onPlay: (c) => c.repeat(reverse: true))
+          .scaleXY(begin: 1.0, end: 0.8, duration: 1500.ms);
     }
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
+
+    return dot;
   }
 }

@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/providers/call_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
+import 'package:flowpbx_mobile/theme/color_tokens.dart';
+import 'package:flowpbx_mobile/theme/dimensions.dart';
+import 'package:flowpbx_mobile/widgets/gradient_avatar.dart';
 
-/// Full-screen incoming call UI with caller ID, accept and reject buttons.
+/// Full-screen incoming call UI with caller ID, accept and reject buttons,
+/// and pulsing ripple animation behind the avatar.
 class IncomingCallScreen extends ConsumerWidget {
   const IncomingCallScreen({super.key});
 
@@ -20,95 +25,126 @@ class IncomingCallScreen extends ConsumerWidget {
         callState.remoteDisplayName != null ? callState.remoteNumber : null;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
-      body: SafeArea(
-        child: Column(
-          children: [
-            const Spacer(flex: 2),
-            // Caller avatar.
-            CircleAvatar(
-              radius: 56,
-              backgroundColor: colorScheme.primaryContainer,
-              child: Text(
-                _initials(displayName),
-                style: TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onPrimaryContainer,
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              colorScheme.primary.withOpacity(0.08),
+              colorScheme.surface,
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              const Spacer(flex: 2),
+              // Pulsing ripple circles behind avatar.
+              SizedBox(
+                width: 200,
+                height: 200,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // 3 concentric ripples with staggered loop.
+                    for (var i = 0; i < 3; i++)
+                      Container(
+                        width: 200,
+                        height: 200,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color:
+                                colorScheme.primary.withOpacity(0.15),
+                            width: 1.5,
+                          ),
+                        ),
+                      )
+                          .animate(
+                              onPlay: (c) => c.repeat())
+                          .scaleXY(
+                            begin: 0.5,
+                            end: 1.0,
+                            duration: 2000.ms,
+                            delay: (i * 600).ms,
+                            curve: Curves.easeOut,
+                          )
+                          .fadeOut(
+                            begin: 0.8,
+                            duration: 2000.ms,
+                            delay: (i * 600).ms,
+                          ),
+                    // Actual avatar on top.
+                    GradientAvatar(
+                      name: displayName,
+                      radius: Dimensions.avatarRadiusXLarge,
+                    ),
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(height: 24),
-            // Caller name / number.
-            Text(
-              displayName,
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-            if (subtitle != null) ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: Dimensions.space24),
+              // Caller name / number.
               Text(
-                subtitle,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                displayName,
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              if (subtitle != null) ...[
+                const SizedBox(height: Dimensions.space4),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+              const SizedBox(height: Dimensions.space16),
+              Text(
+                'Incoming Call...',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: colorScheme.onSurfaceVariant,
                     ),
               ),
-            ],
-            const SizedBox(height: 16),
-            // "Incoming Call" label.
-            Text(
-              'Incoming Call...',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-            ),
-            const Spacer(flex: 3),
-            // Accept / Reject buttons.
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 48),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  // Reject button.
-                  _CallActionButton(
-                    icon: Icons.call_end,
-                    color: Colors.red,
-                    label: 'Decline',
-                    onPressed: () async {
-                      HapticFeedback.mediumImpact();
-                      final sip = ref.read(sipServiceProvider);
-                      await sip.rejectCall();
-                    },
-                  ),
-                  // Accept button.
-                  _CallActionButton(
-                    icon: Icons.call,
-                    color: Colors.green,
-                    label: 'Accept',
-                    onPressed: () async {
-                      HapticFeedback.mediumImpact();
-                      final sip = ref.read(sipServiceProvider);
-                      await sip.acceptCall();
-                    },
-                  ),
-                ],
+              const Spacer(flex: 3),
+              // Accept / Reject buttons.
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: Dimensions.space48),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _CallActionButton(
+                      icon: Icons.call_end,
+                      color: ColorTokens.callRed,
+                      label: 'Decline',
+                      onPressed: () async {
+                        HapticFeedback.mediumImpact();
+                        final sip = ref.read(sipServiceProvider);
+                        await sip.rejectCall();
+                      },
+                    ),
+                    _CallActionButton(
+                      icon: Icons.call,
+                      color: ColorTokens.callGreen,
+                      label: 'Accept',
+                      onPressed: () async {
+                        HapticFeedback.mediumImpact();
+                        final sip = ref.read(sipServiceProvider);
+                        await sip.acceptCall();
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 48),
-          ],
+              const SizedBox(height: Dimensions.space48),
+            ],
+          ),
         ),
       ),
     );
-  }
-
-  String _initials(String name) {
-    final parts = name.trim().split(RegExp(r'\s+'));
-    if (parts.length >= 2) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-    }
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
   }
 }
 
@@ -132,19 +168,20 @@ class _CallActionButton extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(
-          width: 72,
-          height: 72,
+          width: Dimensions.callActionSize,
+          height: Dimensions.callActionSize,
           child: FilledButton(
             onPressed: onPressed,
             style: FilledButton.styleFrom(
               backgroundColor: color,
               shape: const CircleBorder(),
               padding: EdgeInsets.zero,
+              minimumSize: Size.zero,
             ),
             child: Icon(icon, size: 32, color: Colors.white),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: Dimensions.space8),
         Text(
           label,
           style: Theme.of(context).textTheme.bodySmall?.copyWith(

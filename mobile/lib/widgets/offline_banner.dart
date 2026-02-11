@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/providers/connectivity_provider.dart';
 
@@ -50,7 +51,15 @@ class OfflineBannerWrapper extends ConsumerWidget {
               ),
             ],
           ),
-        ),
+        )
+            .animate()
+            .slideY(
+              begin: -1,
+              end: 0,
+              duration: 300.ms,
+              curve: Curves.easeOutCubic,
+            )
+            .fadeIn(duration: 300.ms),
         Expanded(
           child: MediaQuery(
             data: mediaQuery.copyWith(

@@ -5,7 +5,12 @@ import 'package:flowpbx_mobile/providers/auth_provider.dart';
 import 'package:flowpbx_mobile/providers/profile_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
 import 'package:flowpbx_mobile/services/app_error.dart';
+import 'package:flowpbx_mobile/theme/color_tokens.dart';
+import 'package:flowpbx_mobile/theme/dimensions.dart';
+import 'package:flowpbx_mobile/theme/typography.dart';
 import 'package:flowpbx_mobile/widgets/error_banner.dart';
+import 'package:flowpbx_mobile/widgets/gradient_avatar.dart';
+import 'package:flowpbx_mobile/widgets/section_card.dart';
 import 'package:flowpbx_mobile/widgets/skeleton_loader.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -40,98 +45,160 @@ class SettingsScreen extends ConsumerWidget {
           return RefreshIndicator(
             onRefresh: () => ref.read(profileProvider.notifier).refresh(),
             child: ListView(
+              padding: const EdgeInsets.symmetric(vertical: Dimensions.space8),
               children: [
-                // Profile section
-                _SectionHeader(title: 'Profile'),
-                ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor:
-                        Theme.of(context).colorScheme.primaryContainer,
-                    child: Text(
-                      profile.name.isNotEmpty
-                          ? profile.name[0].toUpperCase()
-                          : '?',
-                      style: TextStyle(
-                        color:
-                            Theme.of(context).colorScheme.onPrimaryContainer,
+                // Profile hero card.
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: Dimensions.space16,
+                    vertical: Dimensions.space8,
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.all(Dimensions.space20),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: Dimensions.borderRadiusLarge,
+                      border: Border.all(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .outlineVariant
+                            .withOpacity(0.5),
                       ),
                     ),
+                    child: Row(
+                      children: [
+                        GradientAvatar(
+                          name: profile.name,
+                          radius: 32,
+                        ),
+                        const SizedBox(width: Dimensions.space16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                profile.name,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: Dimensions.space4),
+                              Text(
+                                'Ext. ${profile.extension_}',
+                                style: AppTypography.mono(
+                                  fontSize: 14,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              ),
+                              if (profile.email.isNotEmpty) ...[
+                                const SizedBox(height: Dimensions.space2),
+                                Text(
+                                  profile.email,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant,
+                                      ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  title: Text(profile.name),
-                  subtitle: Text('Ext. ${profile.extension_}'),
-                ),
-                if (profile.email.isNotEmpty)
-                  ListTile(
-                    leading: const Icon(Icons.email_outlined),
-                    title: Text(profile.email),
-                  ),
-
-                const Divider(),
-
-                // Call settings section
-                _SectionHeader(title: 'Call Settings'),
-                _DndToggle(dnd: profile.dnd),
-                _FollowMeToggle(enabled: profile.followMeEnabled),
-                if (profile.followMeEnabled &&
-                    profile.followMeNumbers.isNotEmpty)
-                  ListTile(
-                    leading: const SizedBox(width: 24),
-                    title: const Text('Forward numbers'),
-                    subtitle: Text(profile.followMeNumbers.join(', ')),
-                  ),
-
-                const Divider(),
-
-                // Connection section
-                _SectionHeader(title: 'Connection'),
-                ListTile(
-                  leading: const Icon(Icons.cloud_outlined),
-                  title: const Text('Server'),
-                  subtitle: Text(serverUrl),
-                ),
-                ListTile(
-                  leading: Icon(
-                    Icons.circle,
-                    size: 12,
-                    color: switch (regState) {
-                      SipRegState.registered => Colors.green,
-                      SipRegState.registering => Colors.orange,
-                      SipRegState.error => Colors.red,
-                      SipRegState.unregistered => Colors.grey,
-                    },
-                  ),
-                  title: const Text('SIP Registration'),
-                  subtitle: Text(switch (regState) {
-                    SipRegState.registered =>
-                      'Registered as $extensionNumber',
-                    SipRegState.registering => 'Registering...',
-                    SipRegState.error => 'Registration failed',
-                    SipRegState.unregistered => 'Not registered',
-                  }),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => context.push('/settings/sip'),
                 ),
 
-                const Divider(),
+                const SizedBox(height: Dimensions.space8),
 
-                // Account section
-                _SectionHeader(title: 'Account'),
-                ListTile(
-                  leading: const Icon(Icons.swap_horiz),
-                  title: const Text('Change server'),
-                  subtitle: const Text('Sign out and connect to a different PBX'),
-                  onTap: () => _confirmLogout(context, ref),
+                // Call Settings section.
+                SectionCard(
+                  title: 'Call Settings',
+                  children: [
+                    _DndToggle(dnd: profile.dnd),
+                    Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.3)),
+                    _FollowMeToggle(enabled: profile.followMeEnabled),
+                    if (profile.followMeEnabled &&
+                        profile.followMeNumbers.isNotEmpty) ...[
+                      Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.3)),
+                      ListTile(
+                        leading: const SizedBox(width: 24),
+                        title: const Text('Forward numbers'),
+                        subtitle: Text(profile.followMeNumbers.join(', ')),
+                      ),
+                    ],
+                  ],
                 ),
 
-                const Divider(),
-
-                // About section
-                _SectionHeader(title: 'About'),
-                const ListTile(
-                  leading: Icon(Icons.info_outline),
-                  title: Text('FlowPBX'),
-                  subtitle: Text('Version 1.0.0'),
+                // Connection section.
+                SectionCard(
+                  title: 'Connection',
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.cloud_outlined),
+                      title: const Text('Server'),
+                      subtitle: Text(serverUrl),
+                    ),
+                    Divider(height: 1, color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.3)),
+                    ListTile(
+                      leading: Icon(
+                        Icons.circle,
+                        size: 12,
+                        color: switch (regState) {
+                          SipRegState.registered => ColorTokens.registeredGreen,
+                          SipRegState.registering =>
+                            ColorTokens.registeringOrange,
+                          SipRegState.error => ColorTokens.errorRed,
+                          SipRegState.unregistered => ColorTokens.offlineGrey,
+                        },
+                      ),
+                      title: const Text('SIP Registration'),
+                      subtitle: Text(switch (regState) {
+                        SipRegState.registered =>
+                          'Registered as $extensionNumber',
+                        SipRegState.registering => 'Registering...',
+                        SipRegState.error => 'Registration failed',
+                        SipRegState.unregistered => 'Not registered',
+                      }),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push('/settings/sip'),
+                    ),
+                  ],
                 ),
+
+                // Account section.
+                SectionCard(
+                  title: 'Account',
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.swap_horiz),
+                      title: const Text('Change server'),
+                      subtitle:
+                          const Text('Sign out and connect to a different PBX'),
+                      onTap: () => _confirmLogout(context, ref),
+                    ),
+                  ],
+                ),
+
+                // About section.
+                SectionCard(
+                  title: 'About',
+                  children: const [
+                    ListTile(
+                      leading: Icon(Icons.info_outline),
+                      title: Text('FlowPBX'),
+                      subtitle: Text('Version 1.0.0'),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: Dimensions.space16),
               ],
             ),
           );
@@ -170,25 +237,6 @@ class SettingsScreen extends ConsumerWidget {
   }
 }
 
-class _SectionHeader extends StatelessWidget {
-  final String title;
-
-  const _SectionHeader({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-            ),
-      ),
-    );
-  }
-}
-
 class _DndToggle extends ConsumerStatefulWidget {
   final bool dnd;
 
@@ -206,10 +254,12 @@ class _DndToggleState extends ConsumerState<_DndToggle> {
     return SwitchListTile(
       secondary: Icon(
         Icons.do_not_disturb_on_outlined,
-        color: widget.dnd ? Theme.of(context).colorScheme.error : null,
+        color:
+            widget.dnd ? Theme.of(context).colorScheme.error : null,
       ),
       title: const Text('Do Not Disturb'),
-      subtitle: Text(widget.dnd ? 'All calls are rejected' : 'Accepting calls'),
+      subtitle:
+          Text(widget.dnd ? 'All calls are rejected' : 'Accepting calls'),
       value: widget.dnd,
       onChanged: _updating
           ? null
@@ -220,7 +270,9 @@ class _DndToggleState extends ConsumerState<_DndToggle> {
               } catch (e) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to update DND. ${formatError(e)}')),
+                    SnackBar(
+                        content:
+                            Text('Failed to update DND. ${formatError(e)}')),
                   );
                 }
               } finally {
@@ -266,7 +318,8 @@ class _FollowMeToggleState extends ConsumerState<_FollowMeToggle> {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                        content: Text('Failed to update follow-me. ${formatError(e)}')),
+                        content: Text(
+                            'Failed to update follow-me. ${formatError(e)}')),
                   );
                 }
               } finally {

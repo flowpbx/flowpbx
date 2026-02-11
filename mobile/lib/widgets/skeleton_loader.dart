@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shimmer/shimmer.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 
 /// A shimmering placeholder rectangle used to build skeleton loading screens.
 class SkeletonBox extends StatelessWidget {
@@ -46,7 +46,7 @@ class SkeletonCircle extends StatelessWidget {
   }
 }
 
-/// Wraps children in a shimmer animation effect.
+/// Wraps children in a shimmer animation effect using flutter_animate.
 class SkeletonShimmer extends StatelessWidget {
   final Widget child;
 
@@ -55,13 +55,16 @@ class SkeletonShimmer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Shimmer.fromColors(
-      baseColor: isDark
-          ? Colors.grey.shade800
-          : Colors.grey.shade300,
-      highlightColor: isDark
-          ? Colors.grey.shade700
-          : Colors.grey.shade100,
+    return Animate(
+      onPlay: (controller) => controller.repeat(),
+      effects: [
+        ShimmerEffect(
+          duration: 1200.ms,
+          color: isDark
+              ? Colors.white.withOpacity(0.05)
+              : Colors.white.withOpacity(0.6),
+        ),
+      ],
       child: child,
     );
   }

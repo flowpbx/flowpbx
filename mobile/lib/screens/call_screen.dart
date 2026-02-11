@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/providers/audio_route_provider.dart';
 import 'package:flowpbx_mobile/providers/call_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
+import 'package:flowpbx_mobile/theme/color_tokens.dart';
+import 'package:flowpbx_mobile/theme/dimensions.dart';
+import 'package:flowpbx_mobile/theme/typography.dart';
+import 'package:flowpbx_mobile/widgets/gradient_avatar.dart';
 
 /// In-call screen showing caller info, duration timer, and call controls.
 class CallScreen extends ConsumerStatefulWidget {
@@ -101,7 +106,6 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     final callState = callAsync.valueOrNull ?? ActiveCallState.idle;
 
     // Manage duration timer based on call state.
-    // Keep timer running during hold so total call duration is accurate.
     if ((callState.status == CallStatus.connected ||
             callState.status == CallStatus.held ||
             callState.status == CallStatus.holding) &&
@@ -123,151 +127,159 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     final isConnected = callState.status == CallStatus.connected ||
         callState.status == CallStatus.held;
 
-    // Watch the audio route for icon updates (Bluetooth, headset, etc).
+    // Watch the audio route for icon updates.
     final audioRoute = ref.watch(audioRouteProvider).valueOrNull;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
-      body: SafeArea(
-        child: Column(
-          children: [
-            const Spacer(flex: 2),
-            // Caller avatar.
-            CircleAvatar(
-              radius: 48,
-              backgroundColor: colorScheme.primaryContainer,
-              child: Text(
-                _initials(displayName),
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onPrimaryContainer,
-                ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              colorScheme.primary.withOpacity(0.08),
+              colorScheme.surface,
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              const Spacer(flex: 2),
+              // Caller avatar.
+              GradientAvatar(
+                name: displayName,
+                radius: Dimensions.avatarRadiusLarge,
               ),
-            ),
-            const SizedBox(height: 24),
-            // Caller name / number.
-            Text(
-              displayName,
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-            ),
-            if (subtitle != null) ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: Dimensions.space24),
+              // Caller name / number.
               Text(
-                subtitle,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
+                displayName,
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
                     ),
               ),
-            ],
-            const SizedBox(height: 16),
-            // Call status / duration.
-            Text(
-              _statusText(callState.status),
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: callState.status == CallStatus.connected
-                        ? colorScheme.primary
-                        : colorScheme.onSurfaceVariant,
+              if (subtitle != null) ...[
+                const SizedBox(height: Dimensions.space4),
+                Text(
+                  subtitle,
+                  style: AppTypography.mono(
+                    fontSize: 16,
+                    color: colorScheme.onSurfaceVariant,
                   ),
-            ),
-            const Spacer(flex: 3),
-            // DTMF pad (shown when toggled during connected call).
-            if (_showDtmfPad && isConnected) ...[
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 40),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                ),
+              ],
+              const SizedBox(height: Dimensions.space16),
+              // Call status / duration.
+              Text(
+                _statusText(callState.status),
+                style: AppTypography.mono(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w500,
+                  color: callState.status == CallStatus.connected
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const Spacer(flex: 3),
+              // DTMF pad.
+              if (_showDtmfPad && isConnected) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: Dimensions.space40),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildDtmfRow(['1', '2', '3']),
+                      const SizedBox(height: Dimensions.space8),
+                      _buildDtmfRow(['4', '5', '6']),
+                      const SizedBox(height: Dimensions.space8),
+                      _buildDtmfRow(['7', '8', '9']),
+                      const SizedBox(height: Dimensions.space8),
+                      _buildDtmfRow(['*', '0', '#']),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: Dimensions.space16),
+                TextButton(
+                  onPressed: () => setState(() => _showDtmfPad = false),
+                  child: const Text('Hide'),
+                ),
+                const SizedBox(height: Dimensions.space16),
+              ],
+              // Call controls.
+              if (isConnected && !_showDtmfPad) ...[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    _buildDtmfRow(['1', '2', '3']),
-                    const SizedBox(height: 8),
-                    _buildDtmfRow(['4', '5', '6']),
-                    const SizedBox(height: 8),
-                    _buildDtmfRow(['7', '8', '9']),
-                    const SizedBox(height: 8),
-                    _buildDtmfRow(['*', '0', '#']),
+                    _CallControlButton(
+                      icon: callState.isMuted ? Icons.mic_off : Icons.mic,
+                      label: callState.isMuted ? 'Unmute' : 'Mute',
+                      isActive: callState.isMuted,
+                      onPressed: _toggleMute,
+                    ),
+                    _CallControlButton(
+                      icon: callState.isHeld
+                          ? Icons.play_arrow
+                          : Icons.pause,
+                      label: callState.isHeld ? 'Resume' : 'Hold',
+                      isActive: callState.isHeld,
+                      onPressed: _toggleHold,
+                    ),
+                    _CallControlButton(
+                      icon: _audioRouteIcon(audioRoute, callState.isSpeaker),
+                      label: _audioRouteLabel(audioRoute, callState.isSpeaker),
+                      isActive: callState.isSpeaker,
+                      onPressed: _toggleSpeaker,
+                    ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: () => setState(() => _showDtmfPad = false),
-                child: const Text('Hide'),
-              ),
-              const SizedBox(height: 16),
-            ],
-            // Call controls.
-            if (isConnected && !_showDtmfPad) ...[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _CallControlButton(
-                    icon: callState.isMuted ? Icons.mic_off : Icons.mic,
-                    label: callState.isMuted ? 'Unmute' : 'Mute',
-                    isActive: callState.isMuted,
-                    onPressed: _toggleMute,
-                  ),
-                  _CallControlButton(
-                    icon: callState.isHeld
-                        ? Icons.play_arrow
-                        : Icons.pause,
-                    label: callState.isHeld ? 'Resume' : 'Hold',
-                    isActive: callState.isHeld,
-                    onPressed: _toggleHold,
-                  ),
-                  _CallControlButton(
-                    icon: _audioRouteIcon(audioRoute, callState.isSpeaker),
-                    label: _audioRouteLabel(audioRoute, callState.isSpeaker),
-                    isActive: callState.isSpeaker,
-                    onPressed: _toggleSpeaker,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _CallControlButton(
-                    icon: Icons.dialpad,
-                    label: 'Keypad',
-                    isActive: false,
-                    onPressed: () => setState(() => _showDtmfPad = true),
-                  ),
-                  _CallControlButton(
-                    icon: Icons.phone_forwarded,
-                    label: 'Transfer',
-                    isActive: false,
-                    onPressed: _showTransferDialog,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 32),
-            ],
-            // Hangup button.
-            SizedBox(
-              width: 72,
-              height: 72,
-              child: FilledButton(
-                onPressed:
-                    callState.status == CallStatus.disconnecting
-                        ? null
-                        : _hangup,
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  disabledBackgroundColor: Colors.red.withOpacity(0.3),
-                  shape: const CircleBorder(),
-                  padding: EdgeInsets.zero,
+                const SizedBox(height: Dimensions.space16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _CallControlButton(
+                      icon: Icons.dialpad,
+                      label: 'Keypad',
+                      isActive: false,
+                      onPressed: () => setState(() => _showDtmfPad = true),
+                    ),
+                    _CallControlButton(
+                      icon: Icons.phone_forwarded,
+                      label: 'Transfer',
+                      isActive: false,
+                      onPressed: _showTransferDialog,
+                    ),
+                  ],
                 ),
-                child: const Icon(
-                  Icons.call_end,
-                  size: 32,
-                  color: Colors.white,
+                const SizedBox(height: Dimensions.space32),
+              ],
+              // Hangup button.
+              SizedBox(
+                width: Dimensions.callActionSize,
+                height: Dimensions.callActionSize,
+                child: FilledButton(
+                  onPressed: callState.status == CallStatus.disconnecting
+                      ? null
+                      : _hangup,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: ColorTokens.callRed,
+                    disabledBackgroundColor:
+                        ColorTokens.callRed.withOpacity(0.3),
+                    shape: const CircleBorder(),
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                  ),
+                  child: const Icon(
+                    Icons.call_end,
+                    size: 32,
+                    color: Colors.white,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 48),
-          ],
+              const SizedBox(height: Dimensions.space48),
+            ],
+          ),
         ),
       ),
     );
@@ -313,17 +325,9 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       _ => 'Earpiece',
     };
   }
-
-  String _initials(String name) {
-    final parts = name.trim().split(RegExp(r'\s+'));
-    if (parts.length >= 2) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-    }
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
-  }
 }
 
-/// A circular call control button with icon and label.
+/// Frosted glass call control button.
 class _CallControlButton extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -340,29 +344,50 @@ class _CallControlButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(
-          width: 56,
-          height: 56,
-          child: FilledButton.tonal(
-            onPressed: onPressed,
-            style: FilledButton.styleFrom(
-              backgroundColor: isActive
-                  ? colorScheme.primary
-                  : colorScheme.surfaceContainerHighest,
-              foregroundColor: isActive
-                  ? colorScheme.onPrimary
-                  : colorScheme.onSurface,
-              shape: const CircleBorder(),
-              padding: EdgeInsets.zero,
+          width: Dimensions.callControlSize,
+          height: Dimensions.callControlSize,
+          child: ClipOval(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isActive
+                      ? colorScheme.primary
+                      : isDark
+                          ? Colors.white.withOpacity(0.08)
+                          : Colors.white.withOpacity(0.7),
+                  border: Border.all(
+                    color: isDark
+                        ? Colors.white.withOpacity(0.1)
+                        : colorScheme.outlineVariant.withOpacity(0.3),
+                  ),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: onPressed,
+                    customBorder: const CircleBorder(),
+                    child: Icon(
+                      icon,
+                      size: 24,
+                      color: isActive
+                          ? colorScheme.onPrimary
+                          : colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+              ),
             ),
-            child: Icon(icon, size: 24),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: Dimensions.space8),
         Text(
           label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -374,7 +399,7 @@ class _CallControlButton extends StatelessWidget {
   }
 }
 
-/// A circular DTMF button for the in-call keypad.
+/// DTMF button with mono font.
 class _DtmfButton extends StatelessWidget {
   final String tone;
   final VoidCallback onTap;
@@ -384,23 +409,39 @@ class _DtmfButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return SizedBox(
       width: 64,
       height: 64,
       child: Material(
-        color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
+        color: Colors.transparent,
         shape: const CircleBorder(),
         clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          customBorder: const CircleBorder(),
-          child: Center(
-            child: Text(
-              tone,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w500,
-                  ),
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isDark
+                ? Colors.white.withOpacity(0.06)
+                : Colors.white.withOpacity(0.8),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withOpacity(0.08)
+                  : colorScheme.outlineVariant.withOpacity(0.3),
+            ),
+          ),
+          child: InkWell(
+            onTap: onTap,
+            customBorder: const CircleBorder(),
+            child: Center(
+              child: Text(
+                tone,
+                style: AppTypography.mono(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w500,
+                  color: colorScheme.onSurface,
+                ),
+              ),
             ),
           ),
         ),

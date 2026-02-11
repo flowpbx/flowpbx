@@ -221,6 +221,21 @@ class SipService {
     _setCallState(_callState.copyWith(isMuted: newMuted));
   }
 
+  /// Toggle speaker/earpiece on the current call.
+  Future<void> toggleSpeaker() async {
+    if (_callState.callId == null) return;
+
+    final sdk = SiprixVoipSdk();
+    final count = await sdk.getPlayoutDevices() ?? 0;
+    if (count < 2) return;
+
+    // On mobile, device 0 is typically earpiece and device 1 is speaker.
+    // Toggle between them based on current state.
+    final newSpeaker = !_callState.isSpeaker;
+    await sdk.setPlayoutDevice(newSpeaker ? 1 : 0);
+    _setCallState(_callState.copyWith(isSpeaker: newSpeaker));
+  }
+
   /// Toggle hold on the current call.
   Future<void> toggleHold() async {
     final callId = _callState.callId;

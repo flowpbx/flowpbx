@@ -65,6 +65,11 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     await sipService.toggleMute();
   }
 
+  Future<void> _toggleSpeaker() async {
+    final sipService = ref.read(sipServiceProvider);
+    await sipService.toggleSpeaker();
+  }
+
   @override
   Widget build(BuildContext context) {
     final callAsync = ref.watch(callStateProvider);
@@ -143,6 +148,14 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                     label: callState.isMuted ? 'Unmute' : 'Mute',
                     isActive: callState.isMuted,
                     onPressed: _toggleMute,
+                  ),
+                  _CallControlButton(
+                    icon: callState.isSpeaker
+                        ? Icons.volume_up
+                        : Icons.hearing,
+                    label: callState.isSpeaker ? 'Speaker' : 'Earpiece',
+                    isActive: callState.isSpeaker,
+                    onPressed: _toggleSpeaker,
                   ),
                 ],
               ),

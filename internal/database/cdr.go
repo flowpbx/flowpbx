@@ -81,6 +81,49 @@ func (r *cdrRepo) Update(ctx context.Context, cdr *models.CDR) error {
 	return nil
 }
 
+// ListByExtension returns CDRs where the extension number appears as either
+// caller_id_num or callee. Results are paginated.
+func (r *cdrRepo) ListByExtension(ctx context.Context, extension string, limit, offset int) ([]models.CDR, int, error) {
+	where := "(caller_id_num = ? OR callee = ?)"
+	args := []any{extension, extension}
+
+	// Count total matching rows.
+	var total int
+	countQuery := "SELECT COUNT(*) FROM cdrs WHERE " + where
+	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("counting cdrs by extension: %w", err)
+	}
+
+	query := `SELECT id, call_id, start_time, answer_time, end_time, duration,
+		 billable_dur, caller_id_name, caller_id_num, callee, trunk_id,
+		 direction, disposition, recording_file, flow_path, hangup_cause
+		 FROM cdrs WHERE ` + where + ` ORDER BY start_time DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing cdrs by extension: %w", err)
+	}
+	defer rows.Close()
+
+	var cdrs []models.CDR
+	for rows.Next() {
+		var c models.CDR
+		if err := rows.Scan(&c.ID, &c.CallID, &c.StartTime, &c.AnswerTime, &c.EndTime,
+			&c.Duration, &c.BillableDur, &c.CallerIDName, &c.CallerIDNum,
+			&c.Callee, &c.TrunkID, &c.Direction, &c.Disposition,
+			&c.RecordingFile, &c.FlowPath, &c.HangupCause); err != nil {
+			return nil, 0, fmt.Errorf("scanning cdr row: %w", err)
+		}
+		cdrs = append(cdrs, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterating cdr rows: %w", err)
+	}
+
+	return cdrs, total, nil
+}
+
 // List returns CDRs matching the filter, along with the total count.
 func (r *cdrRepo) List(ctx context.Context, filter CDRListFilter) ([]models.CDR, int, error) {
 	where := "1=1"

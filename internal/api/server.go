@@ -130,7 +130,9 @@ type Server struct {
 	ivrMenus          database.IVRMenuRepository
 	timeSwitches      database.TimeSwitchRepository
 	conferenceBridges database.ConferenceBridgeRepository
+	pushTokens        database.PushTokenRepository
 	encryptor         *database.Encryptor
+	jwtSecret         []byte
 }
 
 // NewServer creates the HTTP handler with all routes mounted.
@@ -156,6 +158,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		ivrMenus:          database.NewIVRMenuRepository(db),
 		timeSwitches:      database.NewTimeSwitchRepository(db),
 		conferenceBridges: database.NewConferenceBridgeRepository(db),
+		pushTokens:        database.NewPushTokenRepository(db),
 		flowValidator:     flow.NewValidator(nil),
 		trunkStatus:       trunkStatus,
 		trunkTester:       trunkTester,
@@ -164,6 +167,14 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		conferenceProv:    conferenceProv,
 		configReloader:    reloader,
 		encryptor:         enc,
+	}
+
+	// Initialize JWT secret for mobile app auth.
+	jwtKey, err := cfg.JWTSecretBytes()
+	if err != nil {
+		slog.Error("failed to initialize jwt secret", "error", err)
+	} else {
+		s.jwtSecret = jwtKey
 	}
 
 	s.routes()
@@ -347,14 +358,20 @@ func (s *Server) routes() {
 
 		// Mobile app endpoints.
 		r.Route("/app", func(r chi.Router) {
-			r.Post("/auth", s.handleNotImplemented)
-			r.Get("/me", s.handleNotImplemented)
-			r.Put("/me", s.handleAppUpdateMe)
-			r.Get("/voicemail", s.handleNotImplemented)
-			r.Put("/voicemail/{id}/read", s.handleNotImplemented)
-			r.Get("/voicemail/{id}/audio", s.handleNotImplemented)
-			r.Get("/history", s.handleNotImplemented)
-			r.Post("/push-token", s.handleNotImplemented)
+			// Auth endpoint is unauthenticated (issues JWT).
+			r.Post("/auth", s.handleAppAuth)
+
+			// Protected app endpoints require a valid JWT.
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAppAuth(s.jwtSecret))
+				r.Get("/me", s.handleAppGetMe)
+				r.Put("/me", s.handleAppUpdateMe)
+				r.Get("/voicemail", s.handleAppListVoicemail)
+				r.Put("/voicemail/{id}/read", s.handleAppMarkVoicemailRead)
+				r.Get("/voicemail/{id}/audio", s.handleAppGetVoicemailAudio)
+				r.Get("/history", s.handleAppHistory)
+				r.Post("/push-token", s.handleAppPushToken)
+			})
 		})
 	})
 

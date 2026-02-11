@@ -60,6 +60,7 @@ type VoicemailBoxRepository interface {
 	Create(ctx context.Context, box *models.VoicemailBox) error
 	GetByID(ctx context.Context, id int64) (*models.VoicemailBox, error)
 	List(ctx context.Context) ([]models.VoicemailBox, error)
+	ListByNotifyExtensionID(ctx context.Context, extensionID int64) ([]models.VoicemailBox, error)
 	Update(ctx context.Context, box *models.VoicemailBox) error
 	Delete(ctx context.Context, id int64) error
 }
@@ -130,6 +131,7 @@ type CDRRepository interface {
 	GetByCallID(ctx context.Context, callID string) (*models.CDR, error)
 	Update(ctx context.Context, cdr *models.CDR) error
 	List(ctx context.Context, filter CDRListFilter) ([]models.CDR, int, error)
+	ListByExtension(ctx context.Context, extension string, limit, offset int) ([]models.CDR, int, error)
 	ListRecent(ctx context.Context, limit int) ([]models.CDR, error)
 	ListWithRecordings(ctx context.Context, filter CDRListFilter) ([]models.CDR, int, error)
 	CountRecordings(ctx context.Context) (int, error)

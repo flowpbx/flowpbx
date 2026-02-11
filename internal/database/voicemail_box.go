@@ -78,6 +78,33 @@ func (r *voicemailBoxRepo) List(ctx context.Context) ([]models.VoicemailBox, err
 	return boxes, rows.Err()
 }
 
+// ListByNotifyExtensionID returns all voicemail boxes linked to a given extension.
+func (r *voicemailBoxRepo) ListByNotifyExtensionID(ctx context.Context, extensionID int64) ([]models.VoicemailBox, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, name, mailbox_number, pin, greeting_file, greeting_type,
+		 email_notify, email_address, email_attach_audio, max_message_duration,
+		 max_messages, retention_days, notify_extension_id, created_at, updated_at
+		 FROM voicemail_boxes WHERE notify_extension_id = ? ORDER BY name`, extensionID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying voicemail boxes by extension: %w", err)
+	}
+	defer rows.Close()
+
+	var boxes []models.VoicemailBox
+	for rows.Next() {
+		var b models.VoicemailBox
+		if err := rows.Scan(&b.ID, &b.Name, &b.MailboxNumber, &b.PIN, &b.GreetingFile,
+			&b.GreetingType, &b.EmailNotify, &b.EmailAddress, &b.EmailAttachAudio,
+			&b.MaxMessageDuration, &b.MaxMessages, &b.RetentionDays, &b.NotifyExtensionID,
+			&b.CreatedAt, &b.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning voicemail box row: %w", err)
+		}
+		boxes = append(boxes, b)
+	}
+	return boxes, rows.Err()
+}
+
 // Update modifies an existing voicemail box.
 func (r *voicemailBoxRepo) Update(ctx context.Context, box *models.VoicemailBox) error {
 	_, err := r.db.ExecContext(ctx,

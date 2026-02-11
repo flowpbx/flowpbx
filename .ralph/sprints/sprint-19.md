@@ -28,12 +28,12 @@
 - [x] Implement push token management: store/update/invalidate via registration
 
 ### App API Endpoints (PBX side)
-- [ ] Implement JWT auth middleware for app endpoints
-- [ ] Implement `POST /api/v1/app/auth` — extension login, return JWT + SIP config
-- [ ] Implement `GET /api/v1/app/me` — extension profile
-- [ ] Implement `PUT /api/v1/app/me` — update DND, follow-me
-- [ ] Implement `GET /api/v1/app/voicemail` — list voicemails for boxes linked to this extension
-- [ ] Implement `PUT /api/v1/app/voicemail/:id/read` — mark read
-- [ ] Implement `GET /api/v1/app/voicemail/:id/audio` — stream audio
-- [ ] Implement `GET /api/v1/app/history` — call history for this extension
-- [ ] Implement `POST /api/v1/app/push-token` — register FCM/APNs token
+- [x] Implement JWT auth middleware for app endpoints
+- [x] Implement `POST /api/v1/app/auth` — extension login, return JWT + SIP config
+- [x] Implement `GET /api/v1/app/me` — extension profile
+- [x] Implement `PUT /api/v1/app/me` — update DND, follow-me
+- [x] Implement `GET /api/v1/app/voicemail` — list voicemails for boxes linked to this extension
+- [x] Implement `PUT /api/v1/app/voicemail/:id/read` — mark read
+- [x] Implement `GET /api/v1/app/voicemail/:id/audio` — stream audio
+- [x] Implement `GET /api/v1/app/history` — call history for this extension
+- [x] Implement `POST /api/v1/app/push-token` — register FCM/APNs token

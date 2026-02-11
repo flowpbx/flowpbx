@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/rand"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -28,6 +29,7 @@ type Config struct {
 	EncryptionKey  string // 32-byte hex-encoded key for AES-256-GCM
 	PushGatewayURL string // URL of the push gateway service (e.g., "https://push.flowpbx.com")
 	LicenseKey     string // license key for the push gateway
+	JWTSecret      string // hex-encoded 32-byte secret for mobile app JWT signing
 }
 
 // defaults
@@ -65,6 +67,7 @@ func Load() (*Config, error) {
 	fs.StringVar(&cfg.EncryptionKey, "encryption-key", "", "hex-encoded 32-byte key for AES-256-GCM encryption of sensitive fields")
 	fs.StringVar(&cfg.PushGatewayURL, "push-gateway-url", "", "URL of the push gateway service for mobile push notifications")
 	fs.StringVar(&cfg.LicenseKey, "license-key", "", "license key for authenticating with the push gateway")
+	fs.StringVar(&cfg.JWTSecret, "jwt-secret", "", "hex-encoded 32-byte secret for mobile app JWT signing (auto-generated if empty)")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return nil, fmt.Errorf("parsing flags: %w", err)
@@ -107,6 +110,7 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 		"encryption-key":   envPrefix + "ENCRYPTION_KEY",
 		"push-gateway-url": envPrefix + "PUSH_GATEWAY_URL",
 		"license-key":      envPrefix + "LICENSE_KEY",
+		"jwt-secret":       envPrefix + "JWT_SECRET",
 	}
 
 	for flagName, envVar := range envMap {
@@ -156,6 +160,8 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 			cfg.PushGatewayURL = val
 		case "license-key":
 			cfg.LicenseKey = val
+		case "jwt-secret":
+			cfg.JWTSecret = val
 		}
 	}
 }
@@ -207,6 +213,29 @@ func (c *Config) EncryptionKeyBytes() ([]byte, error) {
 	}
 	if len(key) != 32 {
 		return nil, fmt.Errorf("encryption key must decode to 32 bytes, got %d", len(key))
+	}
+	return key, nil
+}
+
+// JWTSecretBytes returns the decoded 32-byte JWT signing secret.
+// If no secret is configured, it generates a random 32-byte key and stores
+// the hex-encoded value back in the config for the process lifetime.
+func (c *Config) JWTSecretBytes() ([]byte, error) {
+	if c.JWTSecret == "" {
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return nil, fmt.Errorf("generating jwt secret: %w", err)
+		}
+		c.JWTSecret = hex.EncodeToString(key)
+		slog.Warn("no jwt-secret configured, generated ephemeral key (tokens will not survive restart)")
+		return key, nil
+	}
+	key, err := hex.DecodeString(c.JWTSecret)
+	if err != nil {
+		return nil, fmt.Errorf("decoding jwt secret: %w", err)
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("jwt secret must decode to 32 bytes, got %d", len(key))
 	}
 	return key, nil
 }

@@ -2,6 +2,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/models/voicemail_entry.dart';
 import 'package:flowpbx_mobile/providers/auth_provider.dart';
 
+/// Count of unread voicemail messages (drives the AppBar badge).
+final unreadVoicemailCountProvider = Provider<int>((ref) {
+  final voicemails = ref.watch(voicemailProvider).valueOrNull ?? [];
+  return voicemails.where((e) => e.isUnread).length;
+});
+
 /// Fetches voicemail messages from the PBX API.
 final voicemailProvider =
     AsyncNotifierProvider<VoicemailNotifier, List<VoicemailEntry>>(

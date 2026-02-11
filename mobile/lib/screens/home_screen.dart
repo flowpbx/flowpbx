@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flowpbx_mobile/providers/auth_provider.dart';
 import 'package:flowpbx_mobile/providers/missed_call_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
+import 'package:flowpbx_mobile/providers/voicemail_provider.dart';
 import 'package:flowpbx_mobile/services/battery_optimization_service.dart';
 import 'package:flowpbx_mobile/widgets/sip_status_indicator.dart';
 
@@ -71,9 +72,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           _MissedCallBadge(
             onPressed: () => context.push('/history'),
           ),
-          IconButton(
-            icon: const Icon(Icons.voicemail_outlined),
-            tooltip: 'Voicemail',
+          _UnreadVoicemailBadge(
             onPressed: () => context.push('/voicemail'),
           ),
           IconButton(
@@ -177,6 +176,28 @@ class _MissedCallBadge extends ConsumerWidget {
         child: const Icon(Icons.history),
       ),
       tooltip: 'Call History',
+      onPressed: onPressed,
+    );
+  }
+}
+
+/// Voicemail icon button with an unread-count badge overlay.
+class _UnreadVoicemailBadge extends ConsumerWidget {
+  final VoidCallback onPressed;
+
+  const _UnreadVoicemailBadge({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final count = ref.watch(unreadVoicemailCountProvider);
+
+    return IconButton(
+      icon: Badge(
+        isLabelVisible: count > 0,
+        label: Text(count > 99 ? '99+' : '$count'),
+        child: const Icon(Icons.voicemail_outlined),
+      ),
+      tooltip: 'Voicemail',
       onPressed: onPressed,
     );
   }

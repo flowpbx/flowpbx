@@ -189,6 +189,47 @@ import PushKit
             }
         }
 
+        // Call Directory extension platform channel (caller ID lookup).
+        let callDirChannel = FlutterMethodChannel(
+            name: "com.flowpbx.mobile/call_directory",
+            binaryMessenger: controller.binaryMessenger
+        )
+
+        callDirChannel.setMethodCallHandler { (call, result) in
+            switch call.method {
+            case "updateEntries":
+                guard let entries = call.arguments as? [[String: Any]] else {
+                    result(FlutterError(code: "INVALID_ARGS", message: "Expected list of entries", details: nil))
+                    return
+                }
+                let defaults = UserDefaults(suiteName: "group.com.flowpbx.mobile")
+                defaults?.set(entries, forKey: "callerIdEntries")
+                defaults?.synchronize()
+                result(true)
+
+            case "reloadExtension":
+                CXCallDirectoryManager.sharedInstance.reloadExtension(
+                    withIdentifier: "com.flowpbx.mobile.CallDirectoryExtension"
+                ) { error in
+                    if let error = error {
+                        result(FlutterError(code: "RELOAD_ERROR", message: error.localizedDescription, details: nil))
+                    } else {
+                        result(true)
+                    }
+                }
+
+            case "getEnabledStatus":
+                CXCallDirectoryManager.sharedInstance.getEnabledStatusForExtension(
+                    withIdentifier: "com.flowpbx.mobile.CallDirectoryExtension"
+                ) { status, error in
+                    result(status == .enabled)
+                }
+
+            default:
+                result(FlutterMethodNotImplemented)
+            }
+        }
+
         // Observe audio route changes (Bluetooth connect/disconnect, headset plug).
         NotificationCenter.default.addObserver(
             self,

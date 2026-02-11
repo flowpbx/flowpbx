@@ -6,6 +6,7 @@ import 'package:flowpbx_mobile/models/auth_state.dart';
 import 'package:flowpbx_mobile/models/sip_config.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
 import 'package:flowpbx_mobile/services/api_service.dart';
+import 'package:flowpbx_mobile/services/call_directory_service.dart';
 import 'package:flowpbx_mobile/services/secure_storage_service.dart';
 
 final secureStorageProvider = Provider<SecureStorageService>((ref) {
@@ -47,6 +48,9 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
 
       // Re-register for VoIP push on app restore.
       _setupVoipPush();
+
+      // Sync PBX directory to iOS Call Directory for caller ID lookup.
+      _syncCallDirectory();
 
       return AuthState(
         token: token,
@@ -120,6 +124,9 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     // Register for VoIP push notifications (iOS PushKit).
     _setupVoipPush();
 
+    // Sync PBX directory to iOS Call Directory for caller ID lookup.
+    _syncCallDirectory();
+
     return sipConfig;
   }
 
@@ -149,6 +156,40 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
 
     // Trigger PushKit registration.
     sipService.registerVoipPush();
+  }
+
+  /// Sync PBX directory contacts to the iOS Call Directory extension for
+  /// caller ID identification on incoming calls.
+  void _syncCallDirectory() {
+    if (!Platform.isIOS) return;
+
+    final api = ref.read(apiServiceProvider);
+    final callDir = CallDirectoryService();
+
+    // Run asynchronously — caller ID sync is non-critical.
+    () async {
+      try {
+        final data = await api.getDirectory();
+        final contacts = data.map((e) {
+          final entry = e as Map<String, dynamic>;
+          return (
+            number: entry['extension'] as String,
+            label: entry['name'] as String,
+          );
+        }).toList();
+
+        final entries = CallDirectoryService.formatEntries(
+          contacts: contacts,
+        );
+
+        if (entries.isNotEmpty) {
+          await callDir.updateEntries(entries);
+          await callDir.reloadExtension();
+        }
+      } catch (_) {
+        // Non-fatal: caller ID sync failure should not affect core functionality.
+      }
+    }();
   }
 
   /// Restore SIP registration from stored config map.

@@ -402,9 +402,20 @@ func (s *Server) routes() {
 	})
 
 	// Serve embedded React SPA for non-API routes.
+	// NOTE: mountSPA uses NotFound, so any top-level routes must be registered
+	// before this point (or via MountMetrics after construction).
 	s.mountSPA(r)
 
 	slog.Info("api routes mounted")
+}
+
+// MountMetrics registers a Prometheus-compatible /metrics endpoint on the
+// router. The handler is mounted outside the /api/v1 prefix and requires
+// no authentication (standard for Prometheus scraping). Call this after
+// NewServer if metrics collection is enabled.
+func (s *Server) MountMetrics(handler http.Handler) {
+	s.router.Handle("/metrics", handler)
+	slog.Info("prometheus metrics endpoint mounted", "path", "/metrics")
 }
 
 // handleHealth returns basic health status including first-boot detection.

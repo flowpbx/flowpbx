@@ -720,6 +720,11 @@ func (s *Server) ConferenceManager() *media.ConferenceManager {
 	return s.conferenceMgr
 }
 
+// SessionManager returns the RTP session manager for querying active media sessions.
+func (s *Server) SessionManager() *media.SessionManager {
+	return s.sessionMgr
+}
+
 // MessageTracer returns the SIP message tracer for runtime verbosity changes.
 func (s *Server) MessageTracer() *MessageTracer {
 	return s.tracer

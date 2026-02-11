@@ -14,6 +14,9 @@ import (
 
 	"golang.org/x/crypto/acme/autocert"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/flowpbx/flowpbx/internal/api"
 	"github.com/flowpbx/flowpbx/internal/api/middleware"
 	"github.com/flowpbx/flowpbx/internal/config"
@@ -21,6 +24,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/database/models"
 	"github.com/flowpbx/flowpbx/internal/email"
 	"github.com/flowpbx/flowpbx/internal/media"
+	fpmetrics "github.com/flowpbx/flowpbx/internal/metrics"
 	"github.com/flowpbx/flowpbx/internal/prompts"
 	"github.com/flowpbx/flowpbx/internal/recording"
 	sipserver "github.com/flowpbx/flowpbx/internal/sip"
@@ -144,6 +148,21 @@ func main() {
 
 	// HTTP server using the api package.
 	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, trunkTester, trunkLifecycle, activeCalls, conferenceProv, enc, reloader, sipLogVerbosity)
+
+	// Prometheus metrics endpoint.
+	metricsCollector := fpmetrics.NewCollector(
+		activeCalls,
+		database.NewRegistrationRepository(db),
+		&metricsTrunkAdapter{registrar: sipSrv.TrunkRegistrar()},
+		database.NewCDRRepository(db),
+		&rtpStatsAdapter{sessionMgr: sipSrv.SessionManager()},
+		database.NewVoicemailMessageRepository(db),
+		time.Now(),
+	)
+	metricsRegistry := prometheus.NewRegistry()
+	metricsRegistry.MustRegister(metricsCollector)
+	handler.MountMetrics(promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{}))
+	slog.Info("prometheus metrics collector registered")
 
 	srv := &http.Server{
 		Handler:      handler,
@@ -532,4 +551,60 @@ type sipLogVerbosityAdapter struct {
 
 func (a *sipLogVerbosityAdapter) SetSIPLogVerbosity(level string) {
 	a.tracer.SetVerbosity(sipserver.ParseSIPLogVerbosity(level))
+}
+
+// metricsTrunkAdapter bridges the SIP trunk registrar with the metrics
+// TrunkStatusProvider interface, converting between SIP and metrics types.
+type metricsTrunkAdapter struct {
+	registrar *sipserver.TrunkRegistrar
+}
+
+func (a *metricsTrunkAdapter) GetAllTrunkStatuses() []fpmetrics.TrunkStatusEntry {
+	states := a.registrar.GetAllStatuses()
+	entries := make([]fpmetrics.TrunkStatusEntry, len(states))
+	for i, st := range states {
+		entries[i] = fpmetrics.TrunkStatusEntry{
+			TrunkID: st.TrunkID,
+			Name:    st.Name,
+			Status:  string(st.Status),
+		}
+	}
+	return entries
+}
+
+// rtpStatsAdapter bridges the media.SessionManager with the metrics
+// RTPStatsProvider interface for aggregate RTP statistics.
+type rtpStatsAdapter struct {
+	sessionMgr *media.SessionManager
+}
+
+func (a *rtpStatsAdapter) ActiveSessionCount() int {
+	if a.sessionMgr == nil {
+		return 0
+	}
+	return a.sessionMgr.Count()
+}
+
+func (a *rtpStatsAdapter) AggregatePacketsForwarded() uint64 {
+	if a.sessionMgr == nil {
+		return 0
+	}
+	stats := a.sessionMgr.AggregateStats()
+	return stats.TotalPackets()
+}
+
+func (a *rtpStatsAdapter) AggregatePacketsDropped() uint64 {
+	if a.sessionMgr == nil {
+		return 0
+	}
+	stats := a.sessionMgr.AggregateStats()
+	return stats.PacketsDropped
+}
+
+func (a *rtpStatsAdapter) AggregateBytesForwarded() uint64 {
+	if a.sessionMgr == nil {
+		return 0
+	}
+	stats := a.sessionMgr.AggregateStats()
+	return stats.TotalBytes()
 }

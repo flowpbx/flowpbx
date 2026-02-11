@@ -285,6 +285,31 @@ func (r *cdrRepo) CountRecordings(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// CountByDirection returns the total number of CDRs grouped by direction
+// (inbound, outbound, internal). Used by the Prometheus metrics collector.
+func (r *cdrRepo) CountByDirection(ctx context.Context) (map[string]int64, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT direction, COUNT(*) FROM cdrs GROUP BY direction`)
+	if err != nil {
+		return nil, fmt.Errorf("counting cdrs by direction: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int64)
+	for rows.Next() {
+		var dir string
+		var count int64
+		if err := rows.Scan(&dir, &count); err != nil {
+			return nil, fmt.Errorf("scanning cdr direction count: %w", err)
+		}
+		counts[dir] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating cdr direction rows: %w", err)
+	}
+	return counts, nil
+}
+
 // DeleteExpiredRecordings clears the recording_file field on CDRs whose
 // start_time is older than the given number of days and that have a non-empty
 // recording_file. Returns the file paths of the cleared recordings so callers

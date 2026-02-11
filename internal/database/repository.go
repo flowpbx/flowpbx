@@ -74,6 +74,7 @@ type VoicemailMessageRepository interface {
 	Delete(ctx context.Context, id int64) error
 	DeleteExpiredByRetention(ctx context.Context) ([]string, error)
 	CountByMailbox(ctx context.Context, mailboxID int64) (int64, error)
+	CountAll(ctx context.Context) (int64, error)
 }
 
 // RingGroupRepository manages ring groups.
@@ -135,6 +136,7 @@ type CDRRepository interface {
 	ListRecent(ctx context.Context, limit int) ([]models.CDR, error)
 	ListWithRecordings(ctx context.Context, filter CDRListFilter) ([]models.CDR, int, error)
 	CountRecordings(ctx context.Context) (int, error)
+	CountByDirection(ctx context.Context) (map[string]int64, error)
 	DeleteExpiredRecordings(ctx context.Context, days int) ([]string, error)
 }
 

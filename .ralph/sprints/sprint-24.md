@@ -34,7 +34,7 @@
 ### Monitoring & Observability
 - [x] Structured JSON logging throughout (configurable level)
 - [x] SIP message logging (configurable verbosity)
-- [ ] Prometheus metrics endpoint `/metrics` (active calls, registrations, trunk status, call volume, RTP stats)
+- [x] Prometheus metrics endpoint `/metrics` (active calls, registrations, trunk status, call volume, RTP stats)
 - [ ] WebSocket endpoint `/ws` for real-time admin dashboard updates (active calls, registrations, trunk status)
 - [ ] Wire dashboard page to WebSocket for live stats
 - [ ] Implement `GET /api/v1/calls/active` — list active calls (REST fallback)

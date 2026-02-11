@@ -133,6 +133,10 @@ func (m *mockVoicemailMessageRepo) CountByMailbox(_ context.Context, mailboxID i
 	return count, nil
 }
 
+func (m *mockVoicemailMessageRepo) CountAll(_ context.Context) (int64, error) {
+	return int64(len(m.messages)), nil
+}
+
 // mockExtensionRepo implements database.ExtensionRepository for testing.
 type mockExtensionRepo struct {
 	extensions map[int64]*models.Extension

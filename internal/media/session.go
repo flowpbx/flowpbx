@@ -276,6 +276,24 @@ func (m *SessionManager) Count() int {
 	return len(m.sessions)
 }
 
+// AggregateStats returns the sum of RTP packet/byte counters across all
+// active sessions. This is used by the Prometheus metrics collector.
+func (m *SessionManager) AggregateStats() SessionStats {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var agg SessionStats
+	for _, s := range m.sessions {
+		st := s.Stats()
+		agg.PacketsCallerToCallee += st.PacketsCallerToCallee
+		agg.PacketsCalleeToCaller += st.PacketsCalleeToCaller
+		agg.BytesCallerToCallee += st.BytesCallerToCallee
+		agg.BytesCalleeToCaller += st.BytesCalleeToCaller
+		agg.PacketsDropped += st.PacketsDropped
+	}
+	return agg
+}
+
 // ReleaseAll stops and releases all sessions. Used during shutdown.
 func (m *SessionManager) ReleaseAll() {
 	m.mu.Lock()

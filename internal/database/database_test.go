@@ -54,8 +54,8 @@ func TestOpenAndMigrate(t *testing.T) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatalf("counting migrations: %v", err)
 	}
-	if migrationCount != 19 {
-		t.Errorf("migration count = %d, want 19", migrationCount)
+	if migrationCount != 20 {
+		t.Errorf("migration count = %d, want 20", migrationCount)
 	}
 }
 

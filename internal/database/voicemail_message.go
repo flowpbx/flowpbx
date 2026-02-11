@@ -146,6 +146,18 @@ func (r *voicemailMessageRepo) CountByMailbox(ctx context.Context, mailboxID int
 	return count, nil
 }
 
+// CountAll returns the total number of voicemail messages across all mailboxes.
+func (r *voicemailMessageRepo) CountAll(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM voicemail_messages`,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("counting all voicemail messages: %w", err)
+	}
+	return count, nil
+}
+
 func (r *voicemailMessageRepo) scanOne(row *sql.Row) (*models.VoicemailMessage, error) {
 	var m models.VoicemailMessage
 	err := row.Scan(&m.ID, &m.MailboxID, &m.CallerIDName, &m.CallerIDNum,

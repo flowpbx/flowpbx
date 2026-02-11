@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flowpbx_mobile/models/directory_entry.dart';
 import 'package:flowpbx_mobile/providers/call_provider.dart';
+import 'package:flowpbx_mobile/providers/directory_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
 
 class DialpadScreen extends ConsumerStatefulWidget {
@@ -17,6 +19,19 @@ class DialpadScreen extends ConsumerStatefulWidget {
 class _DialpadScreenState extends ConsumerState<DialpadScreen> {
   final _numberController = TextEditingController();
   bool _isPlacingCall = false;
+  List<DirectoryEntry> _matchingContacts = [];
+
+  /// T9 keypad mapping: letter -> digit.
+  static const _t9Map = <String, String>{
+    'a': '2', 'b': '2', 'c': '2',
+    'd': '3', 'e': '3', 'f': '3',
+    'g': '4', 'h': '4', 'i': '4',
+    'j': '5', 'k': '5', 'l': '5',
+    'm': '6', 'n': '6', 'o': '6',
+    'p': '7', 'q': '7', 'r': '7', 's': '7',
+    't': '8', 'u': '8', 'v': '8',
+    'w': '9', 'x': '9', 'y': '9', 'z': '9',
+  };
 
   @override
   void initState() {
@@ -24,12 +39,56 @@ class _DialpadScreenState extends ConsumerState<DialpadScreen> {
     if (widget.initialNumber != null && widget.initialNumber!.isNotEmpty) {
       _numberController.text = widget.initialNumber!;
     }
+    _numberController.addListener(_updateContactMatches);
   }
 
   @override
   void dispose() {
+    _numberController.removeListener(_updateContactMatches);
     _numberController.dispose();
     super.dispose();
+  }
+
+  /// Convert a name to its T9 digit sequence.
+  static String _nameToT9(String name) {
+    final buf = StringBuffer();
+    for (final c in name.toLowerCase().runes) {
+      final ch = String.fromCharCode(c);
+      final digit = _t9Map[ch];
+      if (digit != null) buf.write(digit);
+    }
+    return buf.toString();
+  }
+
+  void _updateContactMatches() {
+    final digits = _numberController.text.trim();
+    if (digits.isEmpty) {
+      setState(() => _matchingContacts = []);
+      return;
+    }
+
+    final directory = ref.read(directoryProvider).valueOrNull ?? [];
+    final matches = directory.where((entry) {
+      // Match by extension prefix.
+      if (entry.extension_.startsWith(digits)) return true;
+      // Match by T9 name prefix.
+      final t9 = _nameToT9(entry.name);
+      if (t9.startsWith(digits)) return true;
+      // Match by T9 against each word in the name.
+      for (final word in entry.name.split(RegExp(r'\s+'))) {
+        if (_nameToT9(word).startsWith(digits)) return true;
+      }
+      return false;
+    }).take(5).toList();
+
+    setState(() => _matchingContacts = matches);
+  }
+
+  void _selectContact(DirectoryEntry entry) {
+    _numberController.text = entry.extension_;
+    _numberController.selection = TextSelection.fromPosition(
+      TextPosition(offset: _numberController.text.length),
+    );
   }
 
   void _appendDigit(String digit) {
@@ -127,7 +186,25 @@ class _DialpadScreenState extends ConsumerState<DialpadScreen> {
                 readOnly: true,
               ),
             ),
-            const SizedBox(height: 16),
+            // Contact matches.
+            if (_matchingContacts.isNotEmpty)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 160),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _matchingContacts.length,
+                  itemBuilder: (context, index) {
+                    final entry = _matchingContacts[index];
+                    return _ContactMatchTile(
+                      entry: entry,
+                      onTap: () => _selectContact(entry),
+                    );
+                  },
+                ),
+              )
+            else
+              const SizedBox(height: 16),
             // Dialpad grid.
             Expanded(
               child: Padding(
@@ -231,6 +308,47 @@ class _DialpadScreenState extends ConsumerState<DialpadScreen> {
       '0' => '+',
       _ => null,
     };
+  }
+}
+
+class _ContactMatchTile extends StatelessWidget {
+  final DirectoryEntry entry;
+  final VoidCallback onTap;
+
+  const _ContactMatchTile({required this.entry, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return ListTile(
+      dense: true,
+      visualDensity: VisualDensity.compact,
+      leading: CircleAvatar(
+        radius: 16,
+        backgroundColor: colorScheme.primaryContainer,
+        child: Text(
+          _initials(entry.name),
+          style: TextStyle(
+            fontSize: 11,
+            color: colorScheme.onPrimaryContainer,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      title: Text(entry.name, style: const TextStyle(fontSize: 14)),
+      subtitle: Text('Ext. ${entry.extension_}',
+          style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+      onTap: onTap,
+    );
+  }
+
+  String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.length >= 2) {
+      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+    }
+    return name.isNotEmpty ? name[0].toUpperCase() : '?';
   }
 }
 

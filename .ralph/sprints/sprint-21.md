@@ -11,7 +11,7 @@
 ### Outbound Calls
 - [x] Create dialpad screen with number input and call button
 - [x] Implement contact directory from PBX API (extension list)
-- [ ] Implement contact search / filter on dialpad
+- [x] Implement contact search / filter on dialpad
 - [ ] Implement outbound SIP INVITE to PBX
 - [ ] Implement codec negotiation: G.711 alaw/ulaw, Opus
 - [ ] Implement SRTP for encrypted media over untrusted networks

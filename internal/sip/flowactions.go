@@ -26,6 +26,7 @@ const defaultPushWaitTimeout = 5 * time.Second
 type FlowSIPActions struct {
 	extensions     database.ExtensionRepository
 	registrations  database.RegistrationRepository
+	pushTokens     database.PushTokenRepository
 	forker         *Forker
 	outboundRouter *OutboundRouter
 	dialogMgr      *DialogManager
@@ -45,6 +46,7 @@ type FlowSIPActions struct {
 func NewFlowSIPActions(
 	extensions database.ExtensionRepository,
 	registrations database.RegistrationRepository,
+	pushTokens database.PushTokenRepository,
 	forker *Forker,
 	outboundRouter *OutboundRouter,
 	dialogMgr *DialogManager,
@@ -62,6 +64,7 @@ func NewFlowSIPActions(
 	return &FlowSIPActions{
 		extensions:     extensions,
 		registrations:  registrations,
+		pushTokens:     pushTokens,
 		forker:         forker,
 		outboundRouter: outboundRouter,
 		dialogMgr:      dialogMgr,
@@ -1176,32 +1179,73 @@ func (a *FlowSIPActions) JoinConference(ctx context.Context, callCtx *flow.CallC
 	return nil
 }
 
-// sendPushForExtension sends push wake-up notifications for registrations
-// that have push tokens. This is called when no active registrations exist
-// for an extension — the push notification wakes the mobile app so it can
-// re-register and accept the call. Returns the number of push notifications
+// sendPushForExtension looks up stored push tokens and sends push wake-up
+// notifications. Push tokens are stored in a dedicated table that persists
+// independently of SIP registrations. Falls back to registration-embedded
+// tokens for backwards compatibility. Returns the number of push notifications
 // dispatched.
 func (a *FlowSIPActions) sendPushForExtension(regs []models.Registration, ext *models.Extension, callID string, callerID string) int {
 	if a.pushClient == nil || !a.pushClient.Configured() {
 		return 0
 	}
 
+	// Look up push tokens from the dedicated push_tokens table first.
+	if a.pushTokens != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		tokens, err := a.pushTokens.GetByExtensionID(ctx, ext.ID)
+		if err != nil {
+			a.logger.Error("failed to look up push tokens via flow",
+				"call_id", callID,
+				"extension", ext.Extension,
+				"error", err,
+			)
+		}
+		if len(tokens) > 0 {
+			return a.dispatchPushNotifications(ext, callID, callerID, tokens)
+		}
+	}
+
+	// Fallback: use tokens embedded in registrations.
+	var fallbackTokens []models.PushToken
+	for _, reg := range regs {
+		if reg.PushToken != "" && reg.PushPlatform != "" {
+			extID := int64(0)
+			if reg.ExtensionID != nil {
+				extID = *reg.ExtensionID
+			}
+			fallbackTokens = append(fallbackTokens, models.PushToken{
+				ExtensionID: extID,
+				Token:       reg.PushToken,
+				Platform:    reg.PushPlatform,
+				DeviceID:    reg.DeviceID,
+			})
+		}
+	}
+
+	return a.dispatchPushNotifications(ext, callID, callerID, fallbackTokens)
+}
+
+// dispatchPushNotifications sends push notifications for a list of tokens,
+// deduplicating by token value. Notifications are sent asynchronously.
+func (a *FlowSIPActions) dispatchPushNotifications(ext *models.Extension, callID string, callerID string, tokens []models.PushToken) int {
 	sent := 0
 	seen := make(map[string]bool)
-	for _, reg := range regs {
-		if reg.PushToken == "" || reg.PushPlatform == "" {
+	for _, pt := range tokens {
+		if pt.Token == "" || pt.Platform == "" {
 			continue
 		}
-		if seen[reg.PushToken] {
+		if seen[pt.Token] {
 			continue
 		}
-		seen[reg.PushToken] = true
+		seen[pt.Token] = true
 
 		a.logger.Info("sending push notification for incoming call via flow",
 			"call_id", callID,
 			"extension", ext.Extension,
-			"platform", reg.PushPlatform,
-			"device_id", reg.DeviceID,
+			"platform", pt.Platform,
+			"device_id", pt.DeviceID,
 		)
 
 		go func(token, platform string) {
@@ -1225,7 +1269,7 @@ func (a *FlowSIPActions) sendPushForExtension(regs []models.Registration, ext *m
 				"platform", platform,
 				"delivered", delivered,
 			)
-		}(reg.PushToken, reg.PushPlatform)
+		}(pt.Token, pt.Platform)
 
 		sent++
 	}

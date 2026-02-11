@@ -246,3 +246,17 @@ type ConferenceBridge struct {
 	AnnounceJoins bool
 	CreatedAt     time.Time
 }
+
+// PushToken represents a stored push notification token for a mobile device.
+// Tokens persist independently of SIP registrations so push notifications can
+// wake backgrounded apps whose registrations have expired.
+type PushToken struct {
+	ID          int64
+	ExtensionID int64
+	Token       string
+	Platform    string // "fcm" or "apns"
+	DeviceID    string
+	AppVersion  string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}

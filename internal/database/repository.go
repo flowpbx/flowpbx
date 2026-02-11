@@ -148,6 +148,17 @@ type RegistrationRepository interface {
 	Count(ctx context.Context) (int64, error)
 }
 
+// PushTokenRepository manages push notification tokens for mobile devices.
+// Tokens are stored and updated independently of SIP registrations so they
+// survive registration expiry and can be used to wake backgrounded apps.
+type PushTokenRepository interface {
+	Upsert(ctx context.Context, token *models.PushToken) error
+	GetByExtensionID(ctx context.Context, extensionID int64) ([]models.PushToken, error)
+	DeleteByExtensionAndDevice(ctx context.Context, extensionID int64, deviceID string) error
+	DeleteByToken(ctx context.Context, token string) error
+	DeleteByExtensionID(ctx context.Context, extensionID int64) error
+}
+
 // AudioPromptRepository manages custom audio prompts.
 type AudioPromptRepository interface {
 	Create(ctx context.Context, prompt *models.AudioPrompt) error

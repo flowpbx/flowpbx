@@ -55,6 +55,7 @@ type InviteContext struct {
 type InviteHandler struct {
 	extensions     database.ExtensionRepository
 	registrations  database.RegistrationRepository
+	pushTokens     database.PushTokenRepository
 	inboundNumbers database.InboundNumberRepository
 	trunks         database.TrunkRepository
 	trunkRegistrar *TrunkRegistrar
@@ -80,6 +81,7 @@ type InviteHandler struct {
 func NewInviteHandler(
 	extensions database.ExtensionRepository,
 	registrations database.RegistrationRepository,
+	pushTokens database.PushTokenRepository,
 	inboundNumbers database.InboundNumberRepository,
 	trunks database.TrunkRepository,
 	trunkRegistrar *TrunkRegistrar,
@@ -103,6 +105,7 @@ func NewInviteHandler(
 	return &InviteHandler{
 		extensions:     extensions,
 		registrations:  registrations,
+		pushTokens:     pushTokens,
 		inboundNumbers: inboundNumbers,
 		trunks:         trunks,
 		trunkRegistrar: trunkRegistrar,
@@ -1379,11 +1382,10 @@ func (h *InviteHandler) tryFollowMe(
 	return false
 }
 
-// sendPushForExtension checks all registrations (including recently expired
-// ones not yet cleaned up) for push tokens and sends push wake-up notifications
-// via the push gateway. This is called when an incoming call targets an extension
-// with no active SIP registrations — the push notification wakes the mobile app
-// so it can re-register and accept the call.
+// sendPushForExtension looks up stored push tokens for the extension and sends
+// push wake-up notifications via the push gateway. Push tokens are stored in a
+// dedicated table that persists independently of SIP registrations, so tokens
+// survive registration expiry when the mobile app is backgrounded.
 //
 // Push notifications are sent asynchronously (fire-and-forget) so they don't
 // block call processing. Returns the number of push notifications dispatched.
@@ -1395,9 +1397,24 @@ func (h *InviteHandler) sendPushForExtension(ext *models.Extension, callID strin
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Fetch all registrations for this extension, including recently expired
-	// ones that haven't been cleaned up yet. These may still have valid push
-	// tokens from the last time the mobile app registered.
+	// Look up push tokens from the dedicated push_tokens table first.
+	// These persist across registration expiry so backgrounded apps can be woken.
+	if h.pushTokens != nil {
+		tokens, err := h.pushTokens.GetByExtensionID(ctx, ext.ID)
+		if err != nil {
+			h.logger.Error("failed to look up push tokens",
+				"call_id", callID,
+				"extension", ext.Extension,
+				"error", err,
+			)
+		}
+		if len(tokens) > 0 {
+			return h.dispatchPushNotifications(ext, callID, callerID, tokens)
+		}
+	}
+
+	// Fallback: check registrations for push tokens (for devices that registered
+	// before the push_tokens table was introduced).
 	regs, err := h.registrations.GetByExtensionID(ctx, ext.ID)
 	if err != nil {
 		h.logger.Error("failed to look up registrations for push",
@@ -1408,23 +1425,40 @@ func (h *InviteHandler) sendPushForExtension(ext *models.Extension, callID strin
 		return 0
 	}
 
-	// Collect unique push tokens to avoid duplicate notifications.
+	var fallbackTokens []models.PushToken
+	for _, reg := range regs {
+		if reg.PushToken != "" && reg.PushPlatform != "" {
+			fallbackTokens = append(fallbackTokens, models.PushToken{
+				ExtensionID: *reg.ExtensionID,
+				Token:       reg.PushToken,
+				Platform:    reg.PushPlatform,
+				DeviceID:    reg.DeviceID,
+			})
+		}
+	}
+
+	return h.dispatchPushNotifications(ext, callID, callerID, fallbackTokens)
+}
+
+// dispatchPushNotifications sends push notifications for a list of tokens,
+// deduplicating by token value. Notifications are sent asynchronously.
+func (h *InviteHandler) dispatchPushNotifications(ext *models.Extension, callID string, callerID string, tokens []models.PushToken) int {
 	sent := 0
 	seen := make(map[string]bool)
-	for _, reg := range regs {
-		if reg.PushToken == "" || reg.PushPlatform == "" {
+	for _, pt := range tokens {
+		if pt.Token == "" || pt.Platform == "" {
 			continue
 		}
-		if seen[reg.PushToken] {
+		if seen[pt.Token] {
 			continue
 		}
-		seen[reg.PushToken] = true
+		seen[pt.Token] = true
 
 		h.logger.Info("sending push notification for incoming call",
 			"call_id", callID,
 			"extension", ext.Extension,
-			"platform", reg.PushPlatform,
-			"device_id", reg.DeviceID,
+			"platform", pt.Platform,
+			"device_id", pt.DeviceID,
 		)
 
 		// Send push asynchronously — don't block the SIP handler.
@@ -1449,7 +1483,7 @@ func (h *InviteHandler) sendPushForExtension(ext *models.Extension, callID strin
 				"platform", platform,
 				"delivered", delivered,
 			)
-		}(reg.PushToken, reg.PushPlatform)
+		}(pt.Token, pt.Platform)
 
 		sent++
 	}

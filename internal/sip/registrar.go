@@ -25,6 +25,7 @@ const (
 type Registrar struct {
 	extensions    database.ExtensionRepository
 	registrations database.RegistrationRepository
+	pushTokens    database.PushTokenRepository
 	auth          *Authenticator
 	regNotifier   *RegistrationNotifier
 	logger        *slog.Logger
@@ -34,6 +35,7 @@ type Registrar struct {
 func NewRegistrar(
 	extensions database.ExtensionRepository,
 	registrations database.RegistrationRepository,
+	pushTokens database.PushTokenRepository,
 	auth *Authenticator,
 	regNotifier *RegistrationNotifier,
 	logger *slog.Logger,
@@ -41,6 +43,7 @@ func NewRegistrar(
 	return &Registrar{
 		extensions:    extensions,
 		registrations: registrations,
+		pushTokens:    pushTokens,
 		auth:          auth,
 		regNotifier:   regNotifier,
 		logger:        logger.With("subsystem", "registrar"),
@@ -170,6 +173,27 @@ func (r *Registrar) HandleRegister(req *sip.Request, tx sip.ServerTransaction) {
 		)
 		r.respondError(req, tx, 500, "Internal Server Error")
 		return
+	}
+
+	// Persist push token in the dedicated push_tokens table so it survives
+	// registration expiry. The mobile app can still receive push wake-ups
+	// even after the SIP registration is cleaned up.
+	if pushToken != "" && pushPlatform != "" && deviceID != "" && r.pushTokens != nil {
+		pt := &models.PushToken{
+			ExtensionID: ext.ID,
+			Token:       pushToken,
+			Platform:    pushPlatform,
+			DeviceID:    deviceID,
+			AppVersion:  userAgent,
+		}
+		if err := r.pushTokens.Upsert(ctx, pt); err != nil {
+			r.logger.Error("failed to upsert push token",
+				"extension", ext.Extension,
+				"device_id", deviceID,
+				"error", err,
+			)
+			// Non-fatal — the registration itself succeeded.
+		}
 	}
 
 	r.logger.Info("extension registered",

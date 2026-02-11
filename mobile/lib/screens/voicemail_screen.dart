@@ -6,6 +6,7 @@ import 'package:flowpbx_mobile/models/voicemail_entry.dart';
 import 'package:flowpbx_mobile/providers/voicemail_player_provider.dart';
 import 'package:flowpbx_mobile/providers/voicemail_provider.dart';
 import 'package:flowpbx_mobile/widgets/error_banner.dart';
+import 'package:flowpbx_mobile/widgets/skeleton_loader.dart';
 
 class VoicemailScreen extends ConsumerWidget {
   const VoicemailScreen({super.key});
@@ -20,7 +21,7 @@ class VoicemailScreen extends ConsumerWidget {
         title: const Text('Voicemail'),
       ),
       body: voicemailAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const VoicemailSkeleton(),
         error: (error, _) => ErrorBanner(
           error: error,
           fallbackMessage: 'Failed to load voicemails',

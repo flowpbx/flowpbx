@@ -6,6 +6,7 @@ import 'package:flowpbx_mobile/providers/profile_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
 import 'package:flowpbx_mobile/services/app_error.dart';
 import 'package:flowpbx_mobile/widgets/error_banner.dart';
+import 'package:flowpbx_mobile/widgets/skeleton_loader.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -25,7 +26,7 @@ class SettingsScreen extends ConsumerWidget {
         title: const Text('Settings'),
       ),
       body: profileAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const SettingsSkeleton(),
         error: (error, _) => ErrorBanner(
           error: error,
           fallbackMessage: 'Failed to load profile',

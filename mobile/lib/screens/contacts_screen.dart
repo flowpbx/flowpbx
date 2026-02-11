@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flowpbx_mobile/models/directory_entry.dart';
 import 'package:flowpbx_mobile/providers/directory_provider.dart';
 import 'package:flowpbx_mobile/widgets/error_banner.dart';
+import 'package:flowpbx_mobile/widgets/skeleton_loader.dart';
 
 class ContactsScreen extends ConsumerWidget {
   const ContactsScreen({super.key});
@@ -17,7 +18,7 @@ class ContactsScreen extends ConsumerWidget {
         title: const Text('Contacts'),
       ),
       body: directoryAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const ContactsSkeleton(),
         error: (error, _) => ErrorBanner(
           error: error,
           fallbackMessage: 'Failed to load directory',

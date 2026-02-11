@@ -42,7 +42,7 @@
 
 ### Polish
 - [x] Implement app-wide error handling and user-friendly error messages
-- [ ] Add loading states and skeleton screens
+- [x] Add loading states and skeleton screens
 - [ ] Implement network connectivity monitoring (show offline banner)
 - [ ] Test on iOS 15+ and Android 10+
 - [ ] Test on WiFi, 4G, 5G network conditions

@@ -25,6 +25,7 @@ dependencies:
   sqflite: ^2.3.2
   path_provider: ^2.1.2
   just_audio: ^0.9.40
+  shimmer: ^3.0.0
 
 dev_dependencies:
   flutter_test:

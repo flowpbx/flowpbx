@@ -7,6 +7,7 @@ import 'package:flowpbx_mobile/providers/missed_call_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
 import 'package:flowpbx_mobile/services/app_error.dart';
 import 'package:flowpbx_mobile/widgets/error_banner.dart';
+import 'package:flowpbx_mobile/widgets/skeleton_loader.dart';
 
 class CallHistoryScreen extends ConsumerStatefulWidget {
   const CallHistoryScreen({super.key});
@@ -56,7 +57,7 @@ class _CallHistoryScreenState extends ConsumerState<CallHistoryScreen> {
         title: const Text('Call History'),
       ),
       body: historyAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const CallHistorySkeleton(),
         error: (error, _) => ErrorBanner(
           error: error,
           fallbackMessage: 'Failed to load call history',

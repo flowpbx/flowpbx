@@ -65,11 +65,8 @@ class CallHistoryScreen extends ConsumerWidget {
             );
           }
           return RefreshIndicator(
-            onRefresh: () async {
-              ref.invalidate(callHistoryProvider);
-              // Wait for the provider to reload.
-              await ref.read(callHistoryProvider.future);
-            },
+            onRefresh: () =>
+                ref.read(callHistoryProvider.notifier).refresh(),
             child: ListView.separated(
               itemCount: entries.length,
               separatorBuilder: (_, __) => const Divider(height: 1),

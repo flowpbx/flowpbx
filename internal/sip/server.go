@@ -66,7 +66,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sys
 	trunks := database.NewTrunkRepository(db)
 
 	pushTokens := database.NewPushTokenRepository(db)
-	auth := NewAuthenticator(extensions, logger)
+	auth := NewAuthenticator(extensions, enc, logger)
 	regNotifier := NewRegistrationNotifier()
 	registrar := NewRegistrar(extensions, registrations, pushTokens, auth, regNotifier, logger)
 	trunkRegistrar := NewTrunkRegistrar(ua, cfg.MediaIP(), cfg.SIPPort, cfg.SIPTLSPort, logger)

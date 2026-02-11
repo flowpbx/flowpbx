@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -116,7 +117,7 @@ func (s *Server) handleAppAuth(w http.ResponseWriter, r *http.Request) {
 		storedPassword = decrypted
 	}
 
-	if storedPassword != req.SIPPassword {
+	if subtle.ConstantTimeCompare([]byte(storedPassword), []byte(req.SIPPassword)) != 1 {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}

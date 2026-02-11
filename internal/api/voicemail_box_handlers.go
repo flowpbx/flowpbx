@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flowpbx/flowpbx/internal/database"
 	"github.com/flowpbx/flowpbx/internal/database/models"
 	"github.com/flowpbx/flowpbx/internal/media"
 	"github.com/flowpbx/flowpbx/internal/prompts"
@@ -135,9 +136,15 @@ func (s *Server) handleCreateVoicemailBox(w http.ResponseWriter, r *http.Request
 		NotifyExtensionID:  req.NotifyExtensionID,
 	}
 
-	// Hash PIN if provided.
+	// Hash PIN with Argon2id if provided.
 	if req.PIN != "" {
-		box.PIN = req.PIN // PIN hashing handled by the repository or a future sprint
+		pinHash, err := database.HashPassword(req.PIN)
+		if err != nil {
+			slog.Error("create voicemail box: failed to hash pin", "error", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		box.PIN = pinHash
 	}
 
 	// Apply optional fields.
@@ -237,9 +244,15 @@ func (s *Server) handleUpdateVoicemailBox(w http.ResponseWriter, r *http.Request
 	existing.EmailAddress = req.EmailAddress
 	existing.NotifyExtensionID = req.NotifyExtensionID
 
-	// Only update PIN if a new one is provided.
+	// Only update PIN if a new one is provided; hash with Argon2id.
 	if req.PIN != "" {
-		existing.PIN = req.PIN
+		pinHash, err := database.HashPassword(req.PIN)
+		if err != nil {
+			slog.Error("update voicemail box: failed to hash pin", "error", err, "box_id", id)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		existing.PIN = pinHash
 	}
 
 	if req.GreetingType != "" {

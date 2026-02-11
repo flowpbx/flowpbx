@@ -25,10 +25,10 @@
 - [x] Fail2ban-style IP blocking for failed SIP auth attempts
 - [x] Rate limiting on all API endpoints
 - [x] HTTPS enforcement for admin UI (auto Let's Encrypt or manual cert)
-- [ ] Verify all secrets encrypted at rest (SIP passwords, trunk credentials)
+- [x] Verify all secrets encrypted at rest (SIP passwords, trunk credentials)
 - [x] Input validation on all API endpoints
 - [ ] Verify parameterized queries only (no SQL injection vectors)
-- [ ] CSRF protection on admin UI
+- [x] CSRF protection on admin UI
 - [x] Security headers (CSP, HSTS, X-Frame-Options, etc.)
 
 ### Monitoring & Observability

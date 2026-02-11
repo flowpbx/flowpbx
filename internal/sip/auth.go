@@ -26,16 +26,19 @@ const (
 // exceed the failed authentication threshold (fail2ban-style protection).
 type Authenticator struct {
 	extensions database.ExtensionRepository
+	encryptor  *database.Encryptor
 	logger     *slog.Logger
 	nonces     sync.Map // map[string]time.Time — tracks issued nonces
 	guard      *BruteForceGuard
 }
 
 // NewAuthenticator creates a new SIP digest authenticator with brute-force
-// protection enabled.
-func NewAuthenticator(extensions database.ExtensionRepository, logger *slog.Logger) *Authenticator {
+// protection enabled. The encryptor is optional — if nil, SIP passwords are
+// assumed to be stored in plaintext.
+func NewAuthenticator(extensions database.ExtensionRepository, enc *database.Encryptor, logger *slog.Logger) *Authenticator {
 	return &Authenticator{
 		extensions: extensions,
+		encryptor:  enc,
 		logger:     logger.With("subsystem", "auth"),
 		guard:      NewBruteForceGuard(logger),
 	}
@@ -144,11 +147,26 @@ func (a *Authenticator) Authenticate(req *sip.Request, tx sip.ServerTransaction)
 		Algorithm: authAlgoMD5,
 	}
 
+	// Decrypt SIP password if encrypted at rest.
+	sipPassword := ext.SIPPassword
+	if a.encryptor != nil && sipPassword != "" {
+		decrypted, err := a.encryptor.Decrypt(sipPassword)
+		if err != nil {
+			a.logger.Error("failed to decrypt sip password for digest auth",
+				"username", cred.Username,
+				"error", err,
+			)
+			a.respondError(req, tx, 500, "Internal Server Error")
+			return nil
+		}
+		sipPassword = decrypted
+	}
+
 	expected, err := digest.Digest(&chal, digest.Options{
 		Method:   string(req.Method),
 		URI:      cred.URI,
 		Username: cred.Username,
-		Password: ext.SIPPassword,
+		Password: sipPassword,
 	})
 	if err != nil {
 		a.logger.Error("failed to compute digest",

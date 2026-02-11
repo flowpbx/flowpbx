@@ -26,7 +26,7 @@
 - [x] Create in-call screen layout: caller info, duration timer, action buttons
 - [x] Implement mute/unmute toggle
 - [x] Implement speaker/earpiece toggle
-- [ ] Implement hold/resume
+- [x] Implement hold/resume
 - [ ] Implement DTMF pad (send RFC 2833 telephone-event)
 - [ ] Implement blind transfer to extension or number
 - [x] Implement hangup (send BYE)

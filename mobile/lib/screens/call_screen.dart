@@ -70,16 +70,26 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     await sipService.toggleSpeaker();
   }
 
+  Future<void> _toggleHold() async {
+    final sipService = ref.read(sipServiceProvider);
+    await sipService.toggleHold();
+  }
+
   @override
   Widget build(BuildContext context) {
     final callAsync = ref.watch(callStateProvider);
     final callState = callAsync.valueOrNull ?? ActiveCallState.idle;
 
     // Manage duration timer based on call state.
-    if (callState.status == CallStatus.connected &&
+    // Keep timer running during hold so total call duration is accurate.
+    if ((callState.status == CallStatus.connected ||
+            callState.status == CallStatus.held ||
+            callState.status == CallStatus.holding) &&
         callState.connectedAt != null) {
       _startTimer(callState.connectedAt!);
-    } else if (callState.status != CallStatus.connected) {
+    } else if (callState.status != CallStatus.connected &&
+        callState.status != CallStatus.held &&
+        callState.status != CallStatus.holding) {
       _stopTimer();
     }
 
@@ -150,6 +160,14 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                     onPressed: _toggleMute,
                   ),
                   _CallControlButton(
+                    icon: callState.isHeld
+                        ? Icons.play_arrow
+                        : Icons.pause,
+                    label: callState.isHeld ? 'Resume' : 'Hold',
+                    isActive: callState.isHeld,
+                    onPressed: _toggleHold,
+                  ),
+                  _CallControlButton(
                     icon: callState.isSpeaker
                         ? Icons.volume_up
                         : Icons.hearing,
@@ -195,7 +213,8 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       CallStatus.dialing => 'Calling...',
       CallStatus.ringing => 'Ringing...',
       CallStatus.connected => _formatDuration(_duration),
-      CallStatus.holding || CallStatus.held => 'On Hold',
+      CallStatus.holding ||
+      CallStatus.held => 'On Hold · ${_formatDuration(_duration)}',
       CallStatus.disconnecting => 'Ending...',
       CallStatus.idle => '',
     };

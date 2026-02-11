@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -94,6 +95,40 @@ func NewTrunkRegistrar(ua *sipgo.UserAgent, contactHost string, sipPort, sipTLSP
 // IPMatcher returns the IP-auth matcher for querying trunk ACLs.
 func (tr *TrunkRegistrar) IPMatcher() *IPAuthMatcher {
 	return tr.ipMatcher
+}
+
+// MatchRegisterTrunk checks if sourceIP belongs to any active register-type
+// trunk by resolving the trunk's Host field. Returns the trunk ID, name, and
+// whether a match was found.
+func (tr *TrunkRegistrar) MatchRegisterTrunk(sourceIP string) (int64, string, bool) {
+	tr.mu.RLock()
+	defer tr.mu.RUnlock()
+
+	parsedSource := net.ParseIP(sourceIP)
+	if parsedSource == nil {
+		return 0, "", false
+	}
+
+	for _, entry := range tr.states {
+		if entry.trunk.Type != "register" {
+			continue
+		}
+		if entry.state.Status != TrunkStatusRegistered {
+			continue
+		}
+
+		// Resolve the trunk host to IPs and check for a match.
+		ips, err := net.LookupHost(entry.trunk.Host)
+		if err != nil {
+			continue
+		}
+		for _, ip := range ips {
+			if net.ParseIP(ip).Equal(parsedSource) {
+				return entry.trunk.ID, entry.trunk.Name, true
+			}
+		}
+	}
+	return 0, "", false
 }
 
 // StartTrunk begins registration for a register-type trunk.

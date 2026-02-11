@@ -890,7 +890,7 @@ func (h *InviteHandler) classifyCall(req *sip.Request, tx sip.ServerTransaction)
 		fromName = from.DisplayName
 	}
 
-	// Step 1: Check if the INVITE is from a known trunk (IP-auth match).
+	// Step 1a: Check if the INVITE is from a known trunk (IP-auth match).
 	trunkID, trunkName, isTrunk := h.trunkRegistrar.IPMatcher().MatchIPTrunk(sourceIP)
 	if isTrunk {
 		h.logger.Debug("invite from ip-auth trunk",
@@ -898,7 +898,17 @@ func (h *InviteHandler) classifyCall(req *sip.Request, tx sip.ServerTransaction)
 			"trunk", trunkName,
 			"source", sourceIP,
 		)
+		return h.classifyInboundCall(ctx, req, trunkID, requestUser, fromName, fromUser)
+	}
 
+	// Step 1b: Check if the INVITE is from a registered trunk's provider.
+	trunkID, trunkName, isTrunk = h.trunkRegistrar.MatchRegisterTrunk(sourceIP)
+	if isTrunk {
+		h.logger.Debug("invite from register trunk",
+			"trunk_id", trunkID,
+			"trunk", trunkName,
+			"source", sourceIP,
+		)
 		return h.classifyInboundCall(ctx, req, trunkID, requestUser, fromName, fromUser)
 	}
 

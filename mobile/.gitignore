@@ -43,6 +43,16 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/local.properties
+/android/app/src/main/java/io/
+
+# iOS generated
+/ios/RunnerTests/
+/ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md
+
+# Flutter project metadata
+.metadata
+README.md
 
 # Generated files
 *.g.dart

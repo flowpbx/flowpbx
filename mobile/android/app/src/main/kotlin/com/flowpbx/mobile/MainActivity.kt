@@ -102,6 +102,8 @@ class MainActivity : FlutterActivity() {
 
     /// Request audio focus for a VoIP call with AUDIOFOCUS_GAIN.
     /// Uses AudioFocusRequest (API 26+) — our minSdk is 29.
+    /// Includes a focus change listener so we can hold/resume the call
+    /// when another app temporarily takes audio focus.
     private fun requestAudioFocus(): Boolean {
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -111,10 +113,30 @@ class MainActivity : FlutterActivity() {
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
 
+        val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+            when (focusChange) {
+                AudioManager.AUDIOFOCUS_LOSS,
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    methodChannel?.invokeMethod("onAudioInterruption", "began")
+                }
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    // Regained focus — re-set communication mode and notify Dart.
+                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                    methodChannel?.invokeMethod("onAudioInterruption", "ended")
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    // Another app wants to play briefly (notification sound).
+                    // VoIP calls should not duck — notify Dart of transient loss.
+                    methodChannel?.invokeMethod("onAudioInterruption", "focusLost")
+                }
+            }
+        }
+
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(attrs)
             .setAcceptsDelayedFocusGain(false)
             .setWillPauseWhenDucked(false)
+            .setOnAudioFocusChangeListener(focusChangeListener)
             .build()
 
         audioFocusRequest = request

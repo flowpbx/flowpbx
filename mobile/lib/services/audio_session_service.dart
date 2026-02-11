@@ -11,34 +11,76 @@ enum AudioRoute {
   headset,
 }
 
+/// Audio interruption type from the native platform.
+///
+/// [began] — another audio source has interrupted (e.g. cellular call, Siri).
+/// [ended] — the interruption has ended and audio can be resumed.
+/// [focusLost] — Android-specific transient audio focus loss.
+enum AudioInterruption {
+  began,
+  ended,
+  focusLost,
+}
+
 /// Manages the native audio session for VoIP calls.
 ///
 /// On iOS, configures AVAudioSession with playAndRecord category and
-/// voiceChat mode for optimal two-way voice communication.
+/// voiceChat mode for optimal two-way voice communication. Observes
+/// interruption notifications (cellular call, Siri) and media services
+/// reset events for graceful recovery.
+///
 /// On Android, requests audio focus with AUDIOFOCUS_GAIN and sets
-/// MODE_IN_COMMUNICATION for VoIP call audio routing.
+/// MODE_IN_COMMUNICATION for VoIP call audio routing. Listens for
+/// audio focus changes (transient loss, ducking) to hold/resume calls.
 ///
 /// Provides [audioRouteStream] for real-time notification when the
-/// audio route changes (e.g. Bluetooth connects, headset plugged in).
+/// audio route changes (e.g. Bluetooth connects, headset plugged in),
+/// and [interruptionStream] for audio session interruption events.
 class AudioSessionService {
   static const _channel = MethodChannel('com.flowpbx.mobile/audio_session');
 
   bool _configured = false;
 
   final _routeController = StreamController<AudioRoute>.broadcast();
+  final _interruptionController = StreamController<AudioInterruption>.broadcast();
 
   /// Stream of audio route changes from native platform.
   Stream<AudioRoute> get audioRouteStream => _routeController.stream;
+
+  /// Stream of audio interruption events from native platform.
+  ///
+  /// Consumers should hold the active call on [AudioInterruption.began]
+  /// or [AudioInterruption.focusLost], and resume on [AudioInterruption.ended].
+  Stream<AudioInterruption> get interruptionStream =>
+      _interruptionController.stream;
 
   AudioSessionService() {
     _channel.setMethodCallHandler(_handleNativeCall);
   }
 
-  /// Handle calls from native side (route change notifications).
+  /// Handle calls from native side (route change and interruption notifications).
   Future<dynamic> _handleNativeCall(MethodCall call) async {
-    if (call.method == 'onAudioRouteChanged') {
-      final route = _parseRoute(call.arguments as String?);
-      _routeController.add(route);
+    switch (call.method) {
+      case 'onAudioRouteChanged':
+        final route = _parseRoute(call.arguments as String?);
+        _routeController.add(route);
+      case 'onAudioInterruption':
+        final type = call.arguments as String?;
+        final interruption = switch (type) {
+          'began' => AudioInterruption.began,
+          'ended' => AudioInterruption.ended,
+          'focusLost' => AudioInterruption.focusLost,
+          _ => null,
+        };
+        if (interruption != null) {
+          _interruptionController.add(interruption);
+        }
+      case 'onMediaServicesReset':
+        // Media server crashed and restarted (iOS). Reconfigure the session.
+        _configured = false;
+        await configure();
+        // Notify consumers that audio was interrupted so they can recover.
+        _interruptionController.add(AudioInterruption.began);
     }
   }
 
@@ -114,8 +156,9 @@ class AudioSessionService {
     };
   }
 
-  /// Dispose the route stream controller.
+  /// Dispose stream controllers.
   void dispose() {
     _routeController.close();
+    _interruptionController.close();
   }
 }

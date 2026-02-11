@@ -41,7 +41,9 @@ class SipService {
   StreamSubscription<CallKitAction>? _callKitSub;
   StreamSubscription<ConnectionAction>? _connectionSub;
   StreamSubscription<PushIncomingCall>? _pushIncomingSub;
+  StreamSubscription<AudioInterruption>? _audioInterruptionSub;
   Timer? _pushWakeTimer;
+  bool _heldByInterruption = false;
 
   /// Stream of VoIP push tokens for registration with the PBX API.
   Stream<String> get pushTokenStream => _pushService.tokenStream;
@@ -121,6 +123,11 @@ class SipService {
     // Listen for push-woken incoming calls (PushKit on iOS).
     _pushIncomingSub =
         _pushService.incomingPushStream.listen(_onPushIncomingCall);
+
+    // Listen for audio interruptions (iOS: cellular call/Siri,
+    // Android: transient audio focus loss) to hold/resume calls.
+    _audioInterruptionSub =
+        _audioSessionService.interruptionStream.listen(_onAudioInterruption);
 
     _initialized = true;
   }
@@ -363,6 +370,8 @@ class SipService {
     _connectionSub = null;
     _pushIncomingSub?.cancel();
     _pushIncomingSub = null;
+    _audioInterruptionSub?.cancel();
+    _audioInterruptionSub = null;
     _connectivitySub?.cancel();
     _connectivitySub = null;
     if (_accountId != null && _initialized) {
@@ -644,6 +653,33 @@ class SipService {
   void _cancelPushWakeTimer() {
     _pushWakeTimer?.cancel();
     _pushWakeTimer = null;
+  }
+
+  /// Handle audio session interruptions from the native platform.
+  ///
+  /// When the system interrupts audio (e.g. incoming cellular call on iOS,
+  /// transient audio focus loss on Android), hold the active call so the
+  /// remote party hears hold music instead of silence. When the interruption
+  /// ends, resume the call and reactivate the audio session.
+  void _onAudioInterruption(AudioInterruption interruption) {
+    if (_callState.callId == null) return;
+
+    switch (interruption) {
+      case AudioInterruption.began:
+      case AudioInterruption.focusLost:
+        // Only auto-hold if the call is connected and not already held.
+        if (_callState.status == CallStatus.connected && !_callState.isHeld) {
+          _heldByInterruption = true;
+          SiprixVoipSdk().hold(_callState.callId!);
+        }
+      case AudioInterruption.ended:
+        // Resume the call only if we held it due to the interruption.
+        if (_heldByInterruption && _callState.isHeld) {
+          _heldByInterruption = false;
+          _audioSessionService.activate();
+          SiprixVoipSdk().hold(_callState.callId!);
+        }
+    }
   }
 
   /// Handle actions from the native CallKit UI (iOS).

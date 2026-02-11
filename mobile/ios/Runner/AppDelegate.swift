@@ -238,6 +238,22 @@ import PushKit
             object: nil
         )
 
+        // Observe audio interruptions (incoming cellular call, Siri, etc.).
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(audioInterrupted),
+            name: AVAudioSession.interruptionNotification,
+            object: nil
+        )
+
+        // Observe media services reset (audio server crash recovery).
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(mediaServicesReset),
+            name: AVAudioSession.mediaServicesWereResetNotification,
+            object: nil
+        )
+
         GeneratedPluginRegistrant.register(with: self)
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
@@ -348,6 +364,48 @@ import PushKit
         let route = currentAudioRoute()
         DispatchQueue.main.async { [weak self] in
             self?.audioChannel?.invokeMethod("onAudioRouteChanged", arguments: route)
+        }
+    }
+
+    /// Callback when the audio session is interrupted (e.g. incoming cellular call, Siri).
+    /// Notifies Dart so SipService can hold the active VoIP call during the interruption
+    /// and resume it when the interruption ends.
+    @objc private func audioInterrupted(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+            return
+        }
+
+        switch type {
+        case .began:
+            DispatchQueue.main.async { [weak self] in
+                self?.audioChannel?.invokeMethod("onAudioInterruption", arguments: "began")
+            }
+        case .ended:
+            // Check if the system suggests we should resume audio.
+            let shouldResume: Bool
+            if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+                shouldResume = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                    .contains(.shouldResume)
+            } else {
+                shouldResume = true
+            }
+            if shouldResume {
+                DispatchQueue.main.async { [weak self] in
+                    self?.audioChannel?.invokeMethod("onAudioInterruption", arguments: "ended")
+                }
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    /// Callback when the media services daemon is reset (rare but possible crash).
+    /// The audio session is invalidated — we must reconfigure from scratch.
+    @objc private func mediaServicesReset(notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.audioChannel?.invokeMethod("onMediaServicesReset", arguments: nil)
         }
     }
 }

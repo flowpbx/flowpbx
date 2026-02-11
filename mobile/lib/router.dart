@@ -10,6 +10,7 @@ import 'package:flowpbx_mobile/screens/dialpad_screen.dart';
 import 'package:flowpbx_mobile/screens/call_screen.dart';
 import 'package:flowpbx_mobile/screens/call_history_screen.dart';
 import 'package:flowpbx_mobile/screens/incoming_call_screen.dart';
+import 'package:flowpbx_mobile/screens/voicemail_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authStateProvider);
@@ -78,6 +79,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/history',
         builder: (context, state) => const CallHistoryScreen(),
+      ),
+      GoRoute(
+        path: '/voicemail',
+        builder: (context, state) => const VoicemailScreen(),
       ),
       GoRoute(
         path: '/call',

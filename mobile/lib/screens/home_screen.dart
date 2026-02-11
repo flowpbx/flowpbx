@@ -72,6 +72,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             onPressed: () => context.push('/history'),
           ),
           IconButton(
+            icon: const Icon(Icons.voicemail_outlined),
+            tooltip: 'Voicemail',
+            onPressed: () => context.push('/voicemail'),
+          ),
+          IconButton(
             icon: const Icon(Icons.contacts_outlined),
             tooltip: 'Contacts',
             onPressed: () => context.push('/contacts'),

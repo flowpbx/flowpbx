@@ -17,7 +17,7 @@
 - [x] Show missed call badge count
 
 ### Voicemail
-- [ ] Create voicemail list screen (shows messages from all boxes linked to extension)
+- [x] Create voicemail list screen (shows messages from all boxes linked to extension)
 - [ ] Fetch voicemails from `GET /api/v1/app/voicemail`
 - [ ] Implement audio playback: stream from `GET /api/v1/app/voicemail/:id/audio`
 - [ ] Implement playback controls: play/pause, seek, speed (1x/1.5x/2x)

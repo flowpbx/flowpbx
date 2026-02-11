@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flowpbx_mobile/providers/audio_route_provider.dart';
 import 'package:flowpbx_mobile/providers/call_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
 
@@ -122,6 +123,9 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     final isConnected = callState.status == CallStatus.connected ||
         callState.status == CallStatus.held;
 
+    // Watch the audio route for icon updates (Bluetooth, headset, etc).
+    final audioRoute = ref.watch(audioRouteProvider).valueOrNull;
+
     return Scaffold(
       backgroundColor: colorScheme.surface,
       body: SafeArea(
@@ -213,10 +217,8 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                     onPressed: _toggleHold,
                   ),
                   _CallControlButton(
-                    icon: callState.isSpeaker
-                        ? Icons.volume_up
-                        : Icons.hearing,
-                    label: callState.isSpeaker ? 'Speaker' : 'Earpiece',
+                    icon: _audioRouteIcon(audioRoute, callState.isSpeaker),
+                    label: _audioRouteLabel(audioRoute, callState.isSpeaker),
                     isActive: callState.isSpeaker,
                     onPressed: _toggleSpeaker,
                   ),
@@ -290,6 +292,26 @@ class _CallScreenState extends ConsumerState<CallScreen> {
           .map((t) => _DtmfButton(tone: t, onTap: () => _sendDtmf(t)))
           .toList(),
     );
+  }
+
+  IconData _audioRouteIcon(AudioRoute? route, bool isSpeaker) {
+    if (isSpeaker) return Icons.volume_up;
+    return switch (route) {
+      AudioRoute.bluetooth => Icons.bluetooth_audio,
+      AudioRoute.headset => Icons.headset,
+      AudioRoute.speaker => Icons.volume_up,
+      _ => Icons.hearing,
+    };
+  }
+
+  String _audioRouteLabel(AudioRoute? route, bool isSpeaker) {
+    if (isSpeaker) return 'Speaker';
+    return switch (route) {
+      AudioRoute.bluetooth => 'Bluetooth',
+      AudioRoute.headset => 'Headset',
+      AudioRoute.speaker => 'Speaker',
+      _ => 'Earpiece',
+    };
   }
 
   String _initials(String name) {

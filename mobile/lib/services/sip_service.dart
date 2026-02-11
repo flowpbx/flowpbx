@@ -42,6 +42,13 @@ class SipService {
   ActiveCallState _callState = ActiveCallState.idle;
   ActiveCallState get callState => _callState;
 
+  /// Stream of audio route changes from native platform.
+  Stream<AudioRoute> get audioRouteStream =>
+      _audioSessionService.audioRouteStream;
+
+  /// Query the current audio output route.
+  Future<AudioRoute> getAudioRoute() => _audioSessionService.getAudioRoute();
+
   SipRegState get regState => _regState;
   String get regResponse => _regResponse;
   bool get isRegistered => _regState == SipRegState.registered;
@@ -277,6 +284,7 @@ class SipService {
   /// Dispose resources.
   void dispose() {
     _ringtoneService.stopRinging();
+    _audioSessionService.dispose();
     _connectivitySub?.cancel();
     _connectivitySub = null;
     if (_accountId != null && _initialized) {

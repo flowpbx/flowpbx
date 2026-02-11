@@ -4,6 +4,8 @@ import AVFoundation
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
+    private var audioChannel: FlutterMethodChannel?
+
     override func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -13,6 +15,7 @@ import AVFoundation
             name: "com.flowpbx.mobile/audio_session",
             binaryMessenger: controller.binaryMessenger
         )
+        audioChannel = channel
 
         channel.setMethodCallHandler { [weak self] (call, result) in
             switch call.method {
@@ -29,10 +32,20 @@ import AVFoundation
                 } else {
                     result(FlutterError(code: "INVALID_ARGS", message: "Missing 'enabled' argument", details: nil))
                 }
+            case "getAudioRoute":
+                result(self?.currentAudioRoute() ?? "earpiece")
             default:
                 result(FlutterMethodNotImplemented)
             }
         }
+
+        // Observe audio route changes (Bluetooth connect/disconnect, headset plug).
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(audioRouteChanged),
+            name: AVAudioSession.routeChangeNotification,
+            object: nil
+        )
 
         GeneratedPluginRegistrant.register(with: self)
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
@@ -105,6 +118,32 @@ import AVFoundation
                 message: "Failed to set speaker: \(error.localizedDescription)",
                 details: nil
             ))
+        }
+    }
+
+    /// Determine the current audio output route.
+    private func currentAudioRoute() -> String {
+        let session = AVAudioSession.sharedInstance()
+        guard let output = session.currentRoute.outputs.first else {
+            return "earpiece"
+        }
+        switch output.portType {
+        case .builtInSpeaker:
+            return "speaker"
+        case .bluetoothA2DP, .bluetoothLE, .bluetoothHFP:
+            return "bluetooth"
+        case .headphones, .headsetMic:
+            return "headset"
+        default:
+            return "earpiece"
+        }
+    }
+
+    /// Callback when the audio route changes (e.g. Bluetooth connected, headset plugged).
+    @objc private func audioRouteChanged(notification: Notification) {
+        let route = currentAudioRoute()
+        DispatchQueue.main.async { [weak self] in
+            self?.audioChannel?.invokeMethod("onAudioRouteChanged", arguments: route)
         }
     }
 }

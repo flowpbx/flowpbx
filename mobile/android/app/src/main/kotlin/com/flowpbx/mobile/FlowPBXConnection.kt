@@ -28,6 +28,7 @@ class FlowPBXConnection(val uuid: String) : Connection() {
         setDisconnected(DisconnectCause(DisconnectCause.REJECTED))
         destroy()
         FlowPBXConnectionService.connections.remove(uuid)
+        handler?.stopForegroundServiceIfIdle()
         handler?.onConnectionEvent("onConnectionEnd", mapOf("uuid" to uuid))
     }
 
@@ -36,6 +37,7 @@ class FlowPBXConnection(val uuid: String) : Connection() {
         setDisconnected(DisconnectCause(DisconnectCause.LOCAL))
         destroy()
         FlowPBXConnectionService.connections.remove(uuid)
+        handler?.stopForegroundServiceIfIdle()
         handler?.onConnectionEvent("onConnectionEnd", mapOf("uuid" to uuid))
     }
 
@@ -44,6 +46,7 @@ class FlowPBXConnection(val uuid: String) : Connection() {
         setDisconnected(DisconnectCause(DisconnectCause.CANCELED))
         destroy()
         FlowPBXConnectionService.connections.remove(uuid)
+        handler?.stopForegroundServiceIfIdle()
         handler?.onConnectionEvent("onConnectionEnd", mapOf("uuid" to uuid))
     }
 

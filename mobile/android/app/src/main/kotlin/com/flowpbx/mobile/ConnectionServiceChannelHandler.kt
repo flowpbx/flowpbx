@@ -154,15 +154,21 @@ class ConnectionServiceChannelHandler(
 
     private fun reportCallConnected(uuid: String) {
         FlowPBXConnectionService.connections[uuid]?.setConnectionActive()
+
+        // Start foreground service to keep the app alive during the call.
+        val caller = callerLabelForConnection(uuid)
+        CallForegroundService.start(context, caller)
     }
 
     private fun reportCallEnded(uuid: String, reason: Int) {
         FlowPBXConnectionService.connections[uuid]?.setConnectionDisconnected(reason)
+        stopForegroundServiceIfIdle()
     }
 
     private fun endCall(uuid: String) {
         val connection = FlowPBXConnectionService.connections[uuid] ?: return
         connection.setConnectionDisconnected(1)
+        stopForegroundServiceIfIdle()
     }
 
     private fun setMuted(uuid: String, muted: Boolean) {
@@ -196,6 +202,26 @@ class ConnectionServiceChannelHandler(
                 arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                 1001
             )
+        }
+    }
+
+    /** Stop the foreground service if no active connections remain. */
+    fun stopForegroundServiceIfIdle() {
+        if (FlowPBXConnectionService.connections.isEmpty()) {
+            CallForegroundService.stop(context)
+        }
+    }
+
+    /** Get a caller label for the foreground service notification. */
+    private fun callerLabelForConnection(uuid: String): String {
+        val connection = FlowPBXConnectionService.connections[uuid]
+        val displayName = connection?.callerDisplayName
+        val address = connection?.address?.schemeSpecificPart
+        return when {
+            !displayName.isNullOrEmpty() && !address.isNullOrEmpty() -> "$displayName ($address)"
+            !displayName.isNullOrEmpty() -> displayName
+            !address.isNullOrEmpty() -> address
+            else -> "Active Call"
         }
     }
 

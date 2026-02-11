@@ -19,7 +19,7 @@
 - [x] Implement ConnectionService for native Android call integration
 - [x] Handle incoming call notification (heads-up notification with answer/reject)
 - [x] Handle outgoing call routing through ConnectionService
-- [ ] Implement foreground service for active calls
+- [x] Implement foreground service for active calls
 
 ### Push Notifications
 - [ ] Set up Firebase Cloud Messaging (FCM) for Android

@@ -34,6 +34,6 @@
 
 ### Audio Session
 - [x] Configure iOS audio session for VoIP (AVAudioSession)
-- [ ] Configure Android audio focus management
+- [x] Configure Android audio focus management
 - [ ] Handle audio routing: earpiece, speaker, Bluetooth, wired headset
 - [ ] Implement proximity sensor control (screen off when near ear)

@@ -196,7 +196,7 @@ func (s *Server) routes() {
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
 	r.Use(middleware.CORS(middleware.ParseCORSOrigins(s.cfg.CORSOrigins)))
-	r.Use(middleware.SecurityHeaders(s.cfg.TLSCert != ""))
+	r.Use(middleware.SecurityHeaders(s.cfg.TLSEnabled()))
 	r.Use(middleware.StructuredLogger)
 	r.Use(middleware.Recoverer)
 
@@ -220,7 +220,7 @@ func (s *Server) routes() {
 			r.Post("/auth/login", s.handleLogin)
 		})
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequireAuth(s.sessions, s.cfg.TLSCert != ""))
+			r.Use(middleware.RequireAuth(s.sessions, s.cfg.TLSEnabled()))
 			r.Post("/auth/logout", s.handleLogout)
 			r.Get("/auth/me", s.handleMe)
 		})
@@ -557,7 +557,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	middleware.SetSessionCookie(w, sess, s.cfg.TLSCert != "")
+	middleware.SetSessionCookie(w, sess, s.cfg.TLSEnabled())
 
 	slog.Info("admin login", "username", user.Username, "user_id", user.ID)
 
@@ -574,7 +574,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.sessions.Delete(sessionID)
 	}
 
-	middleware.ClearSessionCookie(w, s.cfg.TLSCert != "")
+	middleware.ClearSessionCookie(w, s.cfg.TLSEnabled())
 
 	writeJSON(w, http.StatusOK, nil)
 }

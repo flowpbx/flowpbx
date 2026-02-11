@@ -30,6 +30,8 @@ type Config struct {
 	PushGatewayURL string // URL of the push gateway service (e.g., "https://push.flowpbx.com")
 	LicenseKey     string // license key for the push gateway
 	JWTSecret      string // hex-encoded 32-byte secret for mobile app JWT signing
+	ACMEDomain     string // domain for automatic Let's Encrypt certificate (e.g., "pbx.example.com")
+	ACMEEmail      string // contact email for Let's Encrypt account notifications
 }
 
 // defaults
@@ -68,6 +70,8 @@ func Load() (*Config, error) {
 	fs.StringVar(&cfg.PushGatewayURL, "push-gateway-url", "", "URL of the push gateway service for mobile push notifications")
 	fs.StringVar(&cfg.LicenseKey, "license-key", "", "license key for authenticating with the push gateway")
 	fs.StringVar(&cfg.JWTSecret, "jwt-secret", "", "hex-encoded 32-byte secret for mobile app JWT signing (auto-generated if empty)")
+	fs.StringVar(&cfg.ACMEDomain, "acme-domain", "", "domain for automatic Let's Encrypt TLS certificate (e.g., pbx.example.com)")
+	fs.StringVar(&cfg.ACMEEmail, "acme-email", "", "contact email for Let's Encrypt account notifications")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return nil, fmt.Errorf("parsing flags: %w", err)
@@ -111,6 +115,8 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 		"push-gateway-url": envPrefix + "PUSH_GATEWAY_URL",
 		"license-key":      envPrefix + "LICENSE_KEY",
 		"jwt-secret":       envPrefix + "JWT_SECRET",
+		"acme-domain":      envPrefix + "ACME_DOMAIN",
+		"acme-email":       envPrefix + "ACME_EMAIL",
 	}
 
 	for flagName, envVar := range envMap {
@@ -162,6 +168,10 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 			cfg.LicenseKey = val
 		case "jwt-secret":
 			cfg.JWTSecret = val
+		case "acme-domain":
+			cfg.ACMEDomain = val
+		case "acme-email":
+			cfg.ACMEEmail = val
 		}
 	}
 }
@@ -198,7 +208,18 @@ func (c *Config) validate() error {
 		return fmt.Errorf("tls-cert and tls-key must both be provided or both be omitted")
 	}
 
+	// ACME domain and manual TLS cert/key are mutually exclusive.
+	if c.ACMEDomain != "" && c.TLSCert != "" {
+		return fmt.Errorf("acme-domain and tls-cert/tls-key are mutually exclusive")
+	}
+
 	return nil
+}
+
+// TLSEnabled returns true if either manual TLS certificates or automatic
+// ACME (Let's Encrypt) certificates are configured.
+func (c *Config) TLSEnabled() bool {
+	return c.TLSCert != "" || c.ACMEDomain != ""
 }
 
 // EncryptionKeyBytes returns the decoded 32-byte encryption key, or nil if

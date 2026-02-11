@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
+
+	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/flowpbx/flowpbx/internal/api"
 	"github.com/flowpbx/flowpbx/internal/api/middleware"
@@ -31,13 +35,14 @@ func main() {
 	}
 
 	// Configure structured logging.
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.SlogLevel()}))
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.SlogLevel()}))
 	slog.SetDefault(logger)
 
 	slog.Info("starting flowpbx",
 		"http_port", cfg.HTTPPort,
 		"sip_port", cfg.SIPPort,
 		"data_dir", cfg.DataDir,
+		"tls", cfg.TLSEnabled(),
 	)
 
 	// Open database and run migrations.
@@ -138,21 +143,94 @@ func main() {
 	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, trunkTester, trunkLifecycle, activeCalls, conferenceProv, enc, reloader)
 
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
 		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Start server in goroutine.
+	// Optional HTTP→HTTPS redirect server (started when TLS is enabled).
+	var redirectSrv *http.Server
+
 	errCh := make(chan error, 1)
-	go func() {
-		slog.Info("http server listening", "addr", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- err
+
+	switch {
+	case cfg.ACMEDomain != "":
+		// Automatic TLS via Let's Encrypt (ACME).
+		cacheDir := filepath.Join(cfg.DataDir, "acme-certs")
+		m := &autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(cfg.ACMEDomain),
+			Cache:      autocert.DirCache(cacheDir),
+			Email:      cfg.ACMEEmail,
 		}
-	}()
+		srv.Addr = ":443"
+		srv.TLSConfig = m.TLSConfig()
+
+		// The ACME manager needs to handle HTTP-01 challenges on port 80.
+		// Non-challenge requests are redirected to HTTPS.
+		redirectSrv = &http.Server{
+			Addr:         ":80",
+			Handler:      m.HTTPHandler(middleware.HTTPSRedirectHandler()),
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 5 * time.Second,
+			IdleTimeout:  30 * time.Second,
+		}
+
+		go func() {
+			slog.Info("https server listening (acme)", "addr", srv.Addr, "domain", cfg.ACMEDomain)
+			if err := srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				errCh <- err
+			}
+		}()
+		go func() {
+			slog.Info("http redirect server listening", "addr", redirectSrv.Addr)
+			if err := redirectSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("http redirect server error", "error", err)
+			}
+		}()
+
+	case cfg.TLSCert != "":
+		// Manual TLS certificate.
+		srv.Addr = fmt.Sprintf(":%d", cfg.HTTPPort)
+		srv.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+
+		// Start HTTP→HTTPS redirect on port 80 unless the main port is 80.
+		if cfg.HTTPPort != 80 {
+			redirectSrv = &http.Server{
+				Addr:         ":80",
+				Handler:      middleware.HTTPSRedirectHandler(),
+				ReadTimeout:  5 * time.Second,
+				WriteTimeout: 5 * time.Second,
+				IdleTimeout:  30 * time.Second,
+			}
+			go func() {
+				slog.Info("http redirect server listening", "addr", redirectSrv.Addr)
+				if err := redirectSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					slog.Error("http redirect server error", "error", err)
+				}
+			}()
+		}
+
+		go func() {
+			slog.Info("https server listening", "addr", srv.Addr)
+			if err := srv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey); err != nil && err != http.ErrServerClosed {
+				errCh <- err
+			}
+		}()
+
+	default:
+		// Plain HTTP (no TLS configured).
+		srv.Addr = fmt.Sprintf(":%d", cfg.HTTPPort)
+		go func() {
+			slog.Info("http server listening", "addr", srv.Addr)
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				errCh <- err
+			}
+		}()
+	}
 
 	// Wait for interrupt or server error.
 	quit := make(chan os.Signal, 1)
@@ -171,6 +249,12 @@ func main() {
 
 	slog.Info("shutting down servers")
 	sipSrv.Stop()
+
+	if redirectSrv != nil {
+		if err := redirectSrv.Shutdown(ctx); err != nil {
+			slog.Error("http redirect server shutdown error", "error", err)
+		}
+	}
 
 	if err := srv.Shutdown(ctx); err != nil {
 		slog.Error("http server shutdown error", "error", err)

@@ -196,6 +196,7 @@ func (s *Server) routes() {
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
 	r.Use(middleware.CORS(middleware.ParseCORSOrigins(s.cfg.CORSOrigins)))
+	r.Use(middleware.SecurityHeaders(s.cfg.TLSCert != ""))
 	r.Use(middleware.StructuredLogger)
 	r.Use(middleware.Recoverer)
 

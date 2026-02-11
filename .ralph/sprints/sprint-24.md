@@ -29,7 +29,7 @@
 - [ ] Input validation on all API endpoints
 - [ ] Verify parameterized queries only (no SQL injection vectors)
 - [ ] CSRF protection on admin UI
-- [ ] Security headers (CSP, HSTS, X-Frame-Options, etc.)
+- [x] Security headers (CSP, HSTS, X-Frame-Options, etc.)
 
 ### Monitoring & Observability
 - [ ] Structured JSON logging throughout (configurable level)

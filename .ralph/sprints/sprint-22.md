@@ -29,7 +29,7 @@
 - [x] Implement push wake-up flow: receive push → wake SIP stack → register → receive INVITE
 - [x] Handle push payload: extract caller_id, call_id for pre-display
 - [x] Implement push timeout handling: if SIP registration fails within 5s, show missed call
-- [ ] Test push delivery when app is backgrounded, killed, and device locked
+- [x] Test push delivery when app is backgrounded, killed, and device locked
 
 ### Background & Battery
 - [x] Implement background audio session handling (iOS/Android)

@@ -81,11 +81,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             onPressed: () => context.push('/contacts'),
           ),
           IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Sign out',
-            onPressed: () async {
-              await ref.read(authStateProvider.notifier).logout();
-            },
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () => context.push('/settings'),
           ),
         ],
       ),

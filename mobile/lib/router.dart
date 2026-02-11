@@ -10,6 +10,7 @@ import 'package:flowpbx_mobile/screens/dialpad_screen.dart';
 import 'package:flowpbx_mobile/screens/call_screen.dart';
 import 'package:flowpbx_mobile/screens/call_history_screen.dart';
 import 'package:flowpbx_mobile/screens/incoming_call_screen.dart';
+import 'package:flowpbx_mobile/screens/settings_screen.dart';
 import 'package:flowpbx_mobile/screens/voicemail_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -83,6 +84,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/voicemail',
         builder: (context, state) => const VoicemailScreen(),
+      ),
+      GoRoute(
+        path: '/settings',
+        builder: (context, state) => const SettingsScreen(),
       ),
       GoRoute(
         path: '/call',

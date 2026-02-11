@@ -26,7 +26,7 @@
 - [x] Pull-to-refresh voicemail list
 
 ### Settings & Toggles
-- [ ] Create settings screen
+- [x] Create settings screen
 - [ ] Implement DND toggle (update PBX via `PUT /api/v1/app/me`)
 - [ ] Implement follow-me toggle (update PBX via `PUT /api/v1/app/me`)
 - [ ] Show current registration status and server info

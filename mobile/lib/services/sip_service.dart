@@ -186,6 +186,10 @@ class SipService {
   /// Should be called after login when SIP credentials are available.
   Future<void> registerVoipPush() => _pushService.registerVoipPush();
 
+  /// Register for FCM push notifications (Android).
+  /// Should be called after login when SIP credentials are available.
+  Future<void> registerFcmPush() => _pushService.registerFcmPush();
+
   /// Refresh the current registration (e.g. after network change).
   Future<void> refreshRegistration() async {
     if (_accountId == null || !_initialized) return;

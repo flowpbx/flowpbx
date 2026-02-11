@@ -22,7 +22,7 @@
 - [x] Implement foreground service for active calls
 
 ### Push Notifications
-- [ ] Set up Firebase Cloud Messaging (FCM) for Android
+- [x] Set up Firebase Cloud Messaging (FCM) for Android
 - [ ] Set up APNs / PushKit for iOS (VoIP push for call wake-up)
 - [ ] Register push token with PBX via `POST /api/v1/app/push-token`
 - [ ] Re-register token on app update or token refresh

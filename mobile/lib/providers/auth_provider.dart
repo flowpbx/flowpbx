@@ -46,8 +46,8 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
         _registerSip(sipConfig);
       }
 
-      // Re-register for VoIP push on app restore.
-      _setupVoipPush();
+      // Re-register for push notifications on app restore.
+      _setupPushNotifications();
 
       // Sync PBX directory to iOS Call Directory for caller ID lookup.
       _syncCallDirectory();
@@ -121,8 +121,8 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
       transport: sipConfig.transport,
     );
 
-    // Register for VoIP push notifications (iOS PushKit).
-    _setupVoipPush();
+    // Register for push notifications (iOS PushKit / Android FCM).
+    _setupPushNotifications();
 
     // Sync PBX directory to iOS Call Directory for caller ID lookup.
     _syncCallDirectory();
@@ -141,21 +141,30 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     state = const AsyncData(AuthState.empty);
   }
 
-  /// Set up VoIP push registration and token forwarding to the PBX API.
-  void _setupVoipPush() {
-    if (!Platform.isIOS) return;
-
+  /// Set up push registration and token forwarding to the PBX API.
+  ///
+  /// iOS: VoIP push via PushKit (native method channel).
+  /// Android: FCM via firebase_messaging plugin.
+  void _setupPushNotifications() {
     final sipService = ref.read(sipServiceProvider);
     final api = ref.read(apiServiceProvider);
 
-    // Listen for VoIP push token and forward it to the PBX.
+    // Determine platform identifier for push token registration.
+    final platform = Platform.isIOS ? 'apns' : 'fcm';
+
+    // Listen for push token and forward it to the PBX.
     _pushTokenSub?.cancel();
     _pushTokenSub = sipService.pushTokenStream.listen((token) {
-      api.registerPushToken(token: token, platform: 'ios').catchError((_) {});
+      api.registerPushToken(token: token, platform: platform).catchError((_) {});
     });
 
-    // Trigger PushKit registration.
-    sipService.registerVoipPush();
+    if (Platform.isIOS) {
+      // Trigger PushKit registration.
+      sipService.registerVoipPush();
+    } else if (Platform.isAndroid) {
+      // Trigger FCM registration.
+      sipService.registerFcmPush();
+    }
   }
 
   /// Sync PBX directory contacts to the iOS Call Directory extension for

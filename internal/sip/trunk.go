@@ -108,7 +108,9 @@ func (tr *TrunkRegistrar) StartTrunk(ctx context.Context, trunk models.Trunk) er
 		return fmt.Errorf("creating sip client for trunk %q: %w", trunk.Name, err)
 	}
 
-	trunkCtx, cancel := context.WithCancel(ctx)
+	// Use a background context for the long-running registration goroutine
+	// so it isn't canceled when the calling context (e.g. HTTP request) ends.
+	trunkCtx, cancel := context.WithCancel(context.Background())
 
 	entry := &trunkEntry{
 		trunk:  trunk,
@@ -454,7 +456,9 @@ func (tr *TrunkRegistrar) StartHealthCheck(ctx context.Context, trunk models.Tru
 		return fmt.Errorf("creating sip client for trunk %q: %w", trunk.Name, err)
 	}
 
-	trunkCtx, cancel := context.WithCancel(ctx)
+	// Use a background context so the health check loop isn't canceled
+	// when the calling context (e.g. HTTP request) ends.
+	trunkCtx, cancel := context.WithCancel(context.Background())
 	healthCtx, healthCancel := context.WithCancel(trunkCtx)
 
 	entry := &trunkEntry{

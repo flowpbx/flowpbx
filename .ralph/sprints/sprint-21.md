@@ -12,9 +12,9 @@
 - [x] Create dialpad screen with number input and call button
 - [x] Implement contact directory from PBX API (extension list)
 - [x] Implement contact search / filter on dialpad
-- [ ] Implement outbound SIP INVITE to PBX
-- [ ] Implement codec negotiation: G.711 alaw/ulaw, Opus
-- [ ] Implement SRTP for encrypted media over untrusted networks
+- [x] Implement outbound SIP INVITE to PBX
+- [x] Implement codec negotiation: G.711 alaw/ulaw, Opus
+- [x] Implement SRTP for encrypted media over untrusted networks
 
 ### Inbound Calls
 - [ ] Create full-screen incoming call UI (caller ID, accept/reject buttons)
@@ -23,14 +23,14 @@
 - [ ] Implement ringtone playback for incoming calls
 
 ### In-Call Screen
-- [ ] Create in-call screen layout: caller info, duration timer, action buttons
+- [x] Create in-call screen layout: caller info, duration timer, action buttons
 - [ ] Implement mute/unmute toggle
 - [ ] Implement speaker/earpiece toggle
 - [ ] Implement hold/resume
 - [ ] Implement DTMF pad (send RFC 2833 telephone-event)
 - [ ] Implement blind transfer to extension or number
-- [ ] Implement hangup (send BYE)
-- [ ] Handle remote hangup (receive BYE) — return to idle
+- [x] Implement hangup (send BYE)
+- [x] Handle remote hangup (receive BYE) — return to idle
 
 ### Audio Session
 - [ ] Configure iOS audio session for VoIP (AVAudioSession)

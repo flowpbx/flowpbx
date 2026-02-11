@@ -16,6 +16,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/flow"
 	"github.com/flowpbx/flowpbx/internal/flow/nodes"
 	"github.com/flowpbx/flowpbx/internal/media"
+	"github.com/flowpbx/flowpbx/internal/push"
 )
 
 // Server wraps the sipgo SIP stack with FlowPBX-specific handlers.
@@ -102,13 +103,22 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sys
 	// Create conference manager for active conference room lifecycle.
 	conferenceMgr := media.NewConferenceManager(rtpProxy, cfg.DataDir, logger)
 
+	// Create push gateway client for mobile app wake-up on incoming calls.
+	var pushClient *push.Client
+	if cfg.PushGatewayURL != "" && cfg.LicenseKey != "" {
+		pushClient = push.NewClient(cfg.PushGatewayURL, cfg.LicenseKey)
+		logger.Info("push gateway client configured",
+			"url", cfg.PushGatewayURL,
+		)
+	}
+
 	// Create the flow engine for inbound call routing via visual flow graphs.
 	voicemailMessages := database.NewVoicemailMessageRepository(db)
 	flowEngine := flow.NewEngine(callFlows, cdrs, nil, logger)
-	flowSIPActions := NewFlowSIPActions(extensions, registrations, forker, outboundRouter, dialogMgr, pendingMgr, sessionMgr, dtmfMgr, conferenceMgr, cdrs, proxyIP, cfg.DataDir, logger)
+	flowSIPActions := NewFlowSIPActions(extensions, registrations, forker, outboundRouter, dialogMgr, pendingMgr, sessionMgr, dtmfMgr, conferenceMgr, cdrs, pushClient, proxyIP, cfg.DataDir, logger)
 	nodes.RegisterAll(flowEngine, flowSIPActions, extensions, voicemailMessages, sysConfig, enc, emailSend, cfg.DataDir, logger)
 
-	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, sysConfig, flowEngine, flowSIPActions, proxyIP, cfg.DataDir, logger)
+	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, sysConfig, flowEngine, flowSIPActions, pushClient, proxyIP, cfg.DataDir, logger)
 
 	s := &Server{
 		cfg:            cfg,

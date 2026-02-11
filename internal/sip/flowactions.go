@@ -14,6 +14,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/database/models"
 	"github.com/flowpbx/flowpbx/internal/flow"
 	"github.com/flowpbx/flowpbx/internal/media"
+	"github.com/flowpbx/flowpbx/internal/push"
 )
 
 // FlowSIPActions implements flow.SIPActions, bridging the flow engine's node
@@ -29,6 +30,7 @@ type FlowSIPActions struct {
 	dtmfMgr        *media.CallDTMFManager
 	conferenceMgr  *media.ConferenceManager
 	cdrs           database.CDRRepository
+	pushClient     *push.Client
 	proxyIP        string
 	dataDir        string
 	logger         *slog.Logger
@@ -46,6 +48,7 @@ func NewFlowSIPActions(
 	dtmfMgr *media.CallDTMFManager,
 	conferenceMgr *media.ConferenceManager,
 	cdrs database.CDRRepository,
+	pushClient *push.Client,
 	proxyIP string,
 	dataDir string,
 	logger *slog.Logger,
@@ -61,6 +64,7 @@ func NewFlowSIPActions(
 		dtmfMgr:        dtmfMgr,
 		conferenceMgr:  conferenceMgr,
 		cdrs:           cdrs,
+		pushClient:     pushClient,
 		proxyIP:        proxyIP,
 		dataDir:        dataDir,
 		logger:         logger.With("subsystem", "flow_sip_actions"),
@@ -96,6 +100,10 @@ func (a *FlowSIPActions) RingExtension(ctx context.Context, callCtx *flow.CallCo
 	}
 
 	if len(active) == 0 {
+		// Send push notification to wake mobile apps for this extension.
+		// Push tokens may exist on recently expired registrations that
+		// haven't been cleaned up yet.
+		a.sendPushForExtension(regs, ext, callCtx.CallID, callCtx.CallerIDNum)
 		return &flow.RingResult{NoRegistrations: true}, nil
 	}
 
@@ -1115,6 +1123,57 @@ func (a *FlowSIPActions) JoinConference(ctx context.Context, callCtx *flow.CallC
 	)
 
 	return nil
+}
+
+// sendPushForExtension sends push wake-up notifications for registrations
+// that have push tokens. This is called when no active registrations exist
+// for an extension — the push notification wakes the mobile app so it can
+// re-register and accept the call.
+func (a *FlowSIPActions) sendPushForExtension(regs []models.Registration, ext *models.Extension, callID string, callerID string) {
+	if a.pushClient == nil || !a.pushClient.Configured() {
+		return
+	}
+
+	seen := make(map[string]bool)
+	for _, reg := range regs {
+		if reg.PushToken == "" || reg.PushPlatform == "" {
+			continue
+		}
+		if seen[reg.PushToken] {
+			continue
+		}
+		seen[reg.PushToken] = true
+
+		a.logger.Info("sending push notification for incoming call via flow",
+			"call_id", callID,
+			"extension", ext.Extension,
+			"platform", reg.PushPlatform,
+			"device_id", reg.DeviceID,
+		)
+
+		go func(token, platform string) {
+			pushCtx, pushCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer pushCancel()
+
+			delivered, err := a.pushClient.SendPush(pushCtx, token, platform, callerID, callID)
+			if err != nil {
+				a.logger.Error("push notification failed via flow",
+					"call_id", callID,
+					"extension", ext.Extension,
+					"platform", platform,
+					"error", err,
+				)
+				return
+			}
+
+			a.logger.Info("push notification sent via flow",
+				"call_id", callID,
+				"extension", ext.Extension,
+				"platform", platform,
+				"delivered", delivered,
+			)
+		}(reg.PushToken, reg.PushPlatform)
+	}
 }
 
 // Ensure FlowSIPActions satisfies the flow.SIPActions interface.

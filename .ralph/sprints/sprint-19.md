@@ -22,7 +22,7 @@
 
 ### PBX ↔ Push Gateway Integration
 - [x] Create `internal/push/client.go` — push gateway HTTP client
-- [ ] On incoming call to offline extension: check registrations for push token → send push request
+- [x] On incoming call to offline extension: check registrations for push token → send push request
 - [ ] Implement push wait: hold call for configurable timeout (default 5s) waiting for app to register
 - [ ] If no registration within timeout: continue flow (voicemail, next node, etc.)
 - [ ] Implement push token management: store/update/invalidate via registration

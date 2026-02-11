@@ -11,6 +11,7 @@ import (
 	"github.com/flowpbx/flowpbx/internal/database/models"
 	"github.com/flowpbx/flowpbx/internal/flow"
 	"github.com/flowpbx/flowpbx/internal/media"
+	"github.com/flowpbx/flowpbx/internal/push"
 )
 
 // CallType identifies the direction/nature of a call.
@@ -68,6 +69,7 @@ type InviteHandler struct {
 	systemConfig   database.SystemConfigRepository
 	flowEngine     *flow.Engine
 	flowActions    *FlowSIPActions
+	pushClient     *push.Client
 	proxyIP        string
 	dataDir        string
 	logger         *slog.Logger
@@ -90,6 +92,7 @@ func NewInviteHandler(
 	sysConfig database.SystemConfigRepository,
 	flowEngine *flow.Engine,
 	flowActions *FlowSIPActions,
+	pushClient *push.Client,
 	proxyIP string,
 	dataDir string,
 	logger *slog.Logger,
@@ -112,6 +115,7 @@ func NewInviteHandler(
 		systemConfig:   sysConfig,
 		flowEngine:     flowEngine,
 		flowActions:    flowActions,
+		pushClient:     pushClient,
 		proxyIP:        proxyIP,
 		dataDir:        dataDir,
 		logger:         logger.With("subsystem", "invite"),
@@ -213,6 +217,8 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 				"call_id", callID,
 				"target", ic.TargetExtension.Extension,
 			)
+			// Send push notification to wake mobile apps for this extension.
+			h.sendPushForExtension(ic.TargetExtension, callID, ic.CallerIDNum)
 			// Try follow-me if enabled (no registered devices at all).
 			if h.tryFollowMe(ctx, req, tx, ic.TargetExtension, callID, ic.CallerIDName, ic.CallerIDNum) {
 				return
@@ -600,6 +606,8 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 				"call_id", callID,
 				"target", ic.TargetExtension.Extension,
 			)
+			// Send push notification to wake mobile apps for this extension.
+			h.sendPushForExtension(ic.TargetExtension, callID, ic.CallerIDNum)
 			// Try follow-me if enabled (no registered devices at all).
 			if h.tryFollowMe(ctx, req, tx, ic.TargetExtension, callID, ic.CallerIDName, ic.CallerIDNum) {
 				return
@@ -1350,4 +1358,82 @@ func (h *InviteHandler) tryFollowMe(
 		"strategy", strategy,
 	)
 	return false
+}
+
+// sendPushForExtension checks all registrations (including recently expired
+// ones not yet cleaned up) for push tokens and sends push wake-up notifications
+// via the push gateway. This is called when an incoming call targets an extension
+// with no active SIP registrations — the push notification wakes the mobile app
+// so it can re-register and accept the call.
+//
+// Push notifications are sent asynchronously (fire-and-forget) so they don't
+// block call processing. Returns the number of push notifications dispatched.
+func (h *InviteHandler) sendPushForExtension(ext *models.Extension, callID string, callerID string) int {
+	if h.pushClient == nil || !h.pushClient.Configured() {
+		return 0
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Fetch all registrations for this extension, including recently expired
+	// ones that haven't been cleaned up yet. These may still have valid push
+	// tokens from the last time the mobile app registered.
+	regs, err := h.registrations.GetByExtensionID(ctx, ext.ID)
+	if err != nil {
+		h.logger.Error("failed to look up registrations for push",
+			"call_id", callID,
+			"extension", ext.Extension,
+			"error", err,
+		)
+		return 0
+	}
+
+	// Collect unique push tokens to avoid duplicate notifications.
+	sent := 0
+	seen := make(map[string]bool)
+	for _, reg := range regs {
+		if reg.PushToken == "" || reg.PushPlatform == "" {
+			continue
+		}
+		if seen[reg.PushToken] {
+			continue
+		}
+		seen[reg.PushToken] = true
+
+		h.logger.Info("sending push notification for incoming call",
+			"call_id", callID,
+			"extension", ext.Extension,
+			"platform", reg.PushPlatform,
+			"device_id", reg.DeviceID,
+		)
+
+		// Send push asynchronously — don't block the SIP handler.
+		go func(token, platform string) {
+			pushCtx, pushCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer pushCancel()
+
+			delivered, err := h.pushClient.SendPush(pushCtx, token, platform, callerID, callID)
+			if err != nil {
+				h.logger.Error("push notification failed",
+					"call_id", callID,
+					"extension", ext.Extension,
+					"platform", platform,
+					"error", err,
+				)
+				return
+			}
+
+			h.logger.Info("push notification sent",
+				"call_id", callID,
+				"extension", ext.Extension,
+				"platform", platform,
+				"delivered", delivered,
+			)
+		}(reg.PushToken, reg.PushPlatform)
+
+		sent++
+	}
+
+	return sent
 }

@@ -11,7 +11,7 @@ export 'package:flowpbx_mobile/models/call_state.dart'
 final callStateProvider = StreamProvider<ActiveCallState>((ref) {
   final service = ref.watch(sipServiceProvider);
   return service.callStateStream.transform(
-    StreamTransformer.fromHandlers(
+    StreamTransformer<ActiveCallState, ActiveCallState>.fromHandlers(
       handleData: (data, sink) => sink.add(data),
     ),
   ).startWithValue(service.callState);

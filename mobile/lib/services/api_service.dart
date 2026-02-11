@@ -7,6 +7,9 @@ class ApiService {
   late final Dio _dio;
   final SecureStorageService _storage;
 
+  /// Called when a 401 response is received, signalling the token is invalid.
+  void Function()? onAuthFailure;
+
   ApiService({required SecureStorageService storage}) : _storage = storage {
     _dio = Dio(
       BaseOptions(
@@ -29,6 +32,9 @@ class ApiService {
           return handler.next(options);
         },
         onError: (error, handler) {
+          if (error.response?.statusCode == 401) {
+            onAuthFailure?.call();
+          }
           // Wrap Dio errors into user-friendly AppExceptions.
           return handler.next(error.copyWith(
             error: AppException.fromDio(error),

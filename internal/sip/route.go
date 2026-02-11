@@ -80,12 +80,24 @@ func (r *CallRouter) RouteInternalCall(ctx context.Context, ic *InviteContext) (
 
 	// Filter out expired registrations (belt-and-suspenders; the DB cleanup
 	// runs periodically but there can be a small window).
+	// Also exclude the caller's own registration when calling your own
+	// extension, to avoid ringing the device that's placing the call.
 	now := time.Now()
 	active := make([]models.Registration, 0, len(regs))
 	for _, reg := range regs {
-		if reg.Expires.After(now) {
-			active = append(active, reg)
+		if reg.Expires.Before(now) {
+			continue
 		}
+		if ic.CallerExtension != nil && ic.CallerExtension.ID == ext.ID &&
+			reg.SourceIP != "" && reg.SourcePort > 0 &&
+			ic.sourceIP == reg.SourceIP && ic.sourcePort == reg.SourcePort {
+			r.logger.Debug("excluding caller's own registration from ring targets",
+				"extension", ext.Extension,
+				"contact", reg.ContactURI,
+			)
+			continue
+		}
+		active = append(active, reg)
 	}
 
 	if len(active) == 0 {

@@ -38,19 +38,28 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     final expiresAt = await storage.getExpiresAt();
 
     if (token != null && serverUrl != null) {
-      ref.read(apiServiceProvider).setBaseUrl(serverUrl);
+      // Check if token is expired before restoring the session.
+      if (expiresAt != null && DateTime.now().isAfter(expiresAt)) {
+        await storage.clearAll();
+        return AuthState.empty;
+      }
+
+      final api = ref.read(apiServiceProvider);
+      api.setBaseUrl(serverUrl);
+      api.onAuthFailure = _onAuthFailure;
 
       // Restore SIP registration from stored credentials.
+      // Deferred to avoid modifying providers during widget tree build.
       final sipConfig = await storage.getSipConfig();
       if (sipConfig['domain'] != null && sipConfig['username'] != null) {
-        _registerSip(sipConfig);
+        Future(() => _registerSip(sipConfig));
       }
 
       // Re-register for push notifications on app restore.
-      _setupPushNotifications();
+      Future(_setupPushNotifications);
 
       // Sync PBX directory to iOS Call Directory for caller ID lookup.
-      _syncCallDirectory();
+      Future(_syncCallDirectory);
 
       return AuthState(
         token: token,
@@ -60,6 +69,13 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
       );
     }
     return AuthState.empty;
+  }
+
+  /// Called by the API service when a 401 response is received.
+  void _onAuthFailure() {
+    final storage = ref.read(secureStorageProvider);
+    storage.clearAll();
+    state = const AsyncData(AuthState.empty);
   }
 
   /// Login: authenticate with PBX, store credentials, register SIP.
@@ -72,6 +88,7 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     final storage = ref.read(secureStorageProvider);
 
     api.setBaseUrl(serverUrl);
+    api.onAuthFailure = _onAuthFailure;
 
     final data = await api.authenticate(
       extension_: extension_,

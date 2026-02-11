@@ -17,7 +17,7 @@ final sipStatusProvider = StreamProvider<SipRegState>((ref) {
   final service = ref.watch(sipServiceProvider);
   // Emit the current state immediately, then follow the stream.
   return service.regStateStream.transform(
-    StreamTransformer.fromHandlers(
+    StreamTransformer<SipRegState, SipRegState>.fromHandlers(
       handleData: (data, sink) => sink.add(data),
     ),
   ).startWithValue(service.regState);

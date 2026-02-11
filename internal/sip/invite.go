@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/emiago/sipgo/sip"
@@ -48,6 +49,11 @@ type InviteContext struct {
 	// CallerID is the display info from the From header.
 	CallerIDName string
 	CallerIDNum  string
+
+	// sourceIP and sourcePort identify the calling device's registration,
+	// used to exclude the caller's own device when calling your own extension.
+	sourceIP   string
+	sourcePort int
 }
 
 // InviteHandler processes incoming SIP INVITE requests, classifying them by
@@ -573,16 +579,18 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 			tx,
 		)
 
-		// Spawn the flow walker goroutine so we don't block the SIP handler.
-		go func() {
-			if err := h.flowEngine.ExecuteFlow(callCtx, *ic.InboundNumber.FlowID, ic.InboundNumber.FlowEntryNode); err != nil {
-				h.logger.Error("flow execution failed",
-					"call_id", callID,
-					"flow_id", *ic.InboundNumber.FlowID,
-					"error", err,
-				)
-			}
-		}()
+		// Execute the flow synchronously so the SIP server transaction
+		// stays alive for the duration of the call.
+		if err := h.flowEngine.ExecuteFlow(callCtx, *ic.InboundNumber.FlowID, ic.InboundNumber.FlowEntryNode); err != nil {
+			h.logger.Error("flow execution failed",
+				"call_id", callID,
+				"flow_id", *ic.InboundNumber.FlowID,
+				"error", err,
+			)
+			h.finalizeCDRFailed(callID, 500)
+		} else {
+			h.finalizeCDRFailed(callID, 200)
+		}
 		return
 	}
 
@@ -920,11 +928,15 @@ func (h *InviteHandler) classifyCall(req *sip.Request, tx sip.ServerTransaction)
 	}
 
 	// Caller is a local extension. Determine if target is internal or external.
+	// Extract source IP and port for self-call filtering.
+	srcIP, srcPort := sourceHostPort(req)
 	ic := &InviteContext{
 		CallerExtension: ext,
 		RequestURI:      requestUser,
 		CallerIDName:    ext.Name,
 		CallerIDNum:     ext.Extension,
+		sourceIP:        srcIP,
+		sourcePort:      srcPort,
 	}
 
 	// Step 3: Check if the target matches a local extension.
@@ -1000,6 +1012,17 @@ func sourceHost(req *sip.Request) string {
 		return source
 	}
 	return host
+}
+
+// sourceHostPort extracts both the IP address and port from the request's source.
+func sourceHostPort(req *sip.Request) (string, int) {
+	source := req.Source()
+	host, portStr, err := net.SplitHostPort(source)
+	if err != nil {
+		return source, 0
+	}
+	port, _ := strconv.Atoi(portStr)
+	return host, port
 }
 
 // buildACKFor2xx creates an ACK request for a 2xx response to an INVITE.

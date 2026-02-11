@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:siprix_voip_sdk/accounts_model.dart';
 import 'package:siprix_voip_sdk/calls_model.dart';
 import 'package:siprix_voip_sdk/network_model.dart';
+import 'package:siprix_voip_sdk/logs_model.dart';
 import 'package:siprix_voip_sdk/siprix_voip_sdk.dart';
 
 import 'package:flowpbx_mobile/models/call_state.dart';
@@ -224,7 +225,7 @@ class SipService {
 
     _setRegState(SipRegState.registering);
     try {
-      await SiprixVoipSdk().registerAccount(_accountId!);
+      await SiprixVoipSdk().registerAccount(_accountId!, 300);
     } catch (e) {
       _setRegState(SipRegState.error);
       _regResponse = e.toString();

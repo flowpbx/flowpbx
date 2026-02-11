@@ -9,6 +9,7 @@ import (
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/flowpbx/flowpbx/internal/database/models"
+	"github.com/google/uuid"
 )
 
 // ForkResult describes the outcome of a forked INVITE attempt.
@@ -358,12 +359,15 @@ func (f *Forker) createLeg(
 		req.AppendHeader(sip.NewHeader("X-Caller-Ext", callerExt.Extension))
 	}
 
-	// Preserve the original Call-ID so both legs share the same call identifier
-	// for logging and CDR correlation. Note: in a full B2BUA implementation
-	// each leg would have its own Call-ID; for now we share it.
+	// Generate a new Call-ID for the outbound leg. Using the same Call-ID as
+	// the inbound INVITE causes transaction-layer conflicts when caller and
+	// callee share the same TCP connection (e.g. calling your own extension).
+	// The original Call-ID is preserved in the X-Orig-Call-ID header for CDR
+	// correlation and logging.
 	if cid := incomingReq.CallID(); cid != nil {
-		req.AppendHeader(sip.NewHeader("Call-ID", cid.Value()))
+		req.AppendHeader(sip.NewHeader("X-Orig-Call-ID", cid.Value()))
 	}
+	req.AppendHeader(sip.NewHeader("Call-ID", uuid.New().String()))
 
 	tx, err := f.client.TransactionRequest(ctx, req, sipgo.ClientRequestBuild)
 	if err != nil {

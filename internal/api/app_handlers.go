@@ -133,9 +133,14 @@ func (s *Server) handleAppAuth(w http.ResponseWriter, r *http.Request) {
 	// Build SIP config for the app. Use the SIP password (plaintext) so the
 	// app can register with the PBX.
 	sipPassword := req.SIPPassword
-	domain := s.cfg.SIPHost()
+	domain := s.cfg.MediaIP()
 	if hostname, err := s.systemConfig.Get(r.Context(), "hostname"); err == nil && hostname != "" {
 		domain = hostname
+	}
+
+	transport := "tls"
+	if !s.cfg.TLSEnabled() {
+		transport = "tcp"
 	}
 
 	slog.Info("app extension authenticated", "extension_id", ext.ID, "extension", ext.Extension)
@@ -150,7 +155,7 @@ func (s *Server) handleAppAuth(w http.ResponseWriter, r *http.Request) {
 			TLSPort:   s.cfg.SIPTLSPort,
 			Username:  ext.SIPUsername,
 			Password:  sipPassword,
-			Transport: "tls",
+			Transport: transport,
 		},
 	})
 }

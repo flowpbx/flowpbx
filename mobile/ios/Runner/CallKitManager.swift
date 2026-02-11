@@ -1,3 +1,4 @@
+import AVFoundation
 import CallKit
 import Flutter
 
@@ -21,7 +22,6 @@ class CallKitManager: NSObject {
 
     override init() {
         let config = CXProviderConfiguration()
-        config.localizedName = "FlowPBX"
         config.supportsVideo = false
         config.maximumCallsPerCallGroup = 1
         config.maximumCallGroups = 1

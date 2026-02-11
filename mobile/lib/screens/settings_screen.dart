@@ -108,6 +108,8 @@ class SettingsScreen extends ConsumerWidget {
                     SipRegState.error => 'Registration failed',
                     SipRegState.unregistered => 'Not registered',
                   }),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/settings/sip'),
                 ),
 
                 const Divider(),

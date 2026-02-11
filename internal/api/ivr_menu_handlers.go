@@ -250,8 +250,17 @@ func parseIVRMenuID(r *http.Request) (int64, error) {
 
 // validateIVRMenuRequest checks required fields for an IVR menu create/update.
 func validateIVRMenuRequest(req ivrMenuRequest, isCreate bool) string {
-	if req.Name == "" {
-		return "name is required"
+	if msg := validateRequiredStringLen("name", req.Name, maxNameLen); msg != "" {
+		return msg
+	}
+	if msg := validateNoControlChars("name", req.Name); msg != "" {
+		return msg
+	}
+	if msg := validateStringLen("greeting_file", req.GreetingFile, maxLongStringLen); msg != "" {
+		return msg
+	}
+	if msg := validateStringLen("greeting_tts", req.GreetingTTS, maxLongStringLen); msg != "" {
+		return msg
 	}
 	if isCreate && req.Options == nil {
 		return "options is required"
@@ -261,15 +270,18 @@ func validateIVRMenuRequest(req ivrMenuRequest, isCreate bool) string {
 		if err := json.Unmarshal(req.Options, &obj); err != nil {
 			return "options must be a valid JSON object"
 		}
+		if len(obj) > 20 {
+			return "options must contain at most 20 entries"
+		}
 	}
-	if req.Timeout != nil && *req.Timeout < 1 {
-		return "timeout must be a positive integer"
+	if msg := validateIntRange("timeout", req.Timeout, 1, 300); msg != "" {
+		return msg
 	}
-	if req.MaxRetries != nil && *req.MaxRetries < 0 {
-		return "max_retries must be a non-negative integer"
+	if msg := validateIntRange("max_retries", req.MaxRetries, 0, 20); msg != "" {
+		return msg
 	}
-	if req.DigitTimeout != nil && *req.DigitTimeout < 1 {
-		return "digit_timeout must be a positive integer"
+	if msg := validateIntRange("digit_timeout", req.DigitTimeout, 1, 30); msg != "" {
+		return msg
 	}
 	return ""
 }

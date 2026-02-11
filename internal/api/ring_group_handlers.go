@@ -240,8 +240,11 @@ func parseRingGroupID(r *http.Request) (int64, error) {
 
 // validateRingGroupRequest checks required fields for a ring group create/update.
 func validateRingGroupRequest(req ringGroupRequest, isCreate bool) string {
-	if req.Name == "" {
-		return "name is required"
+	if msg := validateRequiredStringLen("name", req.Name, maxNameLen); msg != "" {
+		return msg
+	}
+	if msg := validateNoControlChars("name", req.Name); msg != "" {
+		return msg
 	}
 	if req.Strategy != "" {
 		switch req.Strategy {
@@ -259,8 +262,8 @@ func validateRingGroupRequest(req ringGroupRequest, isCreate bool) string {
 			return "caller_id_mode must be \"pass\" or \"prepend\""
 		}
 	}
-	if req.RingTimeout != nil && *req.RingTimeout < 1 {
-		return "ring_timeout must be a positive integer"
+	if msg := validateIntRange("ring_timeout", req.RingTimeout, 1, 600); msg != "" {
+		return msg
 	}
 	if isCreate && req.Members == nil {
 		return "members is required"
@@ -269,6 +272,9 @@ func validateRingGroupRequest(req ringGroupRequest, isCreate bool) string {
 		var arr []json.RawMessage
 		if err := json.Unmarshal(req.Members, &arr); err != nil {
 			return "members must be a valid JSON array"
+		}
+		if len(arr) > 100 {
+			return "members must contain at most 100 entries"
 		}
 	}
 	return ""

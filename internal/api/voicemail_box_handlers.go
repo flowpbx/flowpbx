@@ -416,20 +416,35 @@ func parseVoicemailBoxID(r *http.Request) (int64, error) {
 
 // validateVoicemailBoxRequest checks required fields for a voicemail box create/update.
 func validateVoicemailBoxRequest(req voicemailBoxRequest) string {
-	if req.Name == "" {
-		return "name is required"
+	if msg := validateRequiredStringLen("name", req.Name, maxNameLen); msg != "" {
+		return msg
+	}
+	if msg := validateNoControlChars("name", req.Name); msg != "" {
+		return msg
+	}
+	if msg := validateRequiredStringLen("mailbox_number", req.MailboxNumber, maxShortStringLen); msg != "" {
+		return msg
+	}
+	if msg := validateExtensionNumber("mailbox_number", req.MailboxNumber); msg != "" {
+		return msg
+	}
+	if msg := validatePIN("pin", req.PIN); msg != "" {
+		return msg
 	}
 	if req.GreetingType != "" && req.GreetingType != "default" && req.GreetingType != "custom" && req.GreetingType != "name_only" {
 		return "greeting_type must be \"default\", \"custom\", or \"name_only\""
 	}
-	if req.MaxMessageDuration != nil && *req.MaxMessageDuration < 1 {
-		return "max_message_duration must be a positive integer"
+	if msg := validateIntRange("max_message_duration", req.MaxMessageDuration, 1, 3600); msg != "" {
+		return msg
 	}
-	if req.MaxMessages != nil && *req.MaxMessages < 1 {
-		return "max_messages must be a positive integer"
+	if msg := validateIntRange("max_messages", req.MaxMessages, 1, 10000); msg != "" {
+		return msg
 	}
-	if req.RetentionDays != nil && *req.RetentionDays < 0 {
-		return "retention_days must be a non-negative integer"
+	if msg := validateIntRange("retention_days", req.RetentionDays, 0, 3650); msg != "" {
+		return msg
+	}
+	if msg := validateEmail("email_address", req.EmailAddress); msg != "" {
+		return msg
 	}
 	if req.EmailNotify != nil && *req.EmailNotify && req.EmailAddress == "" {
 		return "email_address is required when email_notify is enabled"

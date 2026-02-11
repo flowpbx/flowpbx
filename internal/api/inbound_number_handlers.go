@@ -252,8 +252,20 @@ func parseInboundNumberID(r *http.Request) (int64, error) {
 
 // validateInboundNumberRequest checks required fields for an inbound number create/update.
 func validateInboundNumberRequest(req inboundNumberRequest) string {
-	if req.Number == "" {
-		return "number is required"
+	if msg := validateRequiredStringLen("number", req.Number, maxShortStringLen); msg != "" {
+		return msg
+	}
+	if msg := validateNoControlChars("number", req.Number); msg != "" {
+		return msg
+	}
+	if msg := validateStringLen("name", req.Name, maxNameLen); msg != "" {
+		return msg
+	}
+	if msg := validateNoControlChars("name", req.Name); msg != "" {
+		return msg
+	}
+	if msg := validateStringLen("flow_entry_node", req.FlowEntryNode, maxNameLen); msg != "" {
+		return msg
 	}
 	return ""
 }

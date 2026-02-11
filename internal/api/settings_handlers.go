@@ -181,6 +181,12 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return nil
 	}
 
+	// Validate string lengths across all sections.
+	if errMsg := validateSettingsRequest(req); errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+
 	// SIP settings.
 	if req.SIP != nil {
 		sip := req.SIP
@@ -361,4 +367,70 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 
 	// Return the updated settings.
 	s.handleGetSettings(w, r)
+}
+
+// validateSettingsRequest checks string length limits on all settings fields.
+func validateSettingsRequest(req settingsRequest) string {
+	if req.SIP != nil {
+		for _, f := range []struct {
+			name, val string
+			max       int
+		}{
+			{"sip.tls_cert", req.SIP.TLSCert, maxLongStringLen},
+			{"sip.tls_key", req.SIP.TLSKey, maxLongStringLen},
+			{"sip.external_ip", req.SIP.ExternalIP, maxHostLen},
+			{"sip.hostname", req.SIP.Hostname, maxHostLen},
+		} {
+			if msg := validateStringLen(f.name, f.val, f.max); msg != "" {
+				return msg
+			}
+		}
+		if msg := validateHost("sip.external_ip", req.SIP.ExternalIP); msg != "" {
+			return msg
+		}
+		if msg := validateHost("sip.hostname", req.SIP.Hostname); msg != "" {
+			return msg
+		}
+	}
+	if req.Codecs != nil {
+		if msg := validateStringLen("codecs.audio", req.Codecs.Audio, maxNameLen); msg != "" {
+			return msg
+		}
+	}
+	if req.Recording != nil {
+		if msg := validateStringLen("recording.storage_path", req.Recording.StoragePath, maxLongStringLen); msg != "" {
+			return msg
+		}
+	}
+	if req.SMTP != nil {
+		for _, f := range []struct {
+			name, val string
+			max       int
+		}{
+			{"smtp.host", req.SMTP.Host, maxHostLen},
+			{"smtp.from", req.SMTP.From, maxEmailLen},
+			{"smtp.username", req.SMTP.Username, maxNameLen},
+			{"smtp.password", req.SMTP.Password, maxPasswordLen},
+		} {
+			if msg := validateStringLen(f.name, f.val, f.max); msg != "" {
+				return msg
+			}
+		}
+		if req.SMTP.From != "" {
+			if msg := validateEmail("smtp.from", req.SMTP.From); msg != "" {
+				return msg
+			}
+		}
+	}
+	if req.License != nil {
+		if msg := validateStringLen("license.key", req.License.Key, maxPasswordLen); msg != "" {
+			return msg
+		}
+	}
+	if req.Push != nil {
+		if msg := validateStringLen("push.gateway_url", req.Push.GatewayURL, maxURLLen); msg != "" {
+			return msg
+		}
+	}
+	return ""
 }

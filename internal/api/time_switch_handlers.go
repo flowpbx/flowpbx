@@ -242,8 +242,17 @@ func parseTimeSwitchID(r *http.Request) (int64, error) {
 
 // validateTimeSwitchRequest checks required fields for a time switch create/update.
 func validateTimeSwitchRequest(req timeSwitchRequest, isCreate bool) string {
-	if req.Name == "" {
-		return "name is required"
+	if msg := validateRequiredStringLen("name", req.Name, maxNameLen); msg != "" {
+		return msg
+	}
+	if msg := validateNoControlChars("name", req.Name); msg != "" {
+		return msg
+	}
+	if msg := validateTimezone("timezone", req.Timezone); msg != "" {
+		return msg
+	}
+	if msg := validateStringLen("default_dest", req.DefaultDest, maxNameLen); msg != "" {
+		return msg
 	}
 	if isCreate && req.Rules == nil {
 		return "rules is required"
@@ -253,11 +262,17 @@ func validateTimeSwitchRequest(req timeSwitchRequest, isCreate bool) string {
 		if err := json.Unmarshal(req.Rules, &arr); err != nil {
 			return "rules must be a valid JSON array"
 		}
+		if len(arr) > 100 {
+			return "rules must contain at most 100 entries"
+		}
 	}
 	if req.Overrides != nil {
 		var arr []json.RawMessage
 		if err := json.Unmarshal(req.Overrides, &arr); err != nil {
 			return "overrides must be a valid JSON array"
+		}
+		if len(arr) > 365 {
+			return "overrides must contain at most 365 entries"
 		}
 	}
 	return ""

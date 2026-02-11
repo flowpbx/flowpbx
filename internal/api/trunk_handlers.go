@@ -600,25 +600,42 @@ func (s *Server) handleTestTrunk(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// supportedCodecs are the audio codecs supported by FlowPBX.
+var supportedCodecs = map[string]bool{
+	"g711u": true, "g711a": true, "opus": true,
+}
+
 // validateTrunkRequest checks required fields for a trunk create/update.
 func validateTrunkRequest(req trunkRequest) string {
-	if req.Name == "" {
-		return "name is required"
+	if msg := validateRequiredStringLen("name", req.Name, maxNameLen); msg != "" {
+		return msg
+	}
+	if msg := validateNoControlChars("name", req.Name); msg != "" {
+		return msg
 	}
 	if req.Type != "register" && req.Type != "ip" {
 		return "type must be \"register\" or \"ip\""
 	}
 	if req.Type == "register" {
-		if req.Host == "" {
-			return "host is required for register trunks"
+		if msg := validateRequiredStringLen("host", req.Host, maxHostLen); msg != "" {
+			return msg
 		}
-		if req.Username == "" {
-			return "username is required for register trunks"
+		if msg := validateHost("host", req.Host); msg != "" {
+			return msg
+		}
+		if msg := validateRequiredStringLen("username", req.Username, maxShortStringLen); msg != "" {
+			return msg
 		}
 	}
 	if req.Type == "ip" {
 		if len(req.RemoteHosts) == 0 {
 			return "remote_hosts is required for ip trunks"
+		}
+		if len(req.RemoteHosts) > 50 {
+			return "remote_hosts must contain at most 50 entries"
+		}
+		if msg := validateIPList("remote_hosts", req.RemoteHosts); msg != "" {
+			return msg
 		}
 	}
 	if req.Transport != "" && req.Transport != "udp" && req.Transport != "tcp" && req.Transport != "tls" {
@@ -627,8 +644,46 @@ func validateTrunkRequest(req trunkRequest) string {
 	if req.Port < 0 || req.Port > 65535 {
 		return "port must be between 0 and 65535"
 	}
-	if req.Priority < 0 {
-		return "priority must be non-negative"
+	if req.Priority < 0 || req.Priority > 1000 {
+		return "priority must be between 0 and 1000"
+	}
+	if msg := validateStringLen("password", req.Password, maxPasswordLen); msg != "" {
+		return msg
+	}
+	if msg := validateStringLen("auth_username", req.AuthUsername, maxShortStringLen); msg != "" {
+		return msg
+	}
+	if msg := validateStringLen("username", req.Username, maxShortStringLen); msg != "" {
+		return msg
+	}
+	if req.RegisterExpiry < 0 || req.RegisterExpiry > 86400 {
+		return "register_expiry must be between 0 and 86400"
+	}
+	if msg := validateHost("local_host", req.LocalHost); msg != "" {
+		return msg
+	}
+	if len(req.Codecs) > 10 {
+		return "codecs must contain at most 10 entries"
+	}
+	for _, c := range req.Codecs {
+		if !supportedCodecs[c] {
+			return "unsupported codec: " + c
+		}
+	}
+	if req.MaxChannels < 0 || req.MaxChannels > 10000 {
+		return "max_channels must be between 0 and 10000"
+	}
+	if msg := validateStringLen("caller_id_name", req.CallerIDName, maxNameLen); msg != "" {
+		return msg
+	}
+	if msg := validateStringLen("caller_id_num", req.CallerIDNum, maxShortStringLen); msg != "" {
+		return msg
+	}
+	if req.PrefixStrip < 0 || req.PrefixStrip > 20 {
+		return "prefix_strip must be between 0 and 20"
+	}
+	if msg := validateStringLen("prefix_add", req.PrefixAdd, maxShortStringLen); msg != "" {
+		return msg
 	}
 	if req.RecordingMode != "" && req.RecordingMode != "off" && req.RecordingMode != "always" && req.RecordingMode != "on_demand" {
 		return "recording_mode must be \"off\", \"always\", or \"on_demand\""

@@ -84,6 +84,14 @@ func (s *Server) handleAppAuth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "extension and sip_password are required")
 		return
 	}
+	if msg := validateStringLen("extension", req.Extension, maxShortStringLen); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	if msg := validateStringLen("sip_password", req.SIPPassword, maxPasswordLen); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	ext, err := s.extensions.GetByExtension(r.Context(), req.Extension)
 	if err != nil {
@@ -437,16 +445,20 @@ func (s *Server) handleAppPushToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Token == "" {
-		writeError(w, http.StatusBadRequest, "token is required")
+	if msg := validateRequiredStringLen("token", req.Token, maxPasswordLen); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 	if req.Platform != "fcm" && req.Platform != "apns" {
 		writeError(w, http.StatusBadRequest, "platform must be \"fcm\" or \"apns\"")
 		return
 	}
-	if req.DeviceID == "" {
-		writeError(w, http.StatusBadRequest, "device_id is required")
+	if msg := validateRequiredStringLen("device_id", req.DeviceID, maxNameLen); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	if msg := validateStringLen("app_version", req.AppVersion, maxShortStringLen); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 

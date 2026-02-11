@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -250,6 +252,13 @@ func (s *Server) handlePublishFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Link inbound numbers referenced in the flow graph back to this flow.
+	if err := s.linkInboundNumbersToFlow(r.Context(), id, existing.FlowData); err != nil {
+		slog.Error("publish flow: failed to link inbound numbers", "error", err, "flow_id", id)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
 	published, err := s.callFlows.GetByID(r.Context(), id)
 	if err != nil || published == nil {
 		slog.Error("publish flow: failed to re-fetch", "error", err, "flow_id", id)
@@ -304,6 +313,82 @@ func (s *Server) handleValidateFlow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// linkInboundNumbersToFlow parses the flow graph, finds inbound_number nodes,
+// and updates each referenced inbound number record to point to this flow.
+// It also clears any inbound numbers that previously pointed to this flow
+// but are no longer referenced.
+func (s *Server) linkInboundNumbersToFlow(ctx context.Context, flowID int64, flowData string) error {
+	graph, err := flow.ParseFlowGraph(flowData)
+	if err != nil {
+		return fmt.Errorf("parsing flow graph: %w", err)
+	}
+
+	// Collect inbound number entity IDs and their node IDs from the flow graph.
+	type nodeRef struct {
+		entityID int64
+		nodeID   string
+	}
+	var refs []nodeRef
+	for _, node := range graph.Nodes {
+		if node.Type == "inbound_number" && node.Data.EntityID != nil {
+			refs = append(refs, nodeRef{entityID: *node.Data.EntityID, nodeID: node.ID})
+		}
+	}
+
+	// Clear any inbound numbers that previously pointed to this flow
+	// but are no longer in the graph.
+	allNumbers, err := s.inboundNumbers.List(ctx)
+	if err != nil {
+		return fmt.Errorf("listing inbound numbers: %w", err)
+	}
+	for i := range allNumbers {
+		num := &allNumbers[i]
+		if num.FlowID == nil || *num.FlowID != flowID {
+			continue
+		}
+		// Check if this number is still referenced in the flow.
+		stillReferenced := false
+		for _, ref := range refs {
+			if ref.entityID == num.ID {
+				stillReferenced = true
+				break
+			}
+		}
+		if !stillReferenced {
+			num.FlowID = nil
+			num.FlowEntryNode = ""
+			if err := s.inboundNumbers.Update(ctx, num); err != nil {
+				return fmt.Errorf("clearing flow from inbound number %d: %w", num.ID, err)
+			}
+			slog.Info("unlinked inbound number from flow",
+				"inbound_number_id", num.ID, "number", num.Number, "flow_id", flowID)
+		}
+	}
+
+	// Link each referenced inbound number to this flow.
+	for _, ref := range refs {
+		num, err := s.inboundNumbers.GetByID(ctx, ref.entityID)
+		if err != nil {
+			return fmt.Errorf("fetching inbound number %d: %w", ref.entityID, err)
+		}
+		if num == nil {
+			slog.Warn("inbound number node references non-existent number",
+				"entity_id", ref.entityID, "flow_id", flowID)
+			continue
+		}
+		num.FlowID = &flowID
+		num.FlowEntryNode = ref.nodeID
+		if err := s.inboundNumbers.Update(ctx, num); err != nil {
+			return fmt.Errorf("linking inbound number %d to flow %d: %w", num.ID, flowID, err)
+		}
+		slog.Info("linked inbound number to flow",
+			"inbound_number_id", num.ID, "number", num.Number,
+			"flow_id", flowID, "entry_node", ref.nodeID)
+	}
+
+	return nil
+}
+
 // parseFlowID extracts and parses the call flow ID from the URL parameter.
 func parseFlowID(r *http.Request) (int64, error) {
 	return strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -311,8 +396,14 @@ func parseFlowID(r *http.Request) (int64, error) {
 
 // validateFlowRequest checks required fields for a call flow create/update.
 func validateFlowRequest(req flowRequest) string {
-	if req.Name == "" {
-		return "name is required"
+	if msg := validateRequiredStringLen("name", req.Name, maxNameLen); msg != "" {
+		return msg
+	}
+	if msg := validateNoControlChars("name", req.Name); msg != "" {
+		return msg
+	}
+	if len(req.FlowData) > maxFlowDataLen {
+		return "flow_data exceeds maximum length"
 	}
 	return ""
 }

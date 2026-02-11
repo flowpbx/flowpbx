@@ -415,11 +415,25 @@ func (s *Server) handleKickConferenceParticipant(w http.ResponseWriter, r *http.
 
 // validateConferenceBridgeRequest checks required fields for a conference bridge create/update.
 func validateConferenceBridgeRequest(req conferenceBridgeRequest, isCreate bool) string {
-	if req.Name == "" {
-		return "name is required"
+	if msg := validateRequiredStringLen("name", req.Name, maxNameLen); msg != "" {
+		return msg
 	}
-	if req.MaxMembers != nil && *req.MaxMembers < 2 {
-		return "max_members must be at least 2"
+	if msg := validateNoControlChars("name", req.Name); msg != "" {
+		return msg
+	}
+	if isCreate && req.Extension == "" {
+		return "extension is required"
+	}
+	if req.Extension != "" {
+		if msg := validateExtensionNumber("extension", req.Extension); msg != "" {
+			return msg
+		}
+	}
+	if msg := validatePIN("pin", req.PIN); msg != "" {
+		return msg
+	}
+	if msg := validateIntRange("max_members", req.MaxMembers, 2, 200); msg != "" {
+		return msg
 	}
 	return ""
 }

@@ -422,26 +422,38 @@ func parseExtensionID(r *http.Request) (int64, error) {
 // validateExtensionRequest checks required fields for an extension create/update.
 // isCreate controls whether sip_password is required (mandatory on create, optional on update).
 func validateExtensionRequest(req extensionRequest, isCreate bool) string {
-	if req.Extension == "" {
-		return "extension is required"
+	if msg := validateExtensionNumber("extension", req.Extension); msg != "" {
+		return msg
 	}
-	if req.Name == "" {
-		return "name is required"
+	if msg := validateRequiredStringLen("name", req.Name, maxNameLen); msg != "" {
+		return msg
 	}
-	if req.SIPUsername == "" {
-		return "sip_username is required"
+	if msg := validateNoControlChars("name", req.Name); msg != "" {
+		return msg
+	}
+	if msg := validateRequiredStringLen("sip_username", req.SIPUsername, maxShortStringLen); msg != "" {
+		return msg
+	}
+	if msg := validateNoControlChars("sip_username", req.SIPUsername); msg != "" {
+		return msg
 	}
 	if isCreate && req.SIPPassword == "" {
 		return "sip_password is required"
 	}
+	if msg := validateStringLen("sip_password", req.SIPPassword, maxPasswordLen); msg != "" {
+		return msg
+	}
+	if msg := validateEmail("email", req.Email); msg != "" {
+		return msg
+	}
 	if req.RecordingMode != "" && req.RecordingMode != "off" && req.RecordingMode != "always" && req.RecordingMode != "on_demand" {
 		return "recording_mode must be \"off\", \"always\", or \"on_demand\""
 	}
-	if req.RingTimeout != nil && *req.RingTimeout < 1 {
-		return "ring_timeout must be a positive integer"
+	if msg := validateIntRange("ring_timeout", req.RingTimeout, 1, 600); msg != "" {
+		return msg
 	}
-	if req.MaxRegistrations != nil && *req.MaxRegistrations < 1 {
-		return "max_registrations must be a positive integer"
+	if msg := validateIntRange("max_registrations", req.MaxRegistrations, 1, 20); msg != "" {
+		return msg
 	}
 	if req.FollowMeNumbers != nil {
 		// Validate that follow_me_numbers is a valid JSON array of follow-me entries
@@ -454,15 +466,21 @@ func validateExtensionRequest(req extensionRequest, isCreate bool) string {
 		if err := json.Unmarshal(req.FollowMeNumbers, &entries); err != nil {
 			return "follow_me_numbers must be a valid JSON array"
 		}
+		if len(entries) > 20 {
+			return "follow_me_numbers must contain at most 20 entries"
+		}
 		for i, entry := range entries {
 			if entry.Number == "" {
 				return fmt.Sprintf("follow_me_numbers[%d].number is required", i)
 			}
-			if entry.Delay != nil && *entry.Delay < 0 {
-				return fmt.Sprintf("follow_me_numbers[%d].delay must be non-negative", i)
+			if len(entry.Number) > maxShortStringLen {
+				return fmt.Sprintf("follow_me_numbers[%d].number exceeds maximum length", i)
 			}
-			if entry.Timeout != nil && *entry.Timeout < 1 {
-				return fmt.Sprintf("follow_me_numbers[%d].timeout must be a positive integer", i)
+			if entry.Delay != nil && (*entry.Delay < 0 || *entry.Delay > 600) {
+				return fmt.Sprintf("follow_me_numbers[%d].delay must be between 0 and 600", i)
+			}
+			if entry.Timeout != nil && (*entry.Timeout < 1 || *entry.Timeout > 600) {
+				return fmt.Sprintf("follow_me_numbers[%d].timeout must be between 1 and 600", i)
 			}
 		}
 	}

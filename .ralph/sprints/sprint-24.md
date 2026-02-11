@@ -26,7 +26,7 @@
 - [x] Rate limiting on all API endpoints
 - [ ] HTTPS enforcement for admin UI (auto Let's Encrypt or manual cert)
 - [ ] Verify all secrets encrypted at rest (SIP passwords, trunk credentials)
-- [ ] Input validation on all API endpoints
+- [x] Input validation on all API endpoints
 - [ ] Verify parameterized queries only (no SQL injection vectors)
 - [ ] CSRF protection on admin UI
 - [x] Security headers (CSP, HSTS, X-Frame-Options, etc.)

@@ -12,6 +12,7 @@ enum CallStatus {
 /// Active call state for UI consumption.
 class ActiveCallState {
   final int? callId;
+  final String? callUuid;
   final CallStatus status;
   final String remoteNumber;
   final String? remoteDisplayName;
@@ -24,6 +25,7 @@ class ActiveCallState {
 
   const ActiveCallState({
     this.callId,
+    this.callUuid,
     this.status = CallStatus.idle,
     this.remoteNumber = '',
     this.remoteDisplayName,
@@ -39,6 +41,7 @@ class ActiveCallState {
 
   ActiveCallState copyWith({
     int? callId,
+    String? callUuid,
     CallStatus? status,
     String? remoteNumber,
     String? remoteDisplayName,
@@ -51,6 +54,7 @@ class ActiveCallState {
   }) {
     return ActiveCallState(
       callId: callId ?? this.callId,
+      callUuid: callUuid ?? this.callUuid,
       status: status ?? this.status,
       remoteNumber: remoteNumber ?? this.remoteNumber,
       remoteDisplayName: remoteDisplayName ?? this.remoteDisplayName,

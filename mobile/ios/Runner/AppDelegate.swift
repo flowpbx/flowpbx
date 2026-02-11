@@ -1,10 +1,12 @@
 import UIKit
 import Flutter
 import AVFoundation
+import CallKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
     private var audioChannel: FlutterMethodChannel?
+    private let callKitManager = CallKitManager()
 
     override func application(
         _ application: UIApplication,
@@ -52,6 +54,106 @@ import AVFoundation
                 result(true)
             case "disable":
                 UIDevice.current.isProximityMonitoringEnabled = false
+                result(true)
+            default:
+                result(FlutterMethodNotImplemented)
+            }
+        }
+
+        // CallKit platform channel.
+        let callKitChannel = FlutterMethodChannel(
+            name: "com.flowpbx.mobile/callkit",
+            binaryMessenger: controller.binaryMessenger
+        )
+        callKitManager.setChannel(callKitChannel)
+
+        callKitChannel.setMethodCallHandler { [weak self] (call, result) in
+            guard let self = self else {
+                result(FlutterError(code: "UNAVAILABLE", message: "AppDelegate released", details: nil))
+                return
+            }
+            switch call.method {
+            case "reportIncomingCall":
+                guard let args = call.arguments as? [String: Any],
+                      let uuidStr = args["uuid"] as? String,
+                      let uuid = UUID(uuidString: uuidStr),
+                      let handle = args["handle"] as? String else {
+                    result(FlutterError(code: "INVALID_ARGS", message: "Missing uuid or handle", details: nil))
+                    return
+                }
+                let displayName = args["displayName"] as? String
+                self.callKitManager.reportIncomingCall(uuid: uuid, handle: handle, displayName: displayName) { error in
+                    if let error = error {
+                        result(FlutterError(code: "CALLKIT_ERROR", message: error.localizedDescription, details: nil))
+                    } else {
+                        result(true)
+                    }
+                }
+            case "reportOutgoingCall":
+                guard let args = call.arguments as? [String: Any],
+                      let uuidStr = args["uuid"] as? String,
+                      let uuid = UUID(uuidString: uuidStr),
+                      let handle = args["handle"] as? String else {
+                    result(FlutterError(code: "INVALID_ARGS", message: "Missing uuid or handle", details: nil))
+                    return
+                }
+                self.callKitManager.reportOutgoingCall(uuid: uuid, handle: handle)
+                result(true)
+            case "reportOutgoingCallConnected":
+                guard let args = call.arguments as? [String: Any],
+                      let uuidStr = args["uuid"] as? String,
+                      let uuid = UUID(uuidString: uuidStr) else {
+                    result(FlutterError(code: "INVALID_ARGS", message: "Missing uuid", details: nil))
+                    return
+                }
+                self.callKitManager.reportOutgoingCallConnected(uuid: uuid)
+                result(true)
+            case "reportCallEnded":
+                guard let args = call.arguments as? [String: Any],
+                      let uuidStr = args["uuid"] as? String,
+                      let uuid = UUID(uuidString: uuidStr) else {
+                    result(FlutterError(code: "INVALID_ARGS", message: "Missing uuid", details: nil))
+                    return
+                }
+                let reasonInt = args["reason"] as? Int ?? 1
+                let reason: CXCallEndedReason
+                switch reasonInt {
+                case 2: reason = .failed
+                case 3: reason = .unanswered
+                case 4: reason = .declinedElsewhere
+                case 5: reason = .answeredElsewhere
+                default: reason = .remoteEnded
+                }
+                self.callKitManager.reportCallEnded(uuid: uuid, reason: reason)
+                result(true)
+            case "endCall":
+                guard let args = call.arguments as? [String: Any],
+                      let uuidStr = args["uuid"] as? String,
+                      let uuid = UUID(uuidString: uuidStr) else {
+                    result(FlutterError(code: "INVALID_ARGS", message: "Missing uuid", details: nil))
+                    return
+                }
+                self.callKitManager.endCall(uuid: uuid)
+                result(true)
+            case "setMuted":
+                guard let args = call.arguments as? [String: Any],
+                      let uuidStr = args["uuid"] as? String,
+                      let uuid = UUID(uuidString: uuidStr),
+                      let muted = args["muted"] as? Bool else {
+                    result(FlutterError(code: "INVALID_ARGS", message: "Missing uuid or muted", details: nil))
+                    return
+                }
+                self.callKitManager.setMuted(uuid: uuid, muted: muted)
+                result(true)
+            case "setHeld":
+                guard let args = call.arguments as? [String: Any],
+                      let uuidStr = args["uuid"] as? String,
+                      let uuid = UUID(uuidString: uuidStr),
+                      let held = args["held"] as? Bool else {
+                    result(FlutterError(code: "INVALID_ARGS", message: "Missing uuid or held", details: nil))
+                    return
+                }
+                self.callKitManager.setHeld(uuid: uuid, held: held)
                 result(true)
             default:
                 result(FlutterMethodNotImplemented)

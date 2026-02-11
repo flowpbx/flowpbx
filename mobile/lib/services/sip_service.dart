@@ -484,7 +484,13 @@ class SipService {
   /// Callback: outbound call proceeding (100 Trying / 180 Ringing).
   void _onCallProceeding(int callId, String response) {
     if (callId != _callState.callId) return;
-    // Stay in dialing state — the remote side is ringing.
+
+    // Notify CallKit that the outgoing call has started connecting so the
+    // system UI shows the correct timing indicator.
+    final uuid = _callState.callUuid;
+    if (uuid != null && !_callState.isIncoming) {
+      _callKitService.reportOutgoingCallStartedConnecting(uuid: uuid);
+    }
   }
 
   /// Callback: call connected (200 OK — RTP flowing).
@@ -585,6 +591,12 @@ class SipService {
         if (_callState.callId != null) {
           SiprixVoipSdk().hold(_callState.callId!);
         }
+      case CallKitStartCallAction(:final uuid, :final handle):
+        // System-initiated outgoing call (e.g. user tapped in iOS Recents).
+        // Only place the call if we're not already in one and we're registered.
+        if (!_callState.isActive && _accountId != null) {
+          _onSystemStartCall(uuid, handle);
+        }
       case CallKitDtmfAction(:final digits):
         sendDtmf(digits);
       case CallKitResetAction():
@@ -600,6 +612,37 @@ class SipService {
       case CallKitAudioDeactivatedAction():
         // Audio session deactivated by CallKit — no additional action needed.
         break;
+    }
+  }
+
+  /// Handle a system-initiated outgoing call (e.g. user tapped in iOS Recents).
+  ///
+  /// CallKit has already created the CXStartCallAction with a UUID and handle.
+  /// We need to place the SIP call using that existing UUID rather than
+  /// generating a new one.
+  Future<void> _onSystemStartCall(String uuid, String handle) async {
+    if (_accountId == null) return;
+
+    await _audioSessionService.activate();
+
+    _setCallState(_callState.copyWith(
+      status: CallStatus.dialing,
+      callUuid: uuid,
+      remoteNumber: handle,
+      isIncoming: false,
+      isMuted: false,
+      isSpeaker: false,
+      isHeld: false,
+      connectedAt: null,
+    ));
+
+    try {
+      final dest = CallDestination(handle, _accountId!, false);
+      final callId = await SiprixVoipSdk().invite(dest);
+      _setCallState(_callState.copyWith(callId: callId));
+    } catch (e) {
+      await _callKitService.reportCallEnded(uuid: uuid, reason: 2);
+      _setCallState(ActiveCallState.idle.copyWith(error: e.toString()));
     }
   }
 

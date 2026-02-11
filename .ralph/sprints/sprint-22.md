@@ -11,7 +11,7 @@
 ### iOS — CallKit
 - [x] Integrate CallKit for native iOS call UI
 - [x] Implement CXProvider for incoming calls (lock screen answering)
-- [ ] Implement CXCallController for outgoing calls
+- [x] Implement CXCallController for outgoing calls
 - [ ] Handle CallKit actions: answer, end, mute, hold, DTMF
 - [ ] Implement call directory integration (caller ID lookup)
 

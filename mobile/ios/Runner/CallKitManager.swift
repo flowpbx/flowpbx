@@ -65,16 +65,41 @@ class CallKitManager: NSObject {
         }
     }
 
-    /// Report an outgoing call started (to show in system call log / UI).
+    /// Report an outgoing call started via CXCallController.
+    ///
+    /// This requests CallKit to begin the outgoing call flow:
+    /// 1. CXStartCallAction is sent to the provider delegate
+    /// 2. The delegate configures audio and fulfills the action
+    /// 3. We send a CXCallUpdate so the system UI shows the callee info
     func reportOutgoingCall(uuid: UUID, handle: String) {
         activeCallUUID = uuid
-        let action = CXStartCallAction(call: uuid, handle: CXHandle(type: .generic, value: handle))
+        let cxHandle = CXHandle(type: .generic, value: handle)
+        let action = CXStartCallAction(call: uuid, handle: cxHandle)
+        action.isVideo = false
         let transaction = CXTransaction(action: action)
         callController.request(transaction) { error in
             if let error = error {
+                self.activeCallUUID = nil
                 self.sendToFlutter("onCallKitError", arguments: error.localizedDescription)
+                return
             }
+            // Update the call info so the system UI shows the callee handle
+            // instead of "Unknown".
+            let update = CXCallUpdate()
+            update.remoteHandle = cxHandle
+            update.localizedCallerName = handle
+            update.hasVideo = false
+            update.supportsDTMF = true
+            update.supportsHolding = true
+            update.supportsGrouping = false
+            update.supportsUngrouping = false
+            self.provider.reportCall(with: uuid, updated: update)
         }
+    }
+
+    /// Notify CallKit that the outgoing call is ringing at the remote end.
+    func reportOutgoingCallStartedConnecting(uuid: UUID) {
+        provider.reportOutgoingCall(with: uuid, startedConnectingAt: Date())
     }
 
     /// Notify CallKit that the outgoing call has connected.
@@ -182,6 +207,28 @@ extension CallKitManager: CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
+        // Configure audio session for VoIP before fulfilling.
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(
+                .playAndRecord,
+                mode: .voiceChat,
+                options: [.allowBluetooth, .allowBluetoothA2DP]
+            )
+        } catch {
+            // Non-fatal: audio may already be configured.
+        }
+
+        activeCallUUID = action.callUUID
+
+        // If this action was initiated by the system (e.g. user tapped a call
+        // in iOS Recents), notify Dart so the SIP stack can place the call.
+        let handle = action.handle.value
+        sendToFlutter("onCallKitStartCall", arguments: [
+            "uuid": action.callUUID.uuidString,
+            "handle": handle,
+        ])
+
         action.fulfill()
     }
 

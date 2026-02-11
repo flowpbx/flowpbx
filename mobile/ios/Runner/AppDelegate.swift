@@ -102,6 +102,15 @@ import PushKit
                 }
                 self.callKitManager.reportOutgoingCall(uuid: uuid, handle: handle)
                 result(true)
+            case "reportOutgoingCallStartedConnecting":
+                guard let args = call.arguments as? [String: Any],
+                      let uuidStr = args["uuid"] as? String,
+                      let uuid = UUID(uuidString: uuidStr) else {
+                    result(FlutterError(code: "INVALID_ARGS", message: "Missing uuid", details: nil))
+                    return
+                }
+                self.callKitManager.reportOutgoingCallStartedConnecting(uuid: uuid)
+                result(true)
             case "reportOutgoingCallConnected":
                 guard let args = call.arguments as? [String: Any],
                       let uuidStr = args["uuid"] as? String,

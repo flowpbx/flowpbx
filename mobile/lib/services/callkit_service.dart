@@ -51,6 +51,12 @@ class CallKitService {
           args['uuid'] as String,
           args['digits'] as String,
         ));
+      case 'onCallKitStartCall':
+        final args = call.arguments as Map;
+        _actionController.add(CallKitAction.startCall(
+          args['uuid'] as String,
+          args['handle'] as String,
+        ));
       case 'onCallKitReset':
         _actionController.add(const CallKitAction.reset());
       case 'onCallKitAudioActivated':
@@ -91,6 +97,21 @@ class CallKitService {
       await _channel.invokeMethod('reportOutgoingCall', {
         'uuid': uuid,
         'handle': handle,
+      });
+    } on PlatformException {
+      // Non-fatal.
+    }
+  }
+
+  /// Report that an outgoing call has started connecting (remote ringing).
+  Future<void> reportOutgoingCallStartedConnecting({
+    required String uuid,
+  }) async {
+    if (!Platform.isIOS) return;
+
+    try {
+      await _channel.invokeMethod('reportOutgoingCallStartedConnecting', {
+        'uuid': uuid,
       });
     } on PlatformException {
       // Non-fatal.
@@ -192,6 +213,8 @@ sealed class CallKitAction {
       CallKitHoldAction;
   const factory CallKitAction.dtmf(String uuid, String digits) =
       CallKitDtmfAction;
+  const factory CallKitAction.startCall(String uuid, String handle) =
+      CallKitStartCallAction;
   const factory CallKitAction.reset() = CallKitResetAction;
   const factory CallKitAction.audioActivated() = CallKitAudioActivatedAction;
   const factory CallKitAction.audioDeactivated() =
@@ -224,6 +247,12 @@ class CallKitDtmfAction extends CallKitAction {
   final String uuid;
   final String digits;
   const CallKitDtmfAction(this.uuid, this.digits);
+}
+
+class CallKitStartCallAction extends CallKitAction {
+  final String uuid;
+  final String handle;
+  const CallKitStartCallAction(this.uuid, this.handle);
 }
 
 class CallKitResetAction extends CallKitAction {

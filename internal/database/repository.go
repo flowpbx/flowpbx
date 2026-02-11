@@ -148,6 +148,7 @@ type RegistrationRepository interface {
 	DeleteByExtensionAndContact(ctx context.Context, extensionID int64, contactURI string) error
 	CountByExtensionID(ctx context.Context, extensionID int64) (int64, error)
 	Count(ctx context.Context) (int64, error)
+	RegisteredExtensionIDs(ctx context.Context) (map[int64]bool, error)
 }
 
 // PushTokenRepository manages push notification tokens for mobile devices.

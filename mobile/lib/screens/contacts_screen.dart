@@ -153,18 +153,43 @@ class _ContactTile extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
 
     return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: colorScheme.primaryContainer,
-        child: Text(
-          _initials(entry.name),
-          style: TextStyle(
-            color: colorScheme.onPrimaryContainer,
-            fontWeight: FontWeight.w600,
+      leading: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          CircleAvatar(
+            backgroundColor: colorScheme.primaryContainer,
+            child: Text(
+              _initials(entry.name),
+              style: TextStyle(
+                color: colorScheme.onPrimaryContainer,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
-        ),
+          Positioned(
+            right: -2,
+            bottom: -2,
+            child: Container(
+              width: 14,
+              height: 14,
+              decoration: BoxDecoration(
+                color: entry.online ? Colors.green : Colors.grey,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: colorScheme.surface,
+                  width: 2,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
       title: Text(entry.name),
-      subtitle: Text('Ext. ${entry.extension_}'),
+      subtitle: Text(
+        entry.online
+            ? 'Ext. ${entry.extension_} — Online'
+            : 'Ext. ${entry.extension_} — Offline',
+      ),
       trailing: IconButton(
         icon: const Icon(Icons.call, color: Colors.green),
         tooltip: 'Call ${entry.extension_}',

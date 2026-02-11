@@ -476,6 +476,7 @@ type appDirectoryEntry struct {
 	ID        int64  `json:"id"`
 	Extension string `json:"extension"`
 	Name      string `json:"name"`
+	Online    bool   `json:"online"`
 }
 
 // handleAppDirectory handles GET /api/v1/app/directory — returns a list of all
@@ -494,12 +495,20 @@ func (s *Server) handleAppDirectory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	registeredIDs, err := s.registrations.RegisteredExtensionIDs(r.Context())
+	if err != nil {
+		slog.Error("app directory: failed to query registrations", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
 	entries := make([]appDirectoryEntry, len(exts))
 	for i := range exts {
 		entries[i] = appDirectoryEntry{
 			ID:        exts[i].ID,
 			Extension: exts[i].Extension,
 			Name:      exts[i].Name,
+			Online:    registeredIDs[exts[i].ID],
 		}
 	}
 

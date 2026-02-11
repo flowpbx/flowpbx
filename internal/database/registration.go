@@ -126,3 +126,24 @@ func (r *registrationRepo) Count(ctx context.Context) (int64, error) {
 	}
 	return count, nil
 }
+
+// RegisteredExtensionIDs returns the set of extension IDs that have at least
+// one active (non-expired) registration.
+func (r *registrationRepo) RegisteredExtensionIDs(ctx context.Context) (map[int64]bool, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT DISTINCT extension_id FROM registrations WHERE extension_id IS NOT NULL AND expires >= datetime('now')`)
+	if err != nil {
+		return nil, fmt.Errorf("querying registered extension ids: %w", err)
+	}
+	defer rows.Close()
+
+	ids := make(map[int64]bool)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning extension id: %w", err)
+		}
+		ids[id] = true
+	}
+	return ids, rows.Err()
+}

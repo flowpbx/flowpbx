@@ -108,6 +108,8 @@ type Server struct {
 	cfg               *config.Config
 	sessions          *middleware.SessionStore
 	startTime         time.Time
+	apiLimiter        *middleware.IPRateLimiter
+	authLimiter       *middleware.IPRateLimiter
 	adminUsers        database.AdminUserRepository
 	systemConfig      database.SystemConfigRepository
 	extensions        database.ExtensionRepository
@@ -197,14 +199,25 @@ func (s *Server) routes() {
 	r.Use(middleware.StructuredLogger)
 	r.Use(middleware.Recoverer)
 
+	// Per-IP rate limiters.
+	s.apiLimiter = middleware.NewIPRateLimiter(middleware.DefaultRateLimitConfig())
+	s.authLimiter = middleware.NewIPRateLimiter(middleware.AuthRateLimitConfig())
+
 	// API routes under /api/v1.
 	r.Route("/api/v1", func(r chi.Router) {
+		// Apply general rate limiting to all API endpoints.
+		r.Use(middleware.RateLimit(s.apiLimiter))
+
 		// Unauthenticated routes.
 		r.Get("/health", s.handleHealth)
 		r.Post("/setup", s.handleSetup)
 
 		// Auth routes (login is unauthenticated, logout/me require auth).
-		r.Post("/auth/login", s.handleLogin)
+		// Login has additional stricter rate limiting.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RateLimit(s.authLimiter))
+			r.Post("/auth/login", s.handleLogin)
+		})
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireAuth(s.sessions, s.cfg.TLSCert != ""))
 			r.Post("/auth/logout", s.handleLogout)
@@ -358,8 +371,11 @@ func (s *Server) routes() {
 
 		// Mobile app endpoints.
 		r.Route("/app", func(r chi.Router) {
-			// Auth endpoint is unauthenticated (issues JWT).
-			r.Post("/auth", s.handleAppAuth)
+			// Auth endpoint is unauthenticated (issues JWT) — stricter rate limit.
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RateLimit(s.authLimiter))
+				r.Post("/auth", s.handleAppAuth)
+			})
 
 			// Protected app endpoints require a valid JWT.
 			r.Group(func(r chi.Router) {

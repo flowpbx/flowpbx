@@ -23,7 +23,7 @@
 ### Security Hardening
 - [ ] SIP auth: nonce replay prevention, brute-force lockout
 - [ ] Fail2ban-style IP blocking for failed SIP auth attempts
-- [ ] Rate limiting on all API endpoints
+- [x] Rate limiting on all API endpoints
 - [ ] HTTPS enforcement for admin UI (auto Let's Encrypt or manual cert)
 - [ ] Verify all secrets encrypted at rest (SIP passwords, trunk credentials)
 - [ ] Input validation on all API endpoints

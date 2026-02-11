@@ -23,12 +23,12 @@
 
 ### Push Notifications
 - [x] Set up Firebase Cloud Messaging (FCM) for Android
-- [ ] Set up APNs / PushKit for iOS (VoIP push for call wake-up)
-- [ ] Register push token with PBX via `POST /api/v1/app/push-token`
-- [ ] Re-register token on app update or token refresh
-- [ ] Implement push wake-up flow: receive push → wake SIP stack → register → receive INVITE
-- [ ] Handle push payload: extract caller_id, call_id for pre-display
-- [ ] Implement push timeout handling: if SIP registration fails within 5s, show missed call
+- [x] Set up APNs / PushKit for iOS (VoIP push for call wake-up)
+- [x] Register push token with PBX via `POST /api/v1/app/push-token`
+- [x] Re-register token on app update or token refresh
+- [x] Implement push wake-up flow: receive push → wake SIP stack → register → receive INVITE
+- [x] Handle push payload: extract caller_id, call_id for pre-display
+- [x] Implement push timeout handling: if SIP registration fails within 5s, show missed call
 - [ ] Test push delivery when app is backgrounded, killed, and device locked
 
 ### Background & Battery

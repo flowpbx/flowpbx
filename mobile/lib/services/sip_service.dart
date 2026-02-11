@@ -41,6 +41,7 @@ class SipService {
   StreamSubscription<CallKitAction>? _callKitSub;
   StreamSubscription<ConnectionAction>? _connectionSub;
   StreamSubscription<PushIncomingCall>? _pushIncomingSub;
+  Timer? _pushWakeTimer;
 
   /// Stream of VoIP push tokens for registration with the PBX API.
   Stream<String> get pushTokenStream => _pushService.tokenStream;
@@ -252,11 +253,13 @@ class SipService {
 
   /// Reject an incoming call with 486 Busy.
   Future<void> rejectCall() async {
+    _cancelPushWakeTimer();
     final callId = _callState.callId;
-    if (callId == null) return;
     final uuid = _callState.callUuid;
     _ringtoneService.stopRinging();
-    await SiprixVoipSdk().reject(callId, 486);
+    if (callId != null) {
+      await SiprixVoipSdk().reject(callId, 486);
+    }
     if (uuid != null) {
       await _callKitService.reportCallEnded(uuid: uuid, reason: 3);
       await _connectionService.reportCallEnded(uuid: uuid, reason: 4);
@@ -267,6 +270,7 @@ class SipService {
 
   /// Hang up the current call.
   Future<void> hangup() async {
+    _cancelPushWakeTimer();
     final callId = _callState.callId;
     if (callId == null) return;
     final uuid = _callState.callUuid;
@@ -347,6 +351,7 @@ class SipService {
 
   /// Dispose resources.
   void dispose() {
+    _cancelPushWakeTimer();
     _ringtoneService.stopRinging();
     _audioSessionService.dispose();
     _callKitService.dispose();
@@ -467,6 +472,8 @@ class SipService {
     if (_callState.status == CallStatus.ringing &&
         _callState.isIncoming &&
         _callState.callId == null) {
+      // SIP INVITE arrived — cancel the push wake timeout.
+      _cancelPushWakeTimer();
       _setCallState(_callState.copyWith(
         callId: callId,
         remoteNumber: remoteNumber,
@@ -574,13 +581,20 @@ class SipService {
     _audioSessionService.deactivate();
   }
 
-  /// Handle a push-woken incoming call from PushKit (iOS).
+  /// Handle a push-woken incoming call from PushKit (iOS) or FCM (Android).
   ///
   /// When the app receives a VoIP push, the native side has already reported
   /// the call to CallKit (showing the lock screen UI). Here we set up the
   /// Dart-side call state so the SIP stack can accept the INVITE when it
   /// arrives, and trigger a SIP re-registration if needed.
+  ///
+  /// A 5-second timeout ensures that if SIP registration or the INVITE
+  /// fails to arrive, the call is ended as "missed" rather than leaving
+  /// the user stuck on a ringing screen indefinitely.
   void _onPushIncomingCall(PushIncomingCall push) {
+    // Cancel any existing push wake timer from a prior push.
+    _cancelPushWakeTimer();
+
     // Set call state to ringing with info from the push payload.
     // The actual SIP INVITE will arrive after the PBX sees us re-register.
     _setCallState(ActiveCallState(
@@ -597,6 +611,39 @@ class SipService {
     if (_accountId != null && _regState != SipRegState.registered) {
       refreshRegistration();
     }
+
+    // Start a 5-second timeout. If the SIP INVITE doesn't arrive (callId
+    // remains null), end the call as "unanswered" so the PBX can continue
+    // the flow (e.g. route to voicemail).
+    _pushWakeTimer = Timer(const Duration(seconds: 5), () {
+      _pushWakeTimer = null;
+      if (_callState.status == CallStatus.ringing &&
+          _callState.isIncoming &&
+          _callState.callId == null) {
+        _onPushWakeTimeout();
+      }
+    });
+  }
+
+  /// Called when the push wake timeout fires without receiving a SIP INVITE.
+  /// Ends the call as "unanswered" so CallKit/ConnectionService show a missed
+  /// call notification.
+  void _onPushWakeTimeout() {
+    final uuid = _callState.callUuid;
+    _ringtoneService.stopRinging();
+    if (uuid != null) {
+      // reason 3 = unanswered on both platforms.
+      _callKitService.reportCallEnded(uuid: uuid, reason: 3);
+      _connectionService.reportCallEnded(uuid: uuid, reason: 3);
+    }
+    _setCallState(ActiveCallState.idle);
+    _audioSessionService.deactivate();
+  }
+
+  /// Cancel the push wake timeout timer.
+  void _cancelPushWakeTimer() {
+    _pushWakeTimer?.cancel();
+    _pushWakeTimer = null;
   }
 
   /// Handle actions from the native CallKit UI (iOS).

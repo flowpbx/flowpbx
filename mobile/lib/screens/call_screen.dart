@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/providers/call_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
@@ -17,6 +18,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   Timer? _durationTimer;
   Duration _duration = Duration.zero;
   DateTime? _connectedAt;
+  bool _showDtmfPad = false;
 
   @override
   void dispose() {
@@ -75,6 +77,12 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     await sipService.toggleHold();
   }
 
+  Future<void> _sendDtmf(String tone) async {
+    HapticFeedback.lightImpact();
+    final sipService = ref.read(sipServiceProvider);
+    await sipService.sendDtmf(tone);
+  }
+
   @override
   Widget build(BuildContext context) {
     final callAsync = ref.watch(callStateProvider);
@@ -99,6 +107,9 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     final subtitle = callState.remoteDisplayName != null
         ? callState.remoteNumber
         : null;
+
+    final isConnected = callState.status == CallStatus.connected ||
+        callState.status == CallStatus.held;
 
     return Scaffold(
       backgroundColor: colorScheme.surface,
@@ -147,9 +158,32 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                   ),
             ),
             const Spacer(flex: 3),
+            // DTMF pad (shown when toggled during connected call).
+            if (_showDtmfPad && isConnected) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildDtmfRow(['1', '2', '3']),
+                    const SizedBox(height: 8),
+                    _buildDtmfRow(['4', '5', '6']),
+                    const SizedBox(height: 8),
+                    _buildDtmfRow(['7', '8', '9']),
+                    const SizedBox(height: 8),
+                    _buildDtmfRow(['*', '0', '#']),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () => setState(() => _showDtmfPad = false),
+                child: const Text('Hide'),
+              ),
+              const SizedBox(height: 16),
+            ],
             // Call controls.
-            if (callState.status == CallStatus.connected ||
-                callState.status == CallStatus.held) ...[
+            if (isConnected && !_showDtmfPad) ...[
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
@@ -174,6 +208,18 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                     label: callState.isSpeaker ? 'Speaker' : 'Earpiece',
                     isActive: callState.isSpeaker,
                     onPressed: _toggleSpeaker,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _CallControlButton(
+                    icon: Icons.dialpad,
+                    label: 'Keypad',
+                    isActive: false,
+                    onPressed: () => setState(() => _showDtmfPad = true),
                   ),
                 ],
               ),
@@ -218,6 +264,15 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       CallStatus.disconnecting => 'Ending...',
       CallStatus.idle => '',
     };
+  }
+
+  Widget _buildDtmfRow(List<String> tones) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: tones
+          .map((t) => _DtmfButton(tone: t, onTap: () => _sendDtmf(t)))
+          .toList(),
+    );
   }
 
   String _initials(String name) {
@@ -276,6 +331,41 @@ class _CallControlButton extends StatelessWidget {
               ),
         ),
       ],
+    );
+  }
+}
+
+/// A circular DTMF button for the in-call keypad.
+class _DtmfButton extends StatelessWidget {
+  final String tone;
+  final VoidCallback onTap;
+
+  const _DtmfButton({required this.tone, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return SizedBox(
+      width: 64,
+      height: 64,
+      child: Material(
+        color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Center(
+            child: Text(
+              tone,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

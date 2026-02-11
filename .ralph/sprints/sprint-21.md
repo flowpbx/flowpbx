@@ -27,7 +27,7 @@
 - [x] Implement mute/unmute toggle
 - [x] Implement speaker/earpiece toggle
 - [x] Implement hold/resume
-- [ ] Implement DTMF pad (send RFC 2833 telephone-event)
+- [x] Implement DTMF pad (send RFC 2833 telephone-event)
 - [ ] Implement blind transfer to extension or number
 - [x] Implement hangup (send BYE)
 - [x] Handle remote hangup (receive BYE) — return to idle

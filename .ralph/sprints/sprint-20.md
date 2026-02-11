@@ -19,8 +19,7 @@
 ### SIP Library Evaluation
 - [x] Evaluate `dart_sip_ua` — TLS, SRTP, Opus support, push wake-up capability
 - [x] Evaluate `flutter_ooh_sip` / native bridge options
-- [ ] Evaluate fallback: native iOS (Swift) + Android (Kotlin) SIP engines with Flutter UI via platform channels
-- [ ] Select library and document decision in PROMPT_learnings.md
+- [x] Select library and document decision in PROMPT_learnings.md
 
 #### Evaluation: `dart_sip_ua` (sip_ua on pub.dev)
 

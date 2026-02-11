@@ -370,6 +370,7 @@ func (s *Server) routes() {
 				r.Put("/voicemail/{id}/read", s.handleAppMarkVoicemailRead)
 				r.Get("/voicemail/{id}/audio", s.handleAppGetVoicemailAudio)
 				r.Get("/history", s.handleAppHistory)
+				r.Get("/directory", s.handleAppDirectory)
 				r.Post("/push-token", s.handleAppPushToken)
 			})
 		})

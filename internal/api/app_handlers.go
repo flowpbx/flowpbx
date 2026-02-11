@@ -471,6 +471,41 @@ func (s *Server) handleAppPushToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// appDirectoryEntry is a lightweight extension entry for the mobile app directory.
+type appDirectoryEntry struct {
+	ID        int64  `json:"id"`
+	Extension string `json:"extension"`
+	Name      string `json:"name"`
+}
+
+// handleAppDirectory handles GET /api/v1/app/directory — returns a list of all
+// extensions for the PBX contact directory in the mobile app.
+func (s *Server) handleAppDirectory(w http.ResponseWriter, r *http.Request) {
+	extID := middleware.AppExtensionIDFromContext(r.Context())
+	if extID == 0 {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	exts, err := s.extensions.List(r.Context())
+	if err != nil {
+		slog.Error("app directory: failed to list extensions", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	entries := make([]appDirectoryEntry, len(exts))
+	for i := range exts {
+		entries[i] = appDirectoryEntry{
+			ID:        exts[i].ID,
+			Extension: exts[i].Extension,
+			Name:      exts[i].Name,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, entries)
+}
+
 // toAppMeResponse converts a models.Extension to the app me API response.
 func toAppMeResponse(e *models.Extension) appMeResponse {
 	strategy := e.FollowMeStrategy

@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:flowpbx_mobile/providers/call_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
 
 class DialpadScreen extends ConsumerStatefulWidget {
-  const DialpadScreen({super.key});
+  final String? initialNumber;
+
+  const DialpadScreen({super.key, this.initialNumber});
 
   @override
   ConsumerState<DialpadScreen> createState() => _DialpadScreenState();
@@ -14,6 +17,14 @@ class DialpadScreen extends ConsumerStatefulWidget {
 class _DialpadScreenState extends ConsumerState<DialpadScreen> {
   final _numberController = TextEditingController();
   bool _isPlacingCall = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialNumber != null && widget.initialNumber!.isNotEmpty) {
+      _numberController.text = widget.initialNumber!;
+    }
+  }
 
   @override
   void dispose() {
@@ -86,6 +97,13 @@ class _DialpadScreenState extends ConsumerState<DialpadScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Dialpad'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.contacts_outlined),
+            tooltip: 'Contacts',
+            onPressed: () => context.push('/contacts'),
+          ),
+        ],
       ),
       body: SafeArea(
         child: Column(

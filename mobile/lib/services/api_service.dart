@@ -82,6 +82,16 @@ class ApiService {
     );
   }
 
+  /// Get extension directory (contact list).
+  Future<List<dynamic>> getDirectory() async {
+    final response = await _dio.get('/app/directory');
+    final data = response.data;
+    if (data is Map && data.containsKey('data')) {
+      return data['data'] as List<dynamic>;
+    }
+    return data as List<dynamic>;
+  }
+
   /// Get call history.
   Future<Map<String, dynamic>> getCallHistory({
     int limit = 50,

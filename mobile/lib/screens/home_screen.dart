@@ -20,6 +20,11 @@ class HomeScreen extends ConsumerWidget {
         actions: [
           const SipStatusIndicator(),
           IconButton(
+            icon: const Icon(Icons.contacts_outlined),
+            tooltip: 'Contacts',
+            onPressed: () => context.push('/contacts'),
+          ),
+          IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Sign out',
             onPressed: () async {

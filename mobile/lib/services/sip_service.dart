@@ -10,6 +10,7 @@ import 'package:siprix_voip_sdk/siprix_voip_sdk.dart';
 import 'package:flowpbx_mobile/models/call_state.dart';
 import 'package:flowpbx_mobile/services/audio_session_service.dart';
 import 'package:flowpbx_mobile/services/callkit_service.dart';
+import 'package:flowpbx_mobile/services/connection_service.dart';
 import 'package:flowpbx_mobile/services/proximity_service.dart';
 import 'package:flowpbx_mobile/services/push_service.dart';
 import 'package:flowpbx_mobile/services/ringtone_service.dart';
@@ -33,10 +34,12 @@ class SipService {
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   final _audioSessionService = AudioSessionService();
   final _callKitService = CallKitService();
+  final _connectionService = ConnectionServiceBridge();
   final _proximityService = ProximityService();
   final _pushService = PushService();
   final _ringtoneService = RingtoneService();
   StreamSubscription<CallKitAction>? _callKitSub;
+  StreamSubscription<ConnectionAction>? _connectionSub;
   StreamSubscription<PushIncomingCall>? _pushIncomingSub;
 
   /// Stream of VoIP push tokens for registration with the PBX API.
@@ -109,6 +112,10 @@ class SipService {
 
     // Listen for CallKit actions (iOS native call UI).
     _callKitSub = _callKitService.actionStream.listen(_onCallKitAction);
+
+    // Listen for ConnectionService actions (Android native call UI).
+    _connectionSub =
+        _connectionService.actionStream.listen(_onConnectionAction);
 
     // Listen for push-woken incoming calls (PushKit on iOS).
     _pushIncomingSub =
@@ -213,8 +220,9 @@ class SipService {
       connectedAt: null,
     ));
 
-    // Report outgoing call to CallKit (iOS).
+    // Report outgoing call to CallKit (iOS) / ConnectionService (Android).
     await _callKitService.reportOutgoingCall(uuid: uuid, handle: destination);
+    await _connectionService.reportOutgoingCall(uuid: uuid, handle: destination);
 
     try {
       final dest = CallDestination(destination, _accountId!, false);
@@ -223,6 +231,7 @@ class SipService {
       return callId;
     } catch (e) {
       await _callKitService.reportCallEnded(uuid: uuid, reason: 2);
+      await _connectionService.reportCallEnded(uuid: uuid, reason: 2);
       _setCallState(ActiveCallState.idle.copyWith(error: e.toString()));
       rethrow;
     }
@@ -246,6 +255,7 @@ class SipService {
     await SiprixVoipSdk().reject(callId, 486);
     if (uuid != null) {
       await _callKitService.reportCallEnded(uuid: uuid, reason: 3);
+      await _connectionService.reportCallEnded(uuid: uuid, reason: 4);
     }
     _setCallState(ActiveCallState.idle);
     await _audioSessionService.deactivate();
@@ -266,6 +276,7 @@ class SipService {
     await _proximityService.disable();
     if (uuid != null) {
       await _callKitService.endCall(uuid: uuid);
+      await _connectionService.endCall(uuid: uuid);
     }
     _setCallState(ActiveCallState.idle);
     await _audioSessionService.deactivate();
@@ -283,6 +294,7 @@ class SipService {
     final uuid = _callState.callUuid;
     if (uuid != null) {
       await _callKitService.setMuted(uuid: uuid, muted: newMuted);
+      await _connectionService.setMuted(uuid: uuid, muted: newMuted);
     }
   }
 
@@ -334,9 +346,12 @@ class SipService {
     _ringtoneService.stopRinging();
     _audioSessionService.dispose();
     _callKitService.dispose();
+    _connectionService.dispose();
     _pushService.dispose();
     _callKitSub?.cancel();
     _callKitSub = null;
+    _connectionSub?.cancel();
+    _connectionSub = null;
     _pushIncomingSub?.cancel();
     _pushIncomingSub = null;
     _connectivitySub?.cancel();
@@ -471,8 +486,13 @@ class SipService {
       isIncoming: true,
     ));
 
-    // Report incoming call to CallKit (iOS) for native UI.
+    // Report incoming call to CallKit (iOS) / ConnectionService (Android).
     _callKitService.reportIncomingCall(
+      uuid: uuid,
+      handle: remoteNumber,
+      displayName: displayName,
+    );
+    _connectionService.reportIncomingCall(
       uuid: uuid,
       handle: remoteNumber,
       displayName: displayName,
@@ -504,8 +524,11 @@ class SipService {
     _proximityService.enable();
 
     final uuid = _callState.callUuid;
-    if (uuid != null && !_callState.isIncoming) {
-      _callKitService.reportOutgoingCallConnected(uuid: uuid);
+    if (uuid != null) {
+      if (!_callState.isIncoming) {
+        _callKitService.reportOutgoingCallConnected(uuid: uuid);
+      }
+      _connectionService.reportCallConnected(uuid: uuid);
     }
   }
 
@@ -517,6 +540,7 @@ class SipService {
     _proximityService.disable();
     if (uuid != null) {
       _callKitService.reportCallEnded(uuid: uuid, reason: 1);
+      _connectionService.reportCallEnded(uuid: uuid, reason: 1);
     }
     _setCallState(ActiveCallState.idle);
     _audioSessionService.deactivate();
@@ -539,6 +563,7 @@ class SipService {
     _proximityService.disable();
     if (uuid != null) {
       _callKitService.reportCallEnded(uuid: uuid, reason: 1);
+      _connectionService.reportCallEnded(uuid: uuid, reason: 1);
     }
     _setCallState(ActiveCallState.idle);
     _audioSessionService.deactivate();
@@ -612,6 +637,41 @@ class SipService {
       case CallKitAudioDeactivatedAction():
         // Audio session deactivated by CallKit — no additional action needed.
         break;
+    }
+  }
+
+  /// Handle actions from the native ConnectionService UI (Android).
+  void _onConnectionAction(ConnectionAction action) {
+    switch (action) {
+      case ConnectionAnswerAction():
+        acceptCall();
+      case ConnectionEndAction():
+        if (_callState.isActive) {
+          if (_callState.status == CallStatus.ringing && _callState.isIncoming) {
+            rejectCall();
+          } else {
+            hangup();
+          }
+        }
+      case ConnectionMuteAction(:final muted):
+        if (_callState.callId != null && _callState.isMuted != muted) {
+          SiprixVoipSdk().muteMic(_callState.callId!, muted);
+          _setCallState(_callState.copyWith(isMuted: muted));
+        }
+      case ConnectionHoldAction(:final held):
+        if (_callState.callId != null) {
+          SiprixVoipSdk().hold(_callState.callId!);
+        }
+      case ConnectionDtmfAction(:final digits):
+        sendDtmf(digits);
+      case ConnectionFailedAction():
+        // Connection creation failed on the system side.
+        if (_callState.isActive) {
+          _ringtoneService.stopRinging();
+          _proximityService.disable();
+          _setCallState(ActiveCallState.idle);
+          _audioSessionService.deactivate();
+        }
     }
   }
 

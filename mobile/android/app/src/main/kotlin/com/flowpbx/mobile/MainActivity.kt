@@ -21,6 +21,7 @@ class MainActivity : FlutterActivity() {
     private var methodChannel: MethodChannel? = null
     private var headsetReceiver: BroadcastReceiver? = null
     private var proximityWakeLock: PowerManager.WakeLock? = null
+    private var connectionServiceHandler: ConnectionServiceChannelHandler? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -59,7 +60,6 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
-    }
 
         // Proximity sensor platform channel.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.flowpbx.mobile/proximity")
@@ -76,11 +76,21 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // ConnectionService platform channel (Android equivalent of iOS CallKit).
+        val connectionChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.flowpbx.mobile/connection"
+        )
+        connectionServiceHandler = ConnectionServiceChannelHandler(this, connectionChannel)
+        connectionChannel.setMethodCallHandler(connectionServiceHandler)
     }
 
     override fun onDestroy() {
         unregisterHeadsetReceiver()
         disableProximitySensor()
+        connectionServiceHandler?.dispose()
+        connectionServiceHandler = null
         super.onDestroy()
     }
 

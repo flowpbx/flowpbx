@@ -16,7 +16,7 @@
 - [x] Implement call directory integration (caller ID lookup)
 
 ### Android — ConnectionService
-- [ ] Implement ConnectionService for native Android call integration
+- [x] Implement ConnectionService for native Android call integration
 - [ ] Handle incoming call notification (heads-up notification with answer/reject)
 - [ ] Handle outgoing call routing through ConnectionService
 - [ ] Implement foreground service for active calls

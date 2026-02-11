@@ -18,11 +18,13 @@ class FlowPBXConnection(val uuid: String) : Connection() {
         get() = FlowPBXConnectionService.channelHandler
 
     override fun onAnswer() {
+        dismissNotification()
         setActive()
         handler?.onConnectionEvent("onConnectionAnswer", mapOf("uuid" to uuid))
     }
 
     override fun onReject() {
+        dismissNotification()
         setDisconnected(DisconnectCause(DisconnectCause.REJECTED))
         destroy()
         FlowPBXConnectionService.connections.remove(uuid)
@@ -30,6 +32,7 @@ class FlowPBXConnection(val uuid: String) : Connection() {
     }
 
     override fun onDisconnect() {
+        dismissNotification()
         setDisconnected(DisconnectCause(DisconnectCause.LOCAL))
         destroy()
         FlowPBXConnectionService.connections.remove(uuid)
@@ -37,6 +40,7 @@ class FlowPBXConnection(val uuid: String) : Connection() {
     }
 
     override fun onAbort() {
+        dismissNotification()
         setDisconnected(DisconnectCause(DisconnectCause.CANCELED))
         destroy()
         FlowPBXConnectionService.connections.remove(uuid)
@@ -98,6 +102,7 @@ class FlowPBXConnection(val uuid: String) : Connection() {
 
     /** Disconnect and clean up this connection. */
     fun setConnectionDisconnected(reason: Int) {
+        dismissNotification()
         val cause = when (reason) {
             1 -> DisconnectCause(DisconnectCause.REMOTE)
             2 -> DisconnectCause(DisconnectCause.ERROR)
@@ -108,5 +113,12 @@ class FlowPBXConnection(val uuid: String) : Connection() {
         setDisconnected(cause)
         destroy()
         FlowPBXConnectionService.connections.remove(uuid)
+    }
+
+    /** Dismiss the incoming call heads-up notification if visible. */
+    private fun dismissNotification() {
+        FlowPBXConnectionService.appContext?.let {
+            IncomingCallNotificationHelper.dismiss(it)
+        }
     }
 }

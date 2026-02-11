@@ -1,12 +1,18 @@
 package com.flowpbx.mobile
 
+import android.Manifest
+import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.telecom.PhoneAccount
 import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
@@ -36,6 +42,9 @@ class ConnectionServiceChannelHandler(
         registerPhoneAccount()
         // Wire ourselves as the channel handler for ConnectionService events.
         FlowPBXConnectionService.channelHandler = this
+        // Pre-create the notification channel and request POST_NOTIFICATIONS on API 33+.
+        IncomingCallNotificationHelper.createChannel(context)
+        requestNotificationPermission()
     }
 
     private fun registerPhoneAccount() {
@@ -160,6 +169,20 @@ class ConnectionServiceChannelHandler(
     /** Called by FlowPBXConnection/FlowPBXConnectionService to send events to Flutter. */
     fun onConnectionEvent(method: String, args: Map<String, Any?>) {
         channel.invokeMethod(method, args)
+    }
+
+    /** Request POST_NOTIFICATIONS permission on Android 13+ (API 33). */
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+            == PackageManager.PERMISSION_GRANTED) return
+        if (context is Activity) {
+            ActivityCompat.requestPermissions(
+                context as Activity,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                1001
+            )
+        }
     }
 
     fun dispose() {

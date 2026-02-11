@@ -24,12 +24,17 @@ class FlowPBXConnectionService : ConnectionService() {
 
         /** Reference to the method channel handler for sending events to Flutter. */
         var channelHandler: ConnectionServiceChannelHandler? = null
+
+        /** Application context for dismissing notifications from Connection callbacks. */
+        var appContext: android.content.Context? = null
     }
 
     override fun onCreateIncomingConnection(
         connectionManagerPhoneAccount: PhoneAccountHandle?,
         request: ConnectionRequest?
     ): Connection {
+        appContext = applicationContext
+
         val extras = request?.extras ?: Bundle()
         val uuid = extras.getString("uuid") ?: ""
         val handle = extras.getString("handle") ?: ""
@@ -52,6 +57,12 @@ class FlowPBXConnectionService : ConnectionService() {
         }
 
         connections[uuid] = connection
+
+        // Show heads-up notification with Answer/Reject for self-managed calls.
+        IncomingCallNotificationHelper.show(
+            applicationContext, uuid, handle, displayName
+        )
+
         return connection
     }
 
@@ -67,6 +78,7 @@ class FlowPBXConnectionService : ConnectionService() {
         connectionManagerPhoneAccount: PhoneAccountHandle?,
         request: ConnectionRequest?
     ): Connection {
+        appContext = applicationContext
         val extras = request?.extras ?: Bundle()
         val uuid = extras.getString("uuid") ?: ""
         val handle = request?.address?.schemeSpecificPart ?: ""

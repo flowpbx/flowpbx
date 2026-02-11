@@ -34,8 +34,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Configure structured logging.
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.SlogLevel()}))
+	// Configure structured logging (text or json format, configurable level).
+	logger := slog.New(cfg.SlogHandler(os.Stdout))
 	slog.SetDefault(logger)
 
 	slog.Info("starting flowpbx",

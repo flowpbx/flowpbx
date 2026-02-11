@@ -30,6 +30,7 @@ func main() {
 	rateLimitRate := flag.Float64("rate-limit-rate", 1.0, "push requests allowed per second per license key")
 	rateLimitBurst := flag.Int("rate-limit-burst", 10, "maximum burst size per license key")
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
+	logFormat := flag.String("log-format", "json", "log output format (text, json)")
 	flag.Parse()
 
 	// Configure structured logging.
@@ -44,7 +45,14 @@ func main() {
 	default:
 		level = slog.LevelInfo
 	}
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+	opts := &slog.HandlerOptions{Level: level}
+	var handler slog.Handler
+	if *logFormat == "text" {
+		handler = slog.NewTextHandler(os.Stdout, opts)
+	} else {
+		handler = slog.NewJSONHandler(os.Stdout, opts)
+	}
+	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
 	slog.Info("starting pushgw", "http_port", *httpPort)

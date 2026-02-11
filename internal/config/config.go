@@ -32,6 +32,7 @@ type Config struct {
 	JWTSecret      string // hex-encoded 32-byte secret for mobile app JWT signing
 	ACMEDomain     string // domain for automatic Let's Encrypt certificate (e.g., "pbx.example.com")
 	ACMEEmail      string // contact email for Let's Encrypt account notifications
+	LogFormat      string // log output format: "text" or "json"
 }
 
 // defaults
@@ -43,6 +44,7 @@ const (
 	defaultRTPPortMin = 10000
 	defaultRTPPortMax = 20000
 	defaultLogLevel   = "info"
+	defaultLogFormat  = "text"
 )
 
 // envPrefix is the prefix for all FlowPBX environment variables.
@@ -72,6 +74,7 @@ func Load() (*Config, error) {
 	fs.StringVar(&cfg.JWTSecret, "jwt-secret", "", "hex-encoded 32-byte secret for mobile app JWT signing (auto-generated if empty)")
 	fs.StringVar(&cfg.ACMEDomain, "acme-domain", "", "domain for automatic Let's Encrypt TLS certificate (e.g., pbx.example.com)")
 	fs.StringVar(&cfg.ACMEEmail, "acme-email", "", "contact email for Let's Encrypt account notifications")
+	fs.StringVar(&cfg.LogFormat, "log-format", defaultLogFormat, "log output format (text, json)")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return nil, fmt.Errorf("parsing flags: %w", err)
@@ -117,6 +120,7 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 		"jwt-secret":       envPrefix + "JWT_SECRET",
 		"acme-domain":      envPrefix + "ACME_DOMAIN",
 		"acme-email":       envPrefix + "ACME_EMAIL",
+		"log-format":       envPrefix + "LOG_FORMAT",
 	}
 
 	for flagName, envVar := range envMap {
@@ -172,6 +176,8 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 			cfg.ACMEDomain = val
 		case "acme-email":
 			cfg.ACMEEmail = val
+		case "log-format":
+			cfg.LogFormat = val
 		}
 	}
 }
@@ -202,6 +208,12 @@ func (c *Config) validate() error {
 		return fmt.Errorf("log-level must be one of debug, info, warn, error; got %q", c.LogLevel)
 	}
 	c.LogLevel = strings.ToLower(c.LogLevel)
+
+	validFormats := map[string]bool{"text": true, "json": true}
+	if !validFormats[strings.ToLower(c.LogFormat)] {
+		return fmt.Errorf("log-format must be one of text, json; got %q", c.LogFormat)
+	}
+	c.LogFormat = strings.ToLower(c.LogFormat)
 
 	// TLS cert and key must both be set or both be empty.
 	if (c.TLSCert == "") != (c.TLSKey == "") {
@@ -291,6 +303,16 @@ func (c *Config) MediaIP() string {
 		}
 	}
 	return "127.0.0.1"
+}
+
+// SlogHandler returns a slog.Handler configured with the appropriate format
+// (text or json) and log level.
+func (c *Config) SlogHandler(w *os.File) slog.Handler {
+	opts := &slog.HandlerOptions{Level: c.SlogLevel()}
+	if c.LogFormat == "json" {
+		return slog.NewJSONHandler(w, opts)
+	}
+	return slog.NewTextHandler(w, opts)
 }
 
 // SlogLevel returns the slog.Level corresponding to the configured log level.

@@ -20,13 +20,14 @@ type settingsResponse struct {
 }
 
 type sipSettingsResponse struct {
-	UDPPort    string `json:"udp_port"`
-	TCPPort    string `json:"tcp_port"`
-	TLSPort    string `json:"tls_port"`
-	TLSCert    string `json:"tls_cert"`
-	TLSKey     string `json:"tls_key"`
-	ExternalIP string `json:"external_ip"`
-	Hostname   string `json:"hostname"`
+	UDPPort      string `json:"udp_port"`
+	TCPPort      string `json:"tcp_port"`
+	TLSPort      string `json:"tls_port"`
+	TLSCert      string `json:"tls_cert"`
+	TLSKey       string `json:"tls_key"`
+	ExternalIP   string `json:"external_ip"`
+	Hostname     string `json:"hostname"`
+	LogVerbosity string `json:"log_verbosity"` // "off", "headers", "full"
 }
 
 type codecsSettingsResponse struct {
@@ -70,13 +71,14 @@ type settingsRequest struct {
 }
 
 type sipSettingsRequest struct {
-	UDPPort    string `json:"udp_port"`
-	TCPPort    string `json:"tcp_port"`
-	TLSPort    string `json:"tls_port"`
-	TLSCert    string `json:"tls_cert"`
-	TLSKey     string `json:"tls_key"`
-	ExternalIP string `json:"external_ip"`
-	Hostname   string `json:"hostname"`
+	UDPPort      string `json:"udp_port"`
+	TCPPort      string `json:"tcp_port"`
+	TLSPort      string `json:"tls_port"`
+	TLSCert      string `json:"tls_cert"`
+	TLSKey       string `json:"tls_key"`
+	ExternalIP   string `json:"external_ip"`
+	Hostname     string `json:"hostname"`
+	LogVerbosity string `json:"log_verbosity"` // "off", "headers", "full"
 }
 
 type codecsSettingsRequest struct {
@@ -124,13 +126,14 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 	resp := settingsResponse{
 		SIP: sipSettingsResponse{
-			UDPPort:    get("sip_port"),
-			TCPPort:    get("sip_tcp_port"),
-			TLSPort:    get("sip_tls_port"),
-			TLSCert:    get("sip_tls_cert"),
-			TLSKey:     get("sip_tls_key"),
-			ExternalIP: get("sip_external_ip"),
-			Hostname:   get("hostname"),
+			UDPPort:      get("sip_port"),
+			TCPPort:      get("sip_tcp_port"),
+			TLSPort:      get("sip_tls_port"),
+			TLSCert:      get("sip_tls_cert"),
+			TLSKey:       get("sip_tls_key"),
+			ExternalIP:   get("sip_external_ip"),
+			Hostname:     get("hostname"),
+			LogVerbosity: get("sip_log_verbosity"),
 		},
 		Codecs: codecsSettingsResponse{
 			Audio: get("codecs_audio"),
@@ -209,18 +212,34 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// Validate SIP log verbosity if provided.
+		if sip.LogVerbosity != "" {
+			validVerbosities := map[string]bool{"off": true, "headers": true, "full": true}
+			if !validVerbosities[strings.ToLower(sip.LogVerbosity)] {
+				writeError(w, http.StatusBadRequest, "sip log_verbosity must be off, headers, or full")
+				return
+			}
+			sip.LogVerbosity = strings.ToLower(sip.LogVerbosity)
+		}
+
 		if err := save(map[string]string{
-			"sip_port":        sip.UDPPort,
-			"sip_tcp_port":    sip.TCPPort,
-			"sip_tls_port":    sip.TLSPort,
-			"sip_tls_cert":    sip.TLSCert,
-			"sip_tls_key":     sip.TLSKey,
-			"sip_external_ip": sip.ExternalIP,
-			"hostname":        sip.Hostname,
+			"sip_port":          sip.UDPPort,
+			"sip_tcp_port":      sip.TCPPort,
+			"sip_tls_port":      sip.TLSPort,
+			"sip_tls_cert":      sip.TLSCert,
+			"sip_tls_key":       sip.TLSKey,
+			"sip_external_ip":   sip.ExternalIP,
+			"hostname":          sip.Hostname,
+			"sip_log_verbosity": sip.LogVerbosity,
 		}); err != nil {
 			slog.Error("failed to save sip settings", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to save settings")
 			return
+		}
+
+		// Apply SIP log verbosity change immediately at runtime.
+		if sip.LogVerbosity != "" && s.sipLogVerbosity != nil {
+			s.sipLogVerbosity.SetSIPLogVerbosity(sip.LogVerbosity)
 		}
 	}
 

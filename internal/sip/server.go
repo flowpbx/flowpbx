@@ -35,6 +35,7 @@ type Server struct {
 	dtmfMgr        *media.CallDTMFManager
 	conferenceMgr  *media.ConferenceManager
 	cdrs           database.CDRRepository
+	tracer         *MessageTracer
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
 	logger         *slog.Logger
@@ -43,6 +44,17 @@ type Server struct {
 // NewServer creates a SIP server with all handlers registered.
 func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sysConfig database.SystemConfigRepository, emailSend *email.Sender) (*Server, error) {
 	logger := slog.Default().With("component", "sip")
+
+	// Configure SIP message tracing from system config.
+	verbosityStr, _ := sysConfig.Get(context.Background(), "sip_log_verbosity")
+	verbosity := ParseSIPLogVerbosity(verbosityStr)
+	tracer := NewMessageTracer(logger, verbosity)
+
+	// Enable sipgo transport-level tracing and register our tracer.
+	// When verbosity is "off", the tracer returns immediately in its callbacks.
+	sip.SIPDebug = true
+	sip.SIPDebugTracer(tracer)
+	logger.Info("sip message tracing configured", "verbosity", verbosity.String())
 
 	ua, err := sipgo.NewUA(
 		sipgo.WithUserAgent("FlowPBX"),
@@ -137,6 +149,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sys
 		dtmfMgr:        dtmfMgr,
 		conferenceMgr:  conferenceMgr,
 		cdrs:           cdrs,
+		tracer:         tracer,
 		logger:         logger,
 	}
 
@@ -705,6 +718,11 @@ func (s *Server) CallDTMFManager() *media.CallDTMFManager {
 // controlling active conference participants.
 func (s *Server) ConferenceManager() *media.ConferenceManager {
 	return s.conferenceMgr
+}
+
+// MessageTracer returns the SIP message tracer for runtime verbosity changes.
+func (s *Server) MessageTracer() *MessageTracer {
+	return s.tracer
 }
 
 // handleOptions responds to SIP OPTIONS requests (keepalive pings from

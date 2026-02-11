@@ -101,6 +101,12 @@ type ConferenceParticipantEntry struct {
 	Muted        bool
 }
 
+// SIPLogVerbositySetter allows the API to change SIP message tracing
+// verbosity at runtime without importing the SIP package directly.
+type SIPLogVerbositySetter interface {
+	SetSIPLogVerbosity(level string)
+}
+
 // Server holds HTTP handler dependencies and the chi router.
 type Server struct {
 	router            *chi.Mux
@@ -125,6 +131,7 @@ type Server struct {
 	activeCalls       ActiveCallsProvider
 	conferenceProv    ConferenceProvider
 	configReloader    ConfigReloader
+	sipLogVerbosity   SIPLogVerbositySetter
 	audioPrompts      database.AudioPromptRepository
 	voicemailBoxes    database.VoicemailBoxRepository
 	voicemailMessages database.VoicemailMessageRepository
@@ -138,7 +145,7 @@ type Server struct {
 }
 
 // NewServer creates the HTTP handler with all routes mounted.
-func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, trunkTester TrunkTester, trunkLifecycle TrunkLifecycleManager, activeCalls ActiveCallsProvider, conferenceProv ConferenceProvider, enc *database.Encryptor, reloader ConfigReloader) *Server {
+func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.SessionStore, sysConfig database.SystemConfigRepository, trunkStatus TrunkStatusProvider, trunkTester TrunkTester, trunkLifecycle TrunkLifecycleManager, activeCalls ActiveCallsProvider, conferenceProv ConferenceProvider, enc *database.Encryptor, reloader ConfigReloader, sipLogVerbosity SIPLogVerbositySetter) *Server {
 	s := &Server{
 		router:            chi.NewRouter(),
 		db:                db,
@@ -168,6 +175,7 @@ func NewServer(db *database.DB, cfg *config.Config, sessions *middleware.Session
 		activeCalls:       activeCalls,
 		conferenceProv:    conferenceProv,
 		configReloader:    reloader,
+		sipLogVerbosity:   sipLogVerbosity,
 		encryptor:         enc,
 	}
 

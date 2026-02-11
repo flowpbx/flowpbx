@@ -139,8 +139,11 @@ func main() {
 	// Create adapter for conference management so the API can mute/unmute participants.
 	conferenceProv := &conferenceProviderAdapter{mgr: sipSrv.ConferenceManager()}
 
+	// Create adapter for SIP message tracing verbosity control via API.
+	sipLogVerbosity := &sipLogVerbosityAdapter{tracer: sipSrv.MessageTracer()}
+
 	// HTTP server using the api package.
-	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, trunkTester, trunkLifecycle, activeCalls, conferenceProv, enc, reloader)
+	handler := api.NewServer(db, cfg, sessions, sysConfig, trunkStatus, trunkTester, trunkLifecycle, activeCalls, conferenceProv, enc, reloader, sipLogVerbosity)
 
 	srv := &http.Server{
 		Handler:      handler,
@@ -519,4 +522,14 @@ func (a *conferenceProviderAdapter) Participants(bridgeID int64) ([]api.Conferen
 		}
 	}
 	return entries, nil
+}
+
+// sipLogVerbosityAdapter bridges the SIP message tracer with the API's
+// SIPLogVerbositySetter interface for runtime verbosity control.
+type sipLogVerbosityAdapter struct {
+	tracer *sipserver.MessageTracer
+}
+
+func (a *sipLogVerbosityAdapter) SetSIPLogVerbosity(level string) {
+	a.tracer.SetVerbosity(sipserver.ParseSIPLogVerbosity(level))
 }

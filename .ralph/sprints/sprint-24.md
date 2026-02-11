@@ -27,7 +27,7 @@
 - [x] HTTPS enforcement for admin UI (auto Let's Encrypt or manual cert)
 - [x] Verify all secrets encrypted at rest (SIP passwords, trunk credentials)
 - [x] Input validation on all API endpoints
-- [ ] Verify parameterized queries only (no SQL injection vectors)
+- [x] Verify parameterized queries only (no SQL injection vectors)
 - [x] CSRF protection on admin UI
 - [x] Security headers (CSP, HSTS, X-Frame-Options, etc.)
 

@@ -33,7 +33,7 @@
 - [x] Handle remote hangup (receive BYE) — return to idle
 
 ### Audio Session
-- [ ] Configure iOS audio session for VoIP (AVAudioSession)
+- [x] Configure iOS audio session for VoIP (AVAudioSession)
 - [ ] Configure Android audio focus management
 - [ ] Handle audio routing: earpiece, speaker, Bluetooth, wired headset
 - [ ] Implement proximity sensor control (screen off when near ear)

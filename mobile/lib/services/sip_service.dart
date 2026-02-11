@@ -7,6 +7,7 @@ import 'package:siprix_voip_sdk/network_model.dart';
 import 'package:siprix_voip_sdk/siprix_voip_sdk.dart';
 
 import 'package:flowpbx_mobile/models/call_state.dart';
+import 'package:flowpbx_mobile/services/audio_session_service.dart';
 import 'package:flowpbx_mobile/services/ringtone_service.dart';
 
 /// Registration state for external consumers.
@@ -26,6 +27,7 @@ class SipService {
   SipRegState _regState = SipRegState.unregistered;
   String _regResponse = '';
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  final _audioSessionService = AudioSessionService();
   final _ringtoneService = RingtoneService();
 
   /// Stream of registration state changes.
@@ -78,6 +80,9 @@ class SipService {
     _connectivitySub = Connectivity().onConnectivityChanged.listen(
       _onConnectivityChanged,
     );
+
+    // Configure iOS audio session for VoIP (AVAudioSession).
+    await _audioSessionService.configure();
 
     _initialized = true;
   }
@@ -159,6 +164,8 @@ class SipService {
   Future<int?> invite(String destination) async {
     if (_accountId == null) throw StateError('not registered');
 
+    await _audioSessionService.activate();
+
     _setCallState(_callState.copyWith(
       status: CallStatus.dialing,
       remoteNumber: destination,
@@ -185,6 +192,7 @@ class SipService {
     final callId = _callState.callId;
     if (callId == null) return;
     _ringtoneService.stopRinging();
+    await _audioSessionService.activate();
     await SiprixVoipSdk().accept(callId, false);
   }
 
@@ -195,6 +203,7 @@ class SipService {
     _ringtoneService.stopRinging();
     await SiprixVoipSdk().reject(callId, 486);
     _setCallState(ActiveCallState.idle);
+    await _audioSessionService.deactivate();
   }
 
   /// Hang up the current call.
@@ -209,6 +218,7 @@ class SipService {
       // Call may already be terminated.
     }
     _setCallState(ActiveCallState.idle);
+    await _audioSessionService.deactivate();
   }
 
   /// Toggle mute on the current call.
@@ -225,14 +235,18 @@ class SipService {
   Future<void> toggleSpeaker() async {
     if (_callState.callId == null) return;
 
+    final newSpeaker = !_callState.isSpeaker;
+
+    // Use native audio session override on iOS for reliable speaker switching.
+    await _audioSessionService.setSpeaker(newSpeaker);
+
     final sdk = SiprixVoipSdk();
     final count = await sdk.getPlayoutDevices() ?? 0;
-    if (count < 2) return;
+    if (count >= 2) {
+      // On mobile, device 0 is typically earpiece and device 1 is speaker.
+      await sdk.setPlayoutDevice(newSpeaker ? 1 : 0);
+    }
 
-    // On mobile, device 0 is typically earpiece and device 1 is speaker.
-    // Toggle between them based on current state.
-    final newSpeaker = !_callState.isSpeaker;
-    await sdk.setPlayoutDevice(newSpeaker ? 1 : 0);
     _setCallState(_callState.copyWith(isSpeaker: newSpeaker));
   }
 
@@ -398,6 +412,7 @@ class SipService {
     if (callId != _callState.callId) return;
     _ringtoneService.stopRinging();
     _setCallState(ActiveCallState.idle);
+    _audioSessionService.deactivate();
   }
 
   /// Callback: hold state changed.
@@ -414,5 +429,6 @@ class SipService {
   void _onCallTransferred(int callId, int statusCode) {
     if (callId != _callState.callId) return;
     _setCallState(ActiveCallState.idle);
+    _audioSessionService.deactivate();
   }
 }

@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/models/auth_state.dart';
 import 'package:flowpbx_mobile/models/sip_config.dart';
@@ -18,8 +21,15 @@ final authStateProvider =
     AsyncNotifierProvider<AuthNotifier, AuthState>(AuthNotifier.new);
 
 class AuthNotifier extends AsyncNotifier<AuthState> {
+  StreamSubscription<String>? _pushTokenSub;
+
   @override
   Future<AuthState> build() async {
+    ref.onDispose(() {
+      _pushTokenSub?.cancel();
+      _pushTokenSub = null;
+    });
+
     final storage = ref.read(secureStorageProvider);
     final token = await storage.getToken();
     final serverUrl = await storage.getServerUrl();
@@ -34,6 +44,9 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
       if (sipConfig['domain'] != null && sipConfig['username'] != null) {
         _registerSip(sipConfig);
       }
+
+      // Re-register for VoIP push on app restore.
+      _setupVoipPush();
 
       return AuthState(
         token: token,
@@ -104,6 +117,9 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
       transport: sipConfig.transport,
     );
 
+    // Register for VoIP push notifications (iOS PushKit).
+    _setupVoipPush();
+
     return sipConfig;
   }
 
@@ -116,6 +132,23 @@ class AuthNotifier extends AsyncNotifier<AuthState> {
     final storage = ref.read(secureStorageProvider);
     await storage.clearAll();
     state = const AsyncData(AuthState.empty);
+  }
+
+  /// Set up VoIP push registration and token forwarding to the PBX API.
+  void _setupVoipPush() {
+    if (!Platform.isIOS) return;
+
+    final sipService = ref.read(sipServiceProvider);
+    final api = ref.read(apiServiceProvider);
+
+    // Listen for VoIP push token and forward it to the PBX.
+    _pushTokenSub?.cancel();
+    _pushTokenSub = sipService.pushTokenStream.listen((token) {
+      api.registerPushToken(token: token, platform: 'ios').catchError((_) {});
+    });
+
+    // Trigger PushKit registration.
+    sipService.registerVoipPush();
   }
 
   /// Restore SIP registration from stored config map.

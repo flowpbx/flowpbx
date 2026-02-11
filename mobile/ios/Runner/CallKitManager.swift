@@ -5,11 +5,19 @@ import Flutter
 ///
 /// Provides incoming call display on lock screen, system call UI integration,
 /// and handles user actions (answer, end, mute, hold, DTMF) from the native UI.
+///
+/// Supports push-woken incoming calls: when a VoIP push arrives while the app
+/// is suspended, CallKit must be notified immediately (same run loop). User
+/// actions (answer/end) that arrive before the Flutter engine is ready are
+/// queued and delivered once the method channel is set.
 class CallKitManager: NSObject {
     private let provider: CXProvider
     private let callController = CXCallController()
     private var channel: FlutterMethodChannel?
     private var activeCallUUID: UUID?
+
+    /// Actions queued before the Flutter method channel was available.
+    private var pendingActions: [(String, Any?)] = []
 
     override init() {
         let config = CXProviderConfiguration()
@@ -26,13 +34,16 @@ class CallKitManager: NSObject {
     }
 
     /// Set the Flutter method channel for communicating actions back to Dart.
+    /// Flushes any queued actions that arrived before the channel was ready.
     func setChannel(_ channel: FlutterMethodChannel) {
         self.channel = channel
+        flushPendingActions()
     }
 
     // MARK: - Dart → Native calls
 
     /// Report an incoming call to CallKit (shows native incoming call UI).
+    /// This can be called from PushKit before the Flutter engine is ready.
     func reportIncomingCall(uuid: UUID, handle: String, displayName: String?,
                             completion: @escaping (Error?) -> Void) {
         let update = CXCallUpdate()
@@ -61,7 +72,7 @@ class CallKitManager: NSObject {
         let transaction = CXTransaction(action: action)
         callController.request(transaction) { error in
             if let error = error {
-                self.channel?.invokeMethod("onCallKitError", arguments: error.localizedDescription)
+                self.sendToFlutter("onCallKitError", arguments: error.localizedDescription)
             }
         }
     }
@@ -83,7 +94,7 @@ class CallKitManager: NSObject {
         let transaction = CXTransaction(action: action)
         callController.request(transaction) { error in
             if let error = error {
-                self.channel?.invokeMethod("onCallKitError", arguments: error.localizedDescription)
+                self.sendToFlutter("onCallKitError", arguments: error.localizedDescription)
             }
         }
     }
@@ -105,6 +116,26 @@ class CallKitManager: NSObject {
     var currentCallUUID: UUID? {
         return activeCallUUID
     }
+
+    // MARK: - Channel message delivery
+
+    /// Send a method call to Flutter, or queue it if the channel is not yet ready.
+    private func sendToFlutter(_ method: String, arguments: Any? = nil) {
+        if let channel = channel {
+            channel.invokeMethod(method, arguments: arguments)
+        } else {
+            pendingActions.append((method, arguments))
+        }
+    }
+
+    /// Flush queued actions to the Flutter channel.
+    private func flushPendingActions() {
+        guard let channel = channel else { return }
+        for (method, arguments) in pendingActions {
+            channel.invokeMethod(method, arguments: arguments)
+        }
+        pendingActions.removeAll()
+    }
 }
 
 // MARK: - CXProviderDelegate
@@ -112,22 +143,22 @@ class CallKitManager: NSObject {
 extension CallKitManager: CXProviderDelegate {
     func providerDidReset(_ provider: CXProvider) {
         activeCallUUID = nil
-        channel?.invokeMethod("onCallKitReset", arguments: nil)
+        sendToFlutter("onCallKitReset")
     }
 
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
-        channel?.invokeMethod("onCallKitAnswer", arguments: action.callUUID.uuidString)
+        sendToFlutter("onCallKitAnswer", arguments: action.callUUID.uuidString)
         action.fulfill()
     }
 
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
-        channel?.invokeMethod("onCallKitEnd", arguments: action.callUUID.uuidString)
+        sendToFlutter("onCallKitEnd", arguments: action.callUUID.uuidString)
         activeCallUUID = nil
         action.fulfill()
     }
 
     func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
-        channel?.invokeMethod("onCallKitMute", arguments: [
+        sendToFlutter("onCallKitMute", arguments: [
             "uuid": action.callUUID.uuidString,
             "muted": action.isMuted,
         ])
@@ -135,7 +166,7 @@ extension CallKitManager: CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, perform action: CXSetHeldCallAction) {
-        channel?.invokeMethod("onCallKitHold", arguments: [
+        sendToFlutter("onCallKitHold", arguments: [
             "uuid": action.callUUID.uuidString,
             "held": action.isOnHold,
         ])
@@ -143,7 +174,7 @@ extension CallKitManager: CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, perform action: CXPlayDTMFCallAction) {
-        channel?.invokeMethod("onCallKitDTMF", arguments: [
+        sendToFlutter("onCallKitDTMF", arguments: [
             "uuid": action.callUUID.uuidString,
             "digits": action.digits,
         ])
@@ -155,10 +186,10 @@ extension CallKitManager: CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
-        channel?.invokeMethod("onCallKitAudioActivated", arguments: nil)
+        sendToFlutter("onCallKitAudioActivated")
     }
 
     func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
-        channel?.invokeMethod("onCallKitAudioDeactivated", arguments: nil)
+        sendToFlutter("onCallKitAudioDeactivated")
     }
 }

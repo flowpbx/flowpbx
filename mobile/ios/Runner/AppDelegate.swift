@@ -2,11 +2,14 @@ import UIKit
 import Flutter
 import AVFoundation
 import CallKit
+import PushKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
     private var audioChannel: FlutterMethodChannel?
+    private var pushChannel: FlutterMethodChannel?
     private let callKitManager = CallKitManager()
+    private var pushRegistry: PKPushRegistry?
 
     override func application(
         _ application: UIApplication,
@@ -160,6 +163,23 @@ import CallKit
             }
         }
 
+        // Push notification platform channel (VoIP push token + push wake).
+        let pushCh = FlutterMethodChannel(
+            name: "com.flowpbx.mobile/push",
+            binaryMessenger: controller.binaryMessenger
+        )
+        pushChannel = pushCh
+
+        pushCh.setMethodCallHandler { [weak self] (call, result) in
+            switch call.method {
+            case "registerVoipPush":
+                self?.registerForVoIPPush()
+                result(true)
+            default:
+                result(FlutterMethodNotImplemented)
+            }
+        }
+
         // Observe audio route changes (Bluetooth connect/disconnect, headset plug).
         NotificationCenter.default.addObserver(
             self,
@@ -171,6 +191,19 @@ import CallKit
         GeneratedPluginRegistrant.register(with: self)
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
+
+    // MARK: - PushKit VoIP registration
+
+    /// Register for PushKit VoIP push notifications. Called from Dart after login.
+    private func registerForVoIPPush() {
+        if pushRegistry != nil { return }
+        let registry = PKPushRegistry(queue: .main)
+        registry.delegate = self
+        registry.desiredPushTypes = [.voIP]
+        pushRegistry = registry
+    }
+
+    // MARK: - Audio session helpers
 
     /// Configure AVAudioSession for VoIP calling.
     /// Category: playAndRecord — enables simultaneous input and output.
@@ -265,6 +298,87 @@ import CallKit
         let route = currentAudioRoute()
         DispatchQueue.main.async { [weak self] in
             self?.audioChannel?.invokeMethod("onAudioRouteChanged", arguments: route)
+        }
+    }
+}
+
+// MARK: - PKPushRegistryDelegate
+
+extension AppDelegate: PKPushRegistryDelegate {
+    func pushRegistry(_ registry: PKPushRegistry,
+                      didUpdate pushCredentials: PKPushCredentials,
+                      for type: PKPushType) {
+        guard type == .voIP else { return }
+
+        // Convert device token to hex string.
+        let token = pushCredentials.token.map { String(format: "%02x", $0) }.joined()
+
+        // Send the VoIP push token to Dart for registration with the PBX.
+        DispatchQueue.main.async { [weak self] in
+            self?.pushChannel?.invokeMethod("onVoipToken", arguments: token)
+        }
+    }
+
+    func pushRegistry(_ registry: PKPushRegistry,
+                      didInvalidatePushTokenFor type: PKPushType) {
+        guard type == .voIP else { return }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.pushChannel?.invokeMethod("onVoipTokenInvalidated", arguments: nil)
+        }
+    }
+
+    func pushRegistry(_ registry: PKPushRegistry,
+                      didReceiveIncomingPushWith payload: PKPushPayload,
+                      for type: PKPushType,
+                      completion: @escaping () -> Void) {
+        guard type == .voIP else {
+            completion()
+            return
+        }
+
+        // iOS requires that every VoIP push reports a new incoming call to CallKit.
+        // Failing to do so causes iOS to terminate the app and stop delivering pushes.
+        let data = payload.dictionaryPayload
+
+        // Extract caller info from the push payload.
+        let callerId = data["caller_id"] as? String ?? "Unknown"
+        let callerName = data["caller_name"] as? String
+        let callId = data["call_id"] as? String
+
+        // Generate a UUID for this call (use call_id if provided as a UUID, else generate).
+        let uuid: UUID
+        if let callId = callId, let parsed = UUID(uuidString: callId) {
+            uuid = parsed
+        } else {
+            uuid = UUID()
+        }
+
+        // Report to CallKit immediately — this shows the native incoming call UI
+        // on the lock screen, even if the Flutter engine is not yet running.
+        callKitManager.reportIncomingCall(
+            uuid: uuid,
+            handle: callerId,
+            displayName: callerName
+        ) { [weak self] error in
+            if error != nil {
+                // CallKit rejected the call (e.g. DND). Nothing more to do.
+                completion()
+                return
+            }
+
+            // Notify Flutter about the push-woken incoming call so the SIP stack
+            // can register and accept the INVITE. The push channel may queue this
+            // if Flutter is not yet ready (handled by channel buffering).
+            DispatchQueue.main.async {
+                self?.pushChannel?.invokeMethod("onPushIncomingCall", arguments: [
+                    "uuid": uuid.uuidString,
+                    "caller_id": callerId,
+                    "caller_name": callerName ?? "",
+                    "call_id": callId ?? "",
+                ])
+                completion()
+            }
         }
     }
 }

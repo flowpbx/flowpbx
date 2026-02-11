@@ -11,6 +11,7 @@ import 'package:flowpbx_mobile/models/call_state.dart';
 import 'package:flowpbx_mobile/services/audio_session_service.dart';
 import 'package:flowpbx_mobile/services/callkit_service.dart';
 import 'package:flowpbx_mobile/services/proximity_service.dart';
+import 'package:flowpbx_mobile/services/push_service.dart';
 import 'package:flowpbx_mobile/services/ringtone_service.dart';
 
 /// Registration state for external consumers.
@@ -33,8 +34,17 @@ class SipService {
   final _audioSessionService = AudioSessionService();
   final _callKitService = CallKitService();
   final _proximityService = ProximityService();
+  final _pushService = PushService();
   final _ringtoneService = RingtoneService();
   StreamSubscription<CallKitAction>? _callKitSub;
+  StreamSubscription<PushIncomingCall>? _pushIncomingSub;
+
+  /// Stream of VoIP push tokens for registration with the PBX API.
+  Stream<String> get pushTokenStream => _pushService.tokenStream;
+
+  /// Stream of push token invalidation events.
+  Stream<void> get pushTokenInvalidatedStream =>
+      _pushService.tokenInvalidatedStream;
 
   /// Stream of registration state changes.
   final _regStateController = StreamController<SipRegState>.broadcast();
@@ -100,6 +110,10 @@ class SipService {
     // Listen for CallKit actions (iOS native call UI).
     _callKitSub = _callKitService.actionStream.listen(_onCallKitAction);
 
+    // Listen for push-woken incoming calls (PushKit on iOS).
+    _pushIncomingSub =
+        _pushService.incomingPushStream.listen(_onPushIncomingCall);
+
     _initialized = true;
   }
 
@@ -160,6 +174,10 @@ class SipService {
     await _removeCurrentAccount();
     _setRegState(SipRegState.unregistered);
   }
+
+  /// Register for VoIP push notifications (iOS PushKit).
+  /// Should be called after login when SIP credentials are available.
+  Future<void> registerVoipPush() => _pushService.registerVoipPush();
 
   /// Refresh the current registration (e.g. after network change).
   Future<void> refreshRegistration() async {
@@ -316,8 +334,11 @@ class SipService {
     _ringtoneService.stopRinging();
     _audioSessionService.dispose();
     _callKitService.dispose();
+    _pushService.dispose();
     _callKitSub?.cancel();
     _callKitSub = null;
+    _pushIncomingSub?.cancel();
+    _pushIncomingSub = null;
     _connectivitySub?.cancel();
     _connectivitySub = null;
     if (_accountId != null && _initialized) {
@@ -421,6 +442,24 @@ class SipService {
       remoteNumber = extMatch.group(1)!;
     }
 
+    // Check if this call was already reported via PushKit (push-woken call).
+    // In that case, the call state has a UUID but no callId yet. Attach the
+    // SIP call ID so acceptCall/rejectCall work correctly.
+    if (_callState.status == CallStatus.ringing &&
+        _callState.isIncoming &&
+        _callState.callId == null) {
+      _setCallState(_callState.copyWith(
+        callId: callId,
+        remoteNumber: remoteNumber,
+        remoteDisplayName: displayName ?? _callState.remoteDisplayName,
+      ));
+      // CallKit was already notified by PushKit — don't report again.
+      // Ringtone is handled by CallKit on lock screen, but start it for
+      // foreground consistency.
+      _ringtoneService.startRinging();
+      return;
+    }
+
     final uuid = _generateUuid();
 
     _setCallState(ActiveCallState(
@@ -497,6 +536,31 @@ class SipService {
     }
     _setCallState(ActiveCallState.idle);
     _audioSessionService.deactivate();
+  }
+
+  /// Handle a push-woken incoming call from PushKit (iOS).
+  ///
+  /// When the app receives a VoIP push, the native side has already reported
+  /// the call to CallKit (showing the lock screen UI). Here we set up the
+  /// Dart-side call state so the SIP stack can accept the INVITE when it
+  /// arrives, and trigger a SIP re-registration if needed.
+  void _onPushIncomingCall(PushIncomingCall push) {
+    // Set call state to ringing with info from the push payload.
+    // The actual SIP INVITE will arrive after the PBX sees us re-register.
+    _setCallState(ActiveCallState(
+      callUuid: push.uuid,
+      status: CallStatus.ringing,
+      remoteNumber: push.callerId,
+      remoteDisplayName: push.callerName.isNotEmpty ? push.callerName : null,
+      isIncoming: true,
+    ));
+
+    // Trigger SIP re-registration so the PBX knows we're awake and can
+    // route the INVITE to us. The callId will be set when the SIP INVITE
+    // arrives via _onCallIncoming.
+    if (_accountId != null && _regState != SipRegState.registered) {
+      refreshRegistration();
+    }
   }
 
   /// Handle actions from the native CallKit UI (iOS).

@@ -7,6 +7,7 @@ import 'package:siprix_voip_sdk/network_model.dart';
 import 'package:siprix_voip_sdk/siprix_voip_sdk.dart';
 
 import 'package:flowpbx_mobile/models/call_state.dart';
+import 'package:flowpbx_mobile/services/ringtone_service.dart';
 
 /// Registration state for external consumers.
 enum SipRegState {
@@ -25,6 +26,7 @@ class SipService {
   SipRegState _regState = SipRegState.unregistered;
   String _regResponse = '';
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  final _ringtoneService = RingtoneService();
 
   /// Stream of registration state changes.
   final _regStateController = StreamController<SipRegState>.broadcast();
@@ -182,6 +184,7 @@ class SipService {
   Future<void> acceptCall() async {
     final callId = _callState.callId;
     if (callId == null) return;
+    _ringtoneService.stopRinging();
     await SiprixVoipSdk().accept(callId, false);
   }
 
@@ -189,6 +192,7 @@ class SipService {
   Future<void> rejectCall() async {
     final callId = _callState.callId;
     if (callId == null) return;
+    _ringtoneService.stopRinging();
     await SiprixVoipSdk().reject(callId, 486);
     _setCallState(ActiveCallState.idle);
   }
@@ -243,6 +247,7 @@ class SipService {
 
   /// Dispose resources.
   void dispose() {
+    _ringtoneService.stopRinging();
     _connectivitySub?.cancel();
     _connectivitySub = null;
     if (_accountId != null && _initialized) {
@@ -353,6 +358,8 @@ class SipService {
       remoteDisplayName: displayName,
       isIncoming: true,
     ));
+
+    _ringtoneService.startRinging();
   }
 
   /// Callback: outbound call proceeding (100 Trying / 180 Ringing).
@@ -374,6 +381,7 @@ class SipService {
   /// Callback: call terminated (BYE received or sent).
   void _onCallTerminated(int callId, int statusCode) {
     if (callId != _callState.callId) return;
+    _ringtoneService.stopRinging();
     _setCallState(ActiveCallState.idle);
   }
 

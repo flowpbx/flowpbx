@@ -19,6 +19,7 @@ dependencies:
   json_annotation: ^4.8.1
   siprix_voip_sdk: ^1.0.33
   connectivity_plus: ^6.0.0
+  flutter_ringtone_player: ^4.0.0
 
 dev_dependencies:
   flutter_test:

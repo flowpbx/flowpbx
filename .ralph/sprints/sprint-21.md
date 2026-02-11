@@ -20,7 +20,7 @@
 - [x] Create full-screen incoming call UI (caller ID, accept/reject buttons)
 - [x] Handle incoming SIP INVITE → show incoming call screen
 - [x] Implement call accept (200 OK) and reject (486 Busy)
-- [ ] Implement ringtone playback for incoming calls
+- [x] Implement ringtone playback for incoming calls
 
 ### In-Call Screen
 - [x] Create in-call screen layout: caller info, duration timer, action buttons

@@ -4,12 +4,46 @@ import 'package:flowpbx_mobile/models/call_history_entry.dart';
 import 'package:flowpbx_mobile/providers/call_history_provider.dart';
 import 'package:go_router/go_router.dart';
 
-class CallHistoryScreen extends ConsumerWidget {
+class CallHistoryScreen extends ConsumerStatefulWidget {
   const CallHistoryScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CallHistoryScreen> createState() => _CallHistoryScreenState();
+}
+
+class _CallHistoryScreenState extends ConsumerState<CallHistoryScreen> {
+  final _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.position.pixels;
+    // Trigger load when within 200px of the bottom.
+    if (maxScroll - currentScroll <= 200) {
+      final notifier = ref.read(callHistoryProvider.notifier);
+      if (notifier.hasMore && !notifier.isLoadingMore) {
+        notifier.loadMore();
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final historyAsync = ref.watch(callHistoryProvider);
+    final notifier = ref.read(callHistoryProvider.notifier);
 
     return Scaffold(
       appBar: AppBar(
@@ -65,12 +99,20 @@ class CallHistoryScreen extends ConsumerWidget {
             );
           }
           return RefreshIndicator(
-            onRefresh: () =>
-                ref.read(callHistoryProvider.notifier).refresh(),
+            onRefresh: () => notifier.refresh(),
             child: ListView.separated(
-              itemCount: entries.length,
+              controller: _scrollController,
+              // Extra item at end for loading indicator when more pages exist.
+              itemCount: entries.length + (notifier.hasMore ? 1 : 0),
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, index) {
+                if (index == entries.length) {
+                  // Loading indicator at the bottom.
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
                 return _CallHistoryTile(entry: entries[index]);
               },
             ),

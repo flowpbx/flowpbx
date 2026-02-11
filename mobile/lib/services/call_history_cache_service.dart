@@ -54,6 +54,21 @@ class CallHistoryCacheService {
     });
   }
 
+  /// Upsert entries into the cache (insert or replace by id).
+  /// Used when appending paginated results without wiping existing data.
+  Future<void> upsertAll(List<CallHistoryEntry> entries) async {
+    final db = await _getDb();
+    await db.transaction((txn) async {
+      for (final entry in entries) {
+        await txn.insert(
+          'call_history',
+          _toRow(entry),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
+  }
+
   /// Return all cached entries, newest first.
   Future<List<CallHistoryEntry>> getAll() async {
     final db = await _getDb();

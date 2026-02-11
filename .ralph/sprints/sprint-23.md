@@ -12,7 +12,7 @@
 - [x] Create call history screen (list view: caller/callee, direction, duration, timestamp)
 - [x] Fetch history from PBX API `GET /api/v1/app/history`
 - [x] Implement local caching of call history (SQLite or Hive)
-- [ ] Implement pull-to-refresh and pagination
+- [x] Implement pull-to-refresh and pagination
 - [ ] Tap to call back from history entry
 - [ ] Show missed call badge count
 

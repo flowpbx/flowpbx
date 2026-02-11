@@ -70,6 +70,7 @@ type InviteHandler struct {
 	flowEngine     *flow.Engine
 	flowActions    *FlowSIPActions
 	pushClient     *push.Client
+	regNotifier    *RegistrationNotifier
 	proxyIP        string
 	dataDir        string
 	logger         *slog.Logger
@@ -93,6 +94,7 @@ func NewInviteHandler(
 	flowEngine *flow.Engine,
 	flowActions *FlowSIPActions,
 	pushClient *push.Client,
+	regNotifier *RegistrationNotifier,
 	proxyIP string,
 	dataDir string,
 	logger *slog.Logger,
@@ -116,6 +118,7 @@ func NewInviteHandler(
 		flowEngine:     flowEngine,
 		flowActions:    flowActions,
 		pushClient:     pushClient,
+		regNotifier:    regNotifier,
 		proxyIP:        proxyIP,
 		dataDir:        dataDir,
 		logger:         logger.With("subsystem", "invite"),
@@ -196,6 +199,20 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 	ctx := context.Background()
 
 	route, err := h.router.RouteInternalCall(ctx, ic)
+
+	// If no registrations, try push-wait: send push notification and wait
+	// for the mobile app to re-register before giving up.
+	if err == ErrNoRegistrations {
+		h.logger.Info("internal call failed: no registrations",
+			"call_id", callID,
+			"target", ic.TargetExtension.Extension,
+		)
+		if h.waitForPushRegistration(ctx, ic.TargetExtension, callID, ic.CallerIDNum) {
+			// App re-registered — retry routing.
+			route, err = h.router.RouteInternalCall(ctx, ic)
+		}
+	}
+
 	if err != nil {
 		switch err {
 		case ErrDND:
@@ -213,13 +230,7 @@ func (h *InviteHandler) handleInternalCall(req *sip.Request, tx sip.ServerTransa
 			h.respondErrorWithCDR(req, tx, 486, "Busy Here", callID)
 			return
 		case ErrNoRegistrations:
-			h.logger.Info("internal call failed: no registrations",
-				"call_id", callID,
-				"target", ic.TargetExtension.Extension,
-			)
-			// Send push notification to wake mobile apps for this extension.
-			h.sendPushForExtension(ic.TargetExtension, callID, ic.CallerIDNum)
-			// Try follow-me if enabled (no registered devices at all).
+			// Push wait already attempted above — fall through to follow-me.
 			if h.tryFollowMe(ctx, req, tx, ic.TargetExtension, callID, ic.CallerIDName, ic.CallerIDNum) {
 				return
 			}
@@ -585,6 +596,20 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 
 	// Route to the target extension using the same logic as internal calls.
 	route, err := h.router.RouteInternalCall(ctx, ic)
+
+	// If no registrations, try push-wait: send push notification and wait
+	// for the mobile app to re-register before giving up.
+	if err == ErrNoRegistrations {
+		h.logger.Info("inbound call failed: no registrations",
+			"call_id", callID,
+			"target", ic.TargetExtension.Extension,
+		)
+		if h.waitForPushRegistration(ctx, ic.TargetExtension, callID, ic.CallerIDNum) {
+			// App re-registered — retry routing.
+			route, err = h.router.RouteInternalCall(ctx, ic)
+		}
+	}
+
 	if err != nil {
 		switch err {
 		case ErrDND:
@@ -602,13 +627,7 @@ func (h *InviteHandler) handleInboundCall(req *sip.Request, tx sip.ServerTransac
 			h.respondErrorWithCDR(req, tx, 486, "Busy Here", callID)
 			return
 		case ErrNoRegistrations:
-			h.logger.Info("inbound call failed: no registrations",
-				"call_id", callID,
-				"target", ic.TargetExtension.Extension,
-			)
-			// Send push notification to wake mobile apps for this extension.
-			h.sendPushForExtension(ic.TargetExtension, callID, ic.CallerIDNum)
-			// Try follow-me if enabled (no registered devices at all).
+			// Push wait already attempted above — fall through to follow-me.
 			if h.tryFollowMe(ctx, req, tx, ic.TargetExtension, callID, ic.CallerIDName, ic.CallerIDNum) {
 				return
 			}
@@ -1436,4 +1455,40 @@ func (h *InviteHandler) sendPushForExtension(ext *models.Extension, callID strin
 	}
 
 	return sent
+}
+
+// waitForPushRegistration sends push notifications for the given extension and
+// waits up to defaultPushWaitTimeout for the mobile app to re-register. Returns
+// true if a registration was received within the timeout, meaning the caller
+// should retry routing the call.
+func (h *InviteHandler) waitForPushRegistration(ctx context.Context, ext *models.Extension, callID string, callerID string) bool {
+	pushed := h.sendPushForExtension(ext, callID, callerID)
+	if pushed == 0 || h.regNotifier == nil {
+		return false
+	}
+
+	h.logger.Info("push sent, waiting for app to register",
+		"call_id", callID,
+		"extension", ext.Extension,
+		"push_count", pushed,
+		"wait_timeout", defaultPushWaitTimeout,
+	)
+
+	waitCtx, waitCancel := context.WithTimeout(ctx, defaultPushWaitTimeout)
+	registered := h.regNotifier.WaitForRegistration(waitCtx, ext.ID)
+	waitCancel()
+
+	if registered {
+		h.logger.Info("app registered after push, retrying call routing",
+			"call_id", callID,
+			"extension", ext.Extension,
+		)
+	} else {
+		h.logger.Info("push wait timed out, no registration received",
+			"call_id", callID,
+			"extension", ext.Extension,
+		)
+	}
+
+	return registered
 }

@@ -26,6 +26,7 @@ type Registrar struct {
 	extensions    database.ExtensionRepository
 	registrations database.RegistrationRepository
 	auth          *Authenticator
+	regNotifier   *RegistrationNotifier
 	logger        *slog.Logger
 }
 
@@ -34,12 +35,14 @@ func NewRegistrar(
 	extensions database.ExtensionRepository,
 	registrations database.RegistrationRepository,
 	auth *Authenticator,
+	regNotifier *RegistrationNotifier,
 	logger *slog.Logger,
 ) *Registrar {
 	return &Registrar{
 		extensions:    extensions,
 		registrations: registrations,
 		auth:          auth,
+		regNotifier:   regNotifier,
 		logger:        logger.With("subsystem", "registrar"),
 	}
 }
@@ -177,6 +180,11 @@ func (r *Registrar) HandleRegister(req *sip.Request, tx sip.ServerTransaction) {
 		"source", req.Source(),
 		"push_token_present", pushToken != "",
 	)
+
+	// Notify any push-wait callers that this extension has registered.
+	if r.regNotifier != nil {
+		r.regNotifier.Notify(ext.ID)
+	}
 
 	// Send 200 OK with the registered Contact and Expires.
 	res := sip.NewResponseFromRequest(req, 200, "OK", nil)

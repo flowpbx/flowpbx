@@ -17,6 +17,10 @@ import (
 	"github.com/flowpbx/flowpbx/internal/push"
 )
 
+// defaultPushWaitTimeout is the time to wait for a mobile app to re-register
+// after receiving a push notification before continuing the call flow.
+const defaultPushWaitTimeout = 5 * time.Second
+
 // FlowSIPActions implements flow.SIPActions, bridging the flow engine's node
 // handlers to the SIP stack's call routing and forking infrastructure.
 type FlowSIPActions struct {
@@ -31,6 +35,7 @@ type FlowSIPActions struct {
 	conferenceMgr  *media.ConferenceManager
 	cdrs           database.CDRRepository
 	pushClient     *push.Client
+	regNotifier    *RegistrationNotifier
 	proxyIP        string
 	dataDir        string
 	logger         *slog.Logger
@@ -49,6 +54,7 @@ func NewFlowSIPActions(
 	conferenceMgr *media.ConferenceManager,
 	cdrs database.CDRRepository,
 	pushClient *push.Client,
+	regNotifier *RegistrationNotifier,
 	proxyIP string,
 	dataDir string,
 	logger *slog.Logger,
@@ -65,6 +71,7 @@ func NewFlowSIPActions(
 		conferenceMgr:  conferenceMgr,
 		cdrs:           cdrs,
 		pushClient:     pushClient,
+		regNotifier:    regNotifier,
 		proxyIP:        proxyIP,
 		dataDir:        dataDir,
 		logger:         logger.With("subsystem", "flow_sip_actions"),
@@ -103,8 +110,52 @@ func (a *FlowSIPActions) RingExtension(ctx context.Context, callCtx *flow.CallCo
 		// Send push notification to wake mobile apps for this extension.
 		// Push tokens may exist on recently expired registrations that
 		// haven't been cleaned up yet.
-		a.sendPushForExtension(regs, ext, callCtx.CallID, callCtx.CallerIDNum)
-		return &flow.RingResult{NoRegistrations: true}, nil
+		pushed := a.sendPushForExtension(regs, ext, callCtx.CallID, callCtx.CallerIDNum)
+
+		// If push notifications were sent and we have a registration notifier,
+		// wait for the mobile app to re-register before giving up.
+		if pushed > 0 && a.regNotifier != nil {
+			a.logger.Info("push sent, waiting for app to register",
+				"call_id", callCtx.CallID,
+				"extension", ext.Extension,
+				"push_count", pushed,
+				"wait_timeout", defaultPushWaitTimeout,
+			)
+
+			waitCtx, waitCancel := context.WithTimeout(ctx, defaultPushWaitTimeout)
+			registered := a.regNotifier.WaitForRegistration(waitCtx, ext.ID)
+			waitCancel()
+
+			if registered {
+				a.logger.Info("app registered after push, retrying ring",
+					"call_id", callCtx.CallID,
+					"extension", ext.Extension,
+				)
+
+				// Re-fetch registrations — the app should now have an active one.
+				regs, err = a.registrations.GetByExtensionID(ctx, ext.ID)
+				if err != nil {
+					return nil, fmt.Errorf("looking up registrations after push wait for extension %s: %w", ext.Extension, err)
+				}
+				now = time.Now()
+				active = active[:0]
+				for _, reg := range regs {
+					if reg.Expires.After(now) {
+						active = append(active, reg)
+					}
+				}
+			} else {
+				a.logger.Info("push wait timed out, no registration received",
+					"call_id", callCtx.CallID,
+					"extension", ext.Extension,
+				)
+			}
+		}
+
+		// Still no active registrations after push wait — give up.
+		if len(active) == 0 {
+			return &flow.RingResult{NoRegistrations: true}, nil
+		}
 	}
 
 	// Check if all devices are already busy.
@@ -1128,12 +1179,14 @@ func (a *FlowSIPActions) JoinConference(ctx context.Context, callCtx *flow.CallC
 // sendPushForExtension sends push wake-up notifications for registrations
 // that have push tokens. This is called when no active registrations exist
 // for an extension — the push notification wakes the mobile app so it can
-// re-register and accept the call.
-func (a *FlowSIPActions) sendPushForExtension(regs []models.Registration, ext *models.Extension, callID string, callerID string) {
+// re-register and accept the call. Returns the number of push notifications
+// dispatched.
+func (a *FlowSIPActions) sendPushForExtension(regs []models.Registration, ext *models.Extension, callID string, callerID string) int {
 	if a.pushClient == nil || !a.pushClient.Configured() {
-		return
+		return 0
 	}
 
+	sent := 0
 	seen := make(map[string]bool)
 	for _, reg := range regs {
 		if reg.PushToken == "" || reg.PushPlatform == "" {
@@ -1173,7 +1226,10 @@ func (a *FlowSIPActions) sendPushForExtension(regs []models.Registration, ext *m
 				"delivered", delivered,
 			)
 		}(reg.PushToken, reg.PushPlatform)
+
+		sent++
 	}
+	return sent
 }
 
 // Ensure FlowSIPActions satisfies the flow.SIPActions interface.

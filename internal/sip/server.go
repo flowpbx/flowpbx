@@ -66,7 +66,8 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sys
 	trunks := database.NewTrunkRepository(db)
 
 	auth := NewAuthenticator(extensions, logger)
-	registrar := NewRegistrar(extensions, registrations, auth, logger)
+	regNotifier := NewRegistrationNotifier()
+	registrar := NewRegistrar(extensions, registrations, auth, regNotifier, logger)
 	trunkRegistrar := NewTrunkRegistrar(ua, logger)
 
 	forker, err := NewForker(ua, logger)
@@ -115,10 +116,10 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sys
 	// Create the flow engine for inbound call routing via visual flow graphs.
 	voicemailMessages := database.NewVoicemailMessageRepository(db)
 	flowEngine := flow.NewEngine(callFlows, cdrs, nil, logger)
-	flowSIPActions := NewFlowSIPActions(extensions, registrations, forker, outboundRouter, dialogMgr, pendingMgr, sessionMgr, dtmfMgr, conferenceMgr, cdrs, pushClient, proxyIP, cfg.DataDir, logger)
+	flowSIPActions := NewFlowSIPActions(extensions, registrations, forker, outboundRouter, dialogMgr, pendingMgr, sessionMgr, dtmfMgr, conferenceMgr, cdrs, pushClient, regNotifier, proxyIP, cfg.DataDir, logger)
 	nodes.RegisterAll(flowEngine, flowSIPActions, extensions, voicemailMessages, sysConfig, enc, emailSend, cfg.DataDir, logger)
 
-	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, sysConfig, flowEngine, flowSIPActions, pushClient, proxyIP, cfg.DataDir, logger)
+	inviteHandler := NewInviteHandler(extensions, registrations, inboundNumbers, trunks, trunkRegistrar, auth, outboundRouter, forker, dialogMgr, pendingMgr, sessionMgr, cdrs, sysConfig, flowEngine, flowSIPActions, pushClient, regNotifier, proxyIP, cfg.DataDir, logger)
 
 	s := &Server{
 		cfg:            cfg,

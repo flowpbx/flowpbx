@@ -10,6 +10,7 @@ import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.os.PowerManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -19,6 +20,7 @@ class MainActivity : FlutterActivity() {
     private var audioFocusRequest: AudioFocusRequest? = null
     private var methodChannel: MethodChannel? = null
     private var headsetReceiver: BroadcastReceiver? = null
+    private var proximityWakeLock: PowerManager.WakeLock? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -59,8 +61,26 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+        // Proximity sensor platform channel.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.flowpbx.mobile/proximity")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "enable" -> {
+                        enableProximitySensor()
+                        result.success(true)
+                    }
+                    "disable" -> {
+                        disableProximitySensor()
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
     override fun onDestroy() {
         unregisterHeadsetReceiver()
+        disableProximitySensor()
         super.onDestroy()
     }
 
@@ -176,5 +196,28 @@ class MainActivity : FlutterActivity() {
             }
             headsetReceiver = null
         }
+    }
+
+    /// Acquire a proximity wake lock to turn screen off when near ear.
+    @Suppress("DEPRECATION")
+    private fun enableProximitySensor() {
+        if (proximityWakeLock?.isHeld == true) return
+
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        proximityWakeLock = powerManager.newWakeLock(
+            PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
+            "flowpbx:proximity"
+        )
+        proximityWakeLock?.acquire()
+    }
+
+    /// Release the proximity wake lock.
+    private fun disableProximitySensor() {
+        proximityWakeLock?.let {
+            if (it.isHeld) {
+                it.release()
+            }
+        }
+        proximityWakeLock = null
     }
 }

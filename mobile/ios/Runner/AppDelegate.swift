@@ -39,6 +39,25 @@ import AVFoundation
             }
         }
 
+        // Proximity sensor platform channel.
+        let proximityChannel = FlutterMethodChannel(
+            name: "com.flowpbx.mobile/proximity",
+            binaryMessenger: controller.binaryMessenger
+        )
+
+        proximityChannel.setMethodCallHandler { (call, result) in
+            switch call.method {
+            case "enable":
+                UIDevice.current.isProximityMonitoringEnabled = true
+                result(true)
+            case "disable":
+                UIDevice.current.isProximityMonitoringEnabled = false
+                result(true)
+            default:
+                result(FlutterMethodNotImplemented)
+            }
+        }
+
         // Observe audio route changes (Bluetooth connect/disconnect, headset plug).
         NotificationCenter.default.addObserver(
             self,

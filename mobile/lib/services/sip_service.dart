@@ -8,6 +8,7 @@ import 'package:siprix_voip_sdk/siprix_voip_sdk.dart';
 
 import 'package:flowpbx_mobile/models/call_state.dart';
 import 'package:flowpbx_mobile/services/audio_session_service.dart';
+import 'package:flowpbx_mobile/services/proximity_service.dart';
 import 'package:flowpbx_mobile/services/ringtone_service.dart';
 
 /// Registration state for external consumers.
@@ -28,6 +29,7 @@ class SipService {
   String _regResponse = '';
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   final _audioSessionService = AudioSessionService();
+  final _proximityService = ProximityService();
   final _ringtoneService = RingtoneService();
 
   /// Stream of registration state changes.
@@ -224,6 +226,7 @@ class SipService {
     } catch (_) {
       // Call may already be terminated.
     }
+    await _proximityService.disable();
     _setCallState(ActiveCallState.idle);
     await _audioSessionService.deactivate();
   }
@@ -413,12 +416,14 @@ class SipService {
       status: CallStatus.connected,
       connectedAt: DateTime.now(),
     ));
+    _proximityService.enable();
   }
 
   /// Callback: call terminated (BYE received or sent).
   void _onCallTerminated(int callId, int statusCode) {
     if (callId != _callState.callId) return;
     _ringtoneService.stopRinging();
+    _proximityService.disable();
     _setCallState(ActiveCallState.idle);
     _audioSessionService.deactivate();
   }
@@ -436,6 +441,7 @@ class SipService {
   /// Callback: call transferred.
   void _onCallTransferred(int callId, int statusCode) {
     if (callId != _callState.callId) return;
+    _proximityService.disable();
     _setCallState(ActiveCallState.idle);
     _audioSessionService.deactivate();
   }

@@ -331,8 +331,14 @@ func (tr *TrunkRegistrar) sendRegister(ctx context.Context, entry *trunkEntry, e
 	req := sip.NewRequest(sip.REGISTER, recipient)
 	req.SetTransport(strings.ToUpper(trunk.Transport))
 
-	// Add Contact header with our local address.
+	// Set From and To headers with the extension's AOR (Address of Record).
+	// The registrar uses these to identify which extension is registering.
 	username := trunk.Username
+	aor := fmt.Sprintf("<sip:%s@%s>", username, trunk.Host)
+	req.AppendHeader(sip.NewHeader("From", aor))
+	req.AppendHeader(sip.NewHeader("To", aor))
+
+	// Add Contact header with our local address.
 	contactURI := fmt.Sprintf("<sip:%s@%s>", username, tr.ua.Hostname())
 	req.AppendHeader(sip.NewHeader("Contact", contactURI))
 

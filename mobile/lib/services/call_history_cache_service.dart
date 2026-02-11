@@ -18,7 +18,7 @@ class CallHistoryCacheService {
     final path = join(dir.path, 'call_history_cache.db');
     _db = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE call_history (
@@ -38,6 +38,22 @@ class CallHistoryCacheService {
         await db.execute(
           'CREATE INDEX idx_ch_start_time ON call_history(start_time)',
         );
+        await db.execute('''
+          CREATE TABLE app_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+          )
+        ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS app_meta (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL
+            )
+          ''');
+        }
       },
     );
     return _db!;
@@ -77,6 +93,28 @@ class CallHistoryCacheService {
       orderBy: 'start_time DESC',
     );
     return rows.map(_fromRow).toList();
+  }
+
+  /// Get the last time the user viewed missed calls (for badge count).
+  Future<DateTime?> getLastSeenMissedCall() async {
+    final db = await _getDb();
+    final rows = await db.query(
+      'app_meta',
+      where: 'key = ?',
+      whereArgs: ['last_seen_missed_call'],
+    );
+    if (rows.isEmpty) return null;
+    return DateTime.parse(rows.first['value'] as String);
+  }
+
+  /// Persist the last-seen missed call timestamp.
+  Future<void> setLastSeenMissedCall(DateTime ts) async {
+    final db = await _getDb();
+    await db.insert(
+      'app_meta',
+      {'key': 'last_seen_missed_call', 'value': ts.toIso8601String()},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   /// Close the database (e.g. on logout).

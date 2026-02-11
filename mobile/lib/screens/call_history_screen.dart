@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/models/call_history_entry.dart';
 import 'package:flowpbx_mobile/providers/call_history_provider.dart';
 import 'package:flowpbx_mobile/providers/call_provider.dart';
+import 'package:flowpbx_mobile/providers/missed_call_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
 
 class CallHistoryScreen extends ConsumerStatefulWidget {
@@ -19,6 +20,8 @@ class _CallHistoryScreenState extends ConsumerState<CallHistoryScreen> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
+    // Mark all missed calls as seen so the badge clears.
+    ref.read(lastSeenMissedCallProvider.notifier).markAllSeen();
   }
 
   @override

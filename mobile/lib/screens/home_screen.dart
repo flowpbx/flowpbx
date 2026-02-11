@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flowpbx_mobile/providers/auth_provider.dart';
+import 'package:flowpbx_mobile/providers/missed_call_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
 import 'package:flowpbx_mobile/services/battery_optimization_service.dart';
 import 'package:flowpbx_mobile/widgets/sip_status_indicator.dart';
@@ -67,9 +68,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         title: const Text('FlowPBX'),
         actions: [
           const SipStatusIndicator(),
-          IconButton(
-            icon: const Icon(Icons.history),
-            tooltip: 'Call History',
+          _MissedCallBadge(
             onPressed: () => context.push('/history'),
           ),
           IconButton(
@@ -152,6 +151,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         child: const Icon(Icons.dialpad, size: 32, color: Colors.white),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+    );
+  }
+}
+
+/// History icon button with a missed-call badge overlay.
+class _MissedCallBadge extends ConsumerWidget {
+  final VoidCallback onPressed;
+
+  const _MissedCallBadge({required this.onPressed});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final count = ref.watch(missedCallCountProvider);
+
+    return IconButton(
+      icon: Badge(
+        isLabelVisible: count > 0,
+        label: Text(count > 99 ? '99+' : '$count'),
+        child: const Icon(Icons.history),
+      ),
+      tooltip: 'Call History',
+      onPressed: onPressed,
     );
   }
 }

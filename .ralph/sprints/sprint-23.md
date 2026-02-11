@@ -14,7 +14,7 @@
 - [x] Implement local caching of call history (SQLite or Hive)
 - [x] Implement pull-to-refresh and pagination
 - [x] Tap to call back from history entry
-- [ ] Show missed call badge count
+- [x] Show missed call badge count
 
 ### Voicemail
 - [ ] Create voicemail list screen (shows messages from all boxes linked to extension)

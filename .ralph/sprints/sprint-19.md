@@ -21,7 +21,7 @@
 - [x] Containerize push gateway for deployment
 
 ### PBX ↔ Push Gateway Integration
-- [ ] Create `internal/push/client.go` — push gateway HTTP client
+- [x] Create `internal/push/client.go` — push gateway HTTP client
 - [ ] On incoming call to offline extension: check registrations for push token → send push request
 - [ ] Implement push wait: hold call for configurable timeout (default 5s) waiting for app to register
 - [ ] If no registration within timeout: continue flow (voicemail, next node, etc.)

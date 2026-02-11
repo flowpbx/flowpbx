@@ -14,18 +14,20 @@ import (
 // Config holds all runtime configuration for the FlowPBX server.
 // Precedence: CLI flags > env vars > defaults.
 type Config struct {
-	DataDir       string
-	HTTPPort      int
-	SIPPort       int
-	SIPTLSPort    int
-	RTPPortMin    int
-	RTPPortMax    int
-	TLSCert       string
-	TLSKey        string
-	LogLevel      string
-	CORSOrigins   string
-	ExternalIP    string // public IP for SDP rewriting (media proxy)
-	EncryptionKey string // 32-byte hex-encoded key for AES-256-GCM
+	DataDir        string
+	HTTPPort       int
+	SIPPort        int
+	SIPTLSPort     int
+	RTPPortMin     int
+	RTPPortMax     int
+	TLSCert        string
+	TLSKey         string
+	LogLevel       string
+	CORSOrigins    string
+	ExternalIP     string // public IP for SDP rewriting (media proxy)
+	EncryptionKey  string // 32-byte hex-encoded key for AES-256-GCM
+	PushGatewayURL string // URL of the push gateway service (e.g., "https://push.flowpbx.com")
+	LicenseKey     string // license key for the push gateway
 }
 
 // defaults
@@ -61,6 +63,8 @@ func Load() (*Config, error) {
 	fs.StringVar(&cfg.CORSOrigins, "cors-origins", "", "comma-separated list of allowed CORS origins (use * for all)")
 	fs.StringVar(&cfg.ExternalIP, "external-ip", "", "public IP address for SDP rewriting (auto-detected if empty)")
 	fs.StringVar(&cfg.EncryptionKey, "encryption-key", "", "hex-encoded 32-byte key for AES-256-GCM encryption of sensitive fields")
+	fs.StringVar(&cfg.PushGatewayURL, "push-gateway-url", "", "URL of the push gateway service for mobile push notifications")
+	fs.StringVar(&cfg.LicenseKey, "license-key", "", "license key for authenticating with the push gateway")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return nil, fmt.Errorf("parsing flags: %w", err)
@@ -89,18 +93,20 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 
 	// Map of flag name to env var name.
 	envMap := map[string]string{
-		"data-dir":       envPrefix + "DATA_DIR",
-		"http-port":      envPrefix + "HTTP_PORT",
-		"sip-port":       envPrefix + "SIP_PORT",
-		"sip-tls-port":   envPrefix + "SIP_TLS_PORT",
-		"rtp-port-min":   envPrefix + "RTP_PORT_MIN",
-		"rtp-port-max":   envPrefix + "RTP_PORT_MAX",
-		"tls-cert":       envPrefix + "TLS_CERT",
-		"tls-key":        envPrefix + "TLS_KEY",
-		"log-level":      envPrefix + "LOG_LEVEL",
-		"cors-origins":   envPrefix + "CORS_ORIGINS",
-		"external-ip":    envPrefix + "EXTERNAL_IP",
-		"encryption-key": envPrefix + "ENCRYPTION_KEY",
+		"data-dir":         envPrefix + "DATA_DIR",
+		"http-port":        envPrefix + "HTTP_PORT",
+		"sip-port":         envPrefix + "SIP_PORT",
+		"sip-tls-port":     envPrefix + "SIP_TLS_PORT",
+		"rtp-port-min":     envPrefix + "RTP_PORT_MIN",
+		"rtp-port-max":     envPrefix + "RTP_PORT_MAX",
+		"tls-cert":         envPrefix + "TLS_CERT",
+		"tls-key":          envPrefix + "TLS_KEY",
+		"log-level":        envPrefix + "LOG_LEVEL",
+		"cors-origins":     envPrefix + "CORS_ORIGINS",
+		"external-ip":      envPrefix + "EXTERNAL_IP",
+		"encryption-key":   envPrefix + "ENCRYPTION_KEY",
+		"push-gateway-url": envPrefix + "PUSH_GATEWAY_URL",
+		"license-key":      envPrefix + "LICENSE_KEY",
 	}
 
 	for flagName, envVar := range envMap {
@@ -146,6 +152,10 @@ func applyEnvOverrides(fs *flag.FlagSet, cfg *Config) {
 			cfg.ExternalIP = val
 		case "encryption-key":
 			cfg.EncryptionKey = val
+		case "push-gateway-url":
+			cfg.PushGatewayURL = val
+		case "license-key":
+			cfg.LicenseKey = val
 		}
 	}
 }

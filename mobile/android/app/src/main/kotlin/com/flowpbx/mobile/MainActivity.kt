@@ -10,7 +10,9 @@ import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.net.Uri
 import android.os.PowerManager
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -72,6 +74,23 @@ class MainActivity : FlutterActivity() {
                     "disable" -> {
                         disableProximitySensor()
                         result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // Battery optimization platform channel.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.flowpbx.mobile/battery_optimization")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isIgnoringBatteryOptimizations" -> {
+                        result.success(isIgnoringBatteryOptimizations())
+                    }
+                    "requestIgnoreBatteryOptimizations" -> {
+                        result.success(requestIgnoreBatteryOptimizations())
+                    }
+                    "openBatteryOptimizationSettings" -> {
+                        result.success(openBatteryOptimizationSettings())
                     }
                     else -> result.notImplemented()
                 }
@@ -251,5 +270,38 @@ class MainActivity : FlutterActivity() {
             }
         }
         proximityWakeLock = null
+    }
+
+    /// Check if the app is exempt from battery optimization (Doze).
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        return powerManager.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    /// Request the system to whitelist this app from battery optimization.
+    /// Launches ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS which shows a
+    /// system confirmation dialog.
+    @Suppress("BatteryLife")
+    private fun requestIgnoreBatteryOptimizations(): Boolean {
+        return try {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /// Open the general battery optimization settings page as a fallback.
+    private fun openBatteryOptimizationSettings(): Boolean {
+        return try {
+            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            startActivity(intent)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }

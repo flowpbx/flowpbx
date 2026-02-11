@@ -8,7 +8,7 @@ Implement ONE task from the current sprint, commit it, and exit.
 
 ## Sprint System
 
-Sprints are in `.ralph/sprints/sprint-XX.md` (01-20).
+Sprints are in `.ralph/sprints/sprint-XX.md` (01-24).
 
 1. **Find current sprint**: Check `CURRENT_SPRINT` file, or find first sprint with incomplete tasks
 2. **Read sprint file**: Get the task list and referenced specs

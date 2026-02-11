@@ -8,12 +8,16 @@ import 'package:flowpbx_mobile/screens/home_screen.dart';
 import 'package:flowpbx_mobile/screens/contacts_screen.dart';
 import 'package:flowpbx_mobile/screens/dialpad_screen.dart';
 import 'package:flowpbx_mobile/screens/call_screen.dart';
+import 'package:flowpbx_mobile/screens/incoming_call_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authStateProvider);
   final callState = ref.watch(callStateProvider);
-  final hasActiveCall =
-      callState.valueOrNull?.isActive ?? false;
+  final call = callState.valueOrNull;
+  final hasActiveCall = call?.isActive ?? false;
+  final isIncomingRinging = call != null &&
+      call.isIncoming &&
+      call.status == CallStatus.ringing;
 
   return GoRouter(
     initialLocation: '/',
@@ -21,6 +25,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isAuthenticated = authState.valueOrNull?.isAuthenticated ?? false;
       final isLoginRoute = state.matchedLocation == '/login';
       final isCallRoute = state.matchedLocation == '/call';
+      final isIncomingRoute = state.matchedLocation == '/incoming';
 
       if (!isAuthenticated && !isLoginRoute) {
         return '/login';
@@ -29,13 +34,21 @@ final routerProvider = Provider<GoRouter>((ref) {
         return '/';
       }
 
-      // Redirect to call screen when a call is active.
-      if (isAuthenticated && hasActiveCall && !isCallRoute) {
+      // Redirect to incoming call screen when ringing with an inbound call.
+      if (isAuthenticated && isIncomingRinging && !isIncomingRoute) {
+        return '/incoming';
+      }
+
+      // Redirect to in-call screen for active calls that are not incoming ringing.
+      if (isAuthenticated &&
+          hasActiveCall &&
+          !isIncomingRinging &&
+          !isCallRoute) {
         return '/call';
       }
 
-      // Redirect away from call screen when no call is active.
-      if (isCallRoute && !hasActiveCall) {
+      // Redirect away from call/incoming screens when no call is active.
+      if ((isCallRoute || isIncomingRoute) && !hasActiveCall) {
         return '/';
       }
 
@@ -64,6 +77,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/call',
         builder: (context, state) => const CallScreen(),
+      ),
+      GoRoute(
+        path: '/incoming',
+        builder: (context, state) => const IncomingCallScreen(),
       ),
     ],
   );

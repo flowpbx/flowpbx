@@ -9,7 +9,7 @@
 ## Tasks
 
 ### Project Setup (`mobile/`)
-- [ ] Create Flutter project in `mobile/` directory within monorepo
+- [x] Create Flutter project in `mobile/` directory within monorepo
 - [ ] Configure state management (Riverpod or Bloc)
 - [ ] Set up project structure: screens, services, models, widgets, providers
 - [ ] Configure app icon and branding assets

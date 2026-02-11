@@ -6,6 +6,7 @@ import 'package:flowpbx_mobile/models/directory_entry.dart';
 import 'package:flowpbx_mobile/providers/call_provider.dart';
 import 'package:flowpbx_mobile/providers/directory_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
+import 'package:flowpbx_mobile/services/app_error.dart';
 
 class DialpadScreen extends ConsumerStatefulWidget {
   final String? initialNumber;
@@ -134,7 +135,7 @@ class _DialpadScreenState extends ConsumerState<DialpadScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Call failed: $e')),
+        SnackBar(content: Text('Call failed: ${formatError(e)}')),
       );
     } finally {
       if (mounted) {

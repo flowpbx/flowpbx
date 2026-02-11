@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/providers/auth_provider.dart';
+import 'package:flowpbx_mobile/services/app_error.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -41,7 +42,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           );
     } catch (e) {
       setState(() {
-        _error = 'Login failed. Check your credentials and server URL.';
+        _error = 'Login failed. ${formatError(e)}';
       });
     } finally {
       if (mounted) {

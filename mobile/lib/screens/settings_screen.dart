@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:flowpbx_mobile/providers/auth_provider.dart';
 import 'package:flowpbx_mobile/providers/profile_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
+import 'package:flowpbx_mobile/services/app_error.dart';
+import 'package:flowpbx_mobile/widgets/error_banner.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -24,25 +26,10 @@ class SettingsScreen extends ConsumerWidget {
       ),
       body: profileAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.error_outline,
-                  size: 48, color: Theme.of(context).colorScheme.error),
-              const SizedBox(height: 16),
-              Text('Failed to load profile',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              Text(error.toString(),
-                  style: Theme.of(context).textTheme.bodySmall),
-              const SizedBox(height: 16),
-              FilledButton.tonal(
-                onPressed: () => ref.read(profileProvider.notifier).refresh(),
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
+        error: (error, _) => ErrorBanner(
+          error: error,
+          fallbackMessage: 'Failed to load profile',
+          onRetry: () => ref.read(profileProvider.notifier).refresh(),
         ),
         data: (profile) {
           if (profile == null) {
@@ -230,7 +217,7 @@ class _DndToggleState extends ConsumerState<_DndToggle> {
               } catch (e) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to update DND: $e')),
+                    SnackBar(content: Text('Failed to update DND. ${formatError(e)}')),
                   );
                 }
               } finally {
@@ -276,7 +263,7 @@ class _FollowMeToggleState extends ConsumerState<_FollowMeToggle> {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                        content: Text('Failed to update follow-me: $e')),
+                        content: Text('Failed to update follow-me. ${formatError(e)}')),
                   );
                 }
               } finally {

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/models/voicemail_entry.dart';
 import 'package:flowpbx_mobile/providers/voicemail_player_provider.dart';
 import 'package:flowpbx_mobile/providers/voicemail_provider.dart';
+import 'package:flowpbx_mobile/widgets/error_banner.dart';
 
 class VoicemailScreen extends ConsumerWidget {
   const VoicemailScreen({super.key});
@@ -20,27 +21,10 @@ class VoicemailScreen extends ConsumerWidget {
       ),
       body: voicemailAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.error_outline,
-                size: 48,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Failed to load voicemails',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-              const SizedBox(height: 8),
-              FilledButton.tonal(
-                onPressed: () => ref.invalidate(voicemailProvider),
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
+        error: (error, _) => ErrorBanner(
+          error: error,
+          fallbackMessage: 'Failed to load voicemails',
+          onRetry: () => ref.invalidate(voicemailProvider),
         ),
         data: (entries) {
           if (entries.isEmpty) {

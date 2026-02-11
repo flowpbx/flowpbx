@@ -41,7 +41,7 @@
 - [x] Show online/offline presence indicators (registration status)
 
 ### Polish
-- [ ] Implement app-wide error handling and user-friendly error messages
+- [x] Implement app-wide error handling and user-friendly error messages
 - [ ] Add loading states and skeleton screens
 - [ ] Implement network connectivity monitoring (show offline banner)
 - [ ] Test on iOS 15+ and Android 10+

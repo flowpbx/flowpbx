@@ -5,6 +5,8 @@ import 'package:flowpbx_mobile/providers/call_history_provider.dart';
 import 'package:flowpbx_mobile/providers/call_provider.dart';
 import 'package:flowpbx_mobile/providers/missed_call_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
+import 'package:flowpbx_mobile/services/app_error.dart';
+import 'package:flowpbx_mobile/widgets/error_banner.dart';
 
 class CallHistoryScreen extends ConsumerStatefulWidget {
   const CallHistoryScreen({super.key});
@@ -55,27 +57,10 @@ class _CallHistoryScreenState extends ConsumerState<CallHistoryScreen> {
       ),
       body: historyAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.error_outline,
-                size: 48,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Failed to load call history',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-              const SizedBox(height: 8),
-              FilledButton.tonal(
-                onPressed: () => ref.invalidate(callHistoryProvider),
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
+        error: (error, _) => ErrorBanner(
+          error: error,
+          fallbackMessage: 'Failed to load call history',
+          onRetry: () => ref.invalidate(callHistoryProvider),
         ),
         data: (entries) {
           if (entries.isEmpty) {
@@ -150,7 +135,7 @@ class _CallHistoryTile extends ConsumerWidget {
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Call failed: $e')),
+        SnackBar(content: Text('Call failed: ${formatError(e)}')),
       );
     }
   }

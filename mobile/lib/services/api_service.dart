@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flowpbx_mobile/services/app_error.dart';
 import 'package:flowpbx_mobile/services/secure_storage_service.dart';
 
 /// HTTP client for communicating with the FlowPBX REST API.
@@ -26,6 +27,12 @@ class ApiService {
             options.headers['Authorization'] = 'Bearer $token';
           }
           return handler.next(options);
+        },
+        onError: (error, handler) {
+          // Wrap Dio errors into user-friendly AppExceptions.
+          return handler.next(error.copyWith(
+            error: AppException.fromDio(error),
+          ));
         },
       ),
     );

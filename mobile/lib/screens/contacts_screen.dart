@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flowpbx_mobile/models/directory_entry.dart';
 import 'package:flowpbx_mobile/providers/directory_provider.dart';
+import 'package:flowpbx_mobile/widgets/error_banner.dart';
 
 class ContactsScreen extends ConsumerWidget {
   const ContactsScreen({super.key});
@@ -17,23 +18,10 @@ class ContactsScreen extends ConsumerWidget {
       ),
       body: directoryAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.error_outline,
-                  size: 48,
-                  color: Theme.of(context).colorScheme.error),
-              const SizedBox(height: 16),
-              Text('Failed to load directory',
-                  style: Theme.of(context).textTheme.bodyLarge),
-              const SizedBox(height: 8),
-              FilledButton.tonal(
-                onPressed: () => ref.invalidate(directoryProvider),
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
+        error: (error, _) => ErrorBanner(
+          error: error,
+          fallbackMessage: 'Failed to load directory',
+          onRetry: () => ref.invalidate(directoryProvider),
         ),
         data: (entries) => _DirectoryList(entries: entries),
       ),

@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/models/call_history_entry.dart';
 import 'package:flowpbx_mobile/providers/call_history_provider.dart';
-import 'package:go_router/go_router.dart';
+import 'package:flowpbx_mobile/providers/call_provider.dart';
+import 'package:flowpbx_mobile/providers/sip_provider.dart';
 
 class CallHistoryScreen extends ConsumerStatefulWidget {
   const CallHistoryScreen({super.key});
@@ -123,16 +124,41 @@ class _CallHistoryScreenState extends ConsumerState<CallHistoryScreen> {
   }
 }
 
-class _CallHistoryTile extends StatelessWidget {
+class _CallHistoryTile extends ConsumerWidget {
   final CallHistoryEntry entry;
 
   const _CallHistoryTile({required this.entry});
 
+  Future<void> _callBack(BuildContext context, WidgetRef ref) async {
+    final number = entry.remoteNumber;
+    if (number.isEmpty) return;
+
+    final sipService = ref.read(sipServiceProvider);
+    if (!sipService.isRegistered) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Not registered — cannot place call')),
+      );
+      return;
+    }
+
+    try {
+      await sipService.invite(number);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Call failed: $e')),
+      );
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
     final icon = _directionIcon();
     final iconColor = _iconColor(colorScheme);
+    final callAsync = ref.watch(callStateProvider);
+    final hasActiveCall = callAsync.valueOrNull?.isActive ?? false;
 
     return ListTile(
       leading: CircleAvatar(
@@ -162,28 +188,39 @@ class _CallHistoryTile extends StatelessWidget {
           ],
         ],
       ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            _formatTime(context, entry.startTime),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                _formatTime(context, entry.startTime),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                _formatDate(entry.startTime),
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+                    ),
+              ),
+            ],
           ),
-          const SizedBox(height: 2),
-          Text(
-            _formatDate(entry.startTime),
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant.withOpacity(0.7),
-                ),
+          const SizedBox(width: 8),
+          Icon(
+            Icons.call,
+            size: 20,
+            color: hasActiveCall
+                ? colorScheme.onSurfaceVariant.withOpacity(0.3)
+                : Colors.green,
           ),
         ],
       ),
-      onTap: () {
-        context.go('/dialpad?number=${entry.remoteNumber}');
-      },
+      onTap: hasActiveCall ? null : () => _callBack(context, ref),
     );
   }
 

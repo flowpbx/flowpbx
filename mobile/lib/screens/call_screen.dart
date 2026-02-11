@@ -83,6 +83,17 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     await sipService.sendDtmf(tone);
   }
 
+  Future<void> _showTransferDialog() async {
+    final destination = await showDialog<String>(
+      context: context,
+      builder: (context) => _TransferDialog(),
+    );
+    if (destination == null || destination.isEmpty) return;
+
+    final sipService = ref.read(sipServiceProvider);
+    await sipService.transferBlind(destination);
+  }
+
   @override
   Widget build(BuildContext context) {
     final callAsync = ref.watch(callStateProvider);
@@ -220,6 +231,12 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                     label: 'Keypad',
                     isActive: false,
                     onPressed: () => setState(() => _showDtmfPad = true),
+                  ),
+                  _CallControlButton(
+                    icon: Icons.phone_forwarded,
+                    label: 'Transfer',
+                    isActive: false,
+                    onPressed: _showTransferDialog,
                   ),
                 ],
               ),
@@ -366,6 +383,50 @@ class _DtmfButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Dialog for entering a blind transfer destination.
+class _TransferDialog extends StatefulWidget {
+  @override
+  State<_TransferDialog> createState() => _TransferDialogState();
+}
+
+class _TransferDialogState extends State<_TransferDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Transfer Call'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        keyboardType: TextInputType.phone,
+        decoration: const InputDecoration(
+          labelText: 'Extension or number',
+          hintText: 'e.g. 200 or +61400000000',
+        ),
+        onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(context).pop(_controller.text.trim()),
+          child: const Text('Transfer'),
+        ),
+      ],
     );
   }
 }

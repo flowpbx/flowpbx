@@ -2,8 +2,11 @@ import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:siprix_voip_sdk/accounts_model.dart';
+import 'package:siprix_voip_sdk/calls_model.dart';
 import 'package:siprix_voip_sdk/network_model.dart';
 import 'package:siprix_voip_sdk/siprix_voip_sdk.dart';
+
+import 'package:flowpbx_mobile/models/call_state.dart';
 
 /// Registration state for external consumers.
 enum SipRegState {
@@ -27,6 +30,14 @@ class SipService {
   final _regStateController = StreamController<SipRegState>.broadcast();
   Stream<SipRegState> get regStateStream => _regStateController.stream;
 
+  /// Stream of active call state changes.
+  final _callStateController =
+      StreamController<ActiveCallState>.broadcast();
+  Stream<ActiveCallState> get callStateStream => _callStateController.stream;
+
+  ActiveCallState _callState = ActiveCallState.idle;
+  ActiveCallState get callState => _callState;
+
   SipRegState get regState => _regState;
   String get regResponse => _regResponse;
   bool get isRegistered => _regState == SipRegState.registered;
@@ -44,6 +55,16 @@ class SipService {
     // Listen for registration state changes from the SDK.
     SiprixVoipSdk().accListener = AccStateListener(
       regStateChanged: _onRegStateChanged,
+    );
+
+    // Listen for call state changes from the SDK.
+    SiprixVoipSdk().callListener = CallStateListener(
+      incoming: _onCallIncoming,
+      proceeding: _onCallProceeding,
+      connected: _onCallConnected,
+      terminated: _onCallTerminated,
+      held: _onCallHeld,
+      transferred: _onCallTransferred,
     );
 
     // Listen for network state changes from the SDK.
@@ -130,6 +151,96 @@ class SipService {
     }
   }
 
+  // -- Call management --
+
+  /// Make an outbound call to the given destination (extension or number).
+  Future<int?> invite(String destination) async {
+    if (_accountId == null) throw StateError('not registered');
+
+    _setCallState(_callState.copyWith(
+      status: CallStatus.dialing,
+      remoteNumber: destination,
+      isIncoming: false,
+      isMuted: false,
+      isSpeaker: false,
+      isHeld: false,
+      connectedAt: null,
+    ));
+
+    try {
+      final dest = CallDestination(destination, _accountId!, false);
+      final callId = await SiprixVoipSdk().invite(dest);
+      _setCallState(_callState.copyWith(callId: callId));
+      return callId;
+    } catch (e) {
+      _setCallState(ActiveCallState.idle.copyWith(error: e.toString()));
+      rethrow;
+    }
+  }
+
+  /// Accept an incoming call.
+  Future<void> acceptCall() async {
+    final callId = _callState.callId;
+    if (callId == null) return;
+    await SiprixVoipSdk().accept(callId, false);
+  }
+
+  /// Reject an incoming call with 486 Busy.
+  Future<void> rejectCall() async {
+    final callId = _callState.callId;
+    if (callId == null) return;
+    await SiprixVoipSdk().reject(callId, 486);
+    _setCallState(ActiveCallState.idle);
+  }
+
+  /// Hang up the current call.
+  Future<void> hangup() async {
+    final callId = _callState.callId;
+    if (callId == null) return;
+
+    _setCallState(_callState.copyWith(status: CallStatus.disconnecting));
+    try {
+      await SiprixVoipSdk().bye(callId);
+    } catch (_) {
+      // Call may already be terminated.
+    }
+    _setCallState(ActiveCallState.idle);
+  }
+
+  /// Toggle mute on the current call.
+  Future<void> toggleMute() async {
+    final callId = _callState.callId;
+    if (callId == null) return;
+
+    final newMuted = !_callState.isMuted;
+    await SiprixVoipSdk().muteMic(callId, newMuted);
+    _setCallState(_callState.copyWith(isMuted: newMuted));
+  }
+
+  /// Toggle hold on the current call.
+  Future<void> toggleHold() async {
+    final callId = _callState.callId;
+    if (callId == null) return;
+
+    await SiprixVoipSdk().hold(callId);
+  }
+
+  /// Send DTMF tones on the current call.
+  Future<void> sendDtmf(String tones) async {
+    final callId = _callState.callId;
+    if (callId == null) return;
+
+    await SiprixVoipSdk().sendDtmf(callId, tones, 160, 60);
+  }
+
+  /// Blind transfer the current call to the given destination.
+  Future<void> transferBlind(String destination) async {
+    final callId = _callState.callId;
+    if (callId == null) return;
+
+    await SiprixVoipSdk().transferBlind(callId, destination);
+  }
+
   /// Dispose resources.
   void dispose() {
     _connectivitySub?.cancel();
@@ -139,6 +250,7 @@ class SipService {
       SiprixVoipSdk().unRegisterAccount(_accountId!).catchError((_) {});
     }
     _regStateController.close();
+    _callStateController.close();
     _initialized = false;
     _accountId = null;
   }
@@ -210,5 +322,74 @@ class SipService {
       // Network restored — refresh registration.
       refreshRegistration();
     }
+  }
+
+  // -- Call state helpers --
+
+  void _setCallState(ActiveCallState state) {
+    _callState = state;
+    _callStateController.add(state);
+  }
+
+  /// Callback: incoming call received.
+  void _onCallIncoming(int callId, int accId, bool withVideo,
+      String hdrFrom, String hdrTo) {
+    // Parse caller display name from From header (e.g. "Name" <sip:ext@domain>).
+    String remoteNumber = hdrFrom;
+    String? displayName;
+    final nameMatch = RegExp(r'"(.+?)"').firstMatch(hdrFrom);
+    if (nameMatch != null) {
+      displayName = nameMatch.group(1);
+    }
+    final extMatch = RegExp(r'sip:(\w+)@').firstMatch(hdrFrom);
+    if (extMatch != null) {
+      remoteNumber = extMatch.group(1)!;
+    }
+
+    _setCallState(ActiveCallState(
+      callId: callId,
+      status: CallStatus.ringing,
+      remoteNumber: remoteNumber,
+      remoteDisplayName: displayName,
+      isIncoming: true,
+    ));
+  }
+
+  /// Callback: outbound call proceeding (100 Trying / 180 Ringing).
+  void _onCallProceeding(int callId, String response) {
+    if (callId != _callState.callId) return;
+    // Stay in dialing state — the remote side is ringing.
+  }
+
+  /// Callback: call connected (200 OK — RTP flowing).
+  void _onCallConnected(int callId, String hdrFrom, String hdrTo,
+      bool withVideo) {
+    if (callId != _callState.callId) return;
+    _setCallState(_callState.copyWith(
+      status: CallStatus.connected,
+      connectedAt: DateTime.now(),
+    ));
+  }
+
+  /// Callback: call terminated (BYE received or sent).
+  void _onCallTerminated(int callId, int statusCode) {
+    if (callId != _callState.callId) return;
+    _setCallState(ActiveCallState.idle);
+  }
+
+  /// Callback: hold state changed.
+  void _onCallHeld(int callId, HoldState holdState) {
+    if (callId != _callState.callId) return;
+    final isHeld = holdState != HoldState.none;
+    _setCallState(_callState.copyWith(
+      status: isHeld ? CallStatus.held : CallStatus.connected,
+      isHeld: isHeld,
+    ));
+  }
+
+  /// Callback: call transferred.
+  void _onCallTransferred(int callId, int statusCode) {
+    if (callId != _callState.callId) return;
+    _setCallState(ActiveCallState.idle);
   }
 }

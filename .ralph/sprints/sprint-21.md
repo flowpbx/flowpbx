@@ -9,7 +9,7 @@
 ## Tasks
 
 ### Outbound Calls
-- [ ] Create dialpad screen with number input and call button
+- [x] Create dialpad screen with number input and call button
 - [ ] Implement contact directory from PBX API (extension list)
 - [ ] Implement contact search / filter on dialpad
 - [ ] Implement outbound SIP INVITE to PBX

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flowpbx_mobile/providers/auth_provider.dart';
 import 'package:flowpbx_mobile/screens/login_screen.dart';
 import 'package:flowpbx_mobile/screens/home_screen.dart';
+import 'package:flowpbx_mobile/screens/dialpad_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authStateProvider);
@@ -30,6 +31,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/',
         builder: (context, state) => const HomeScreen(),
+      ),
+      GoRoute(
+        path: '/dialpad',
+        builder: (context, state) => const DialpadScreen(),
       ),
     ],
   );

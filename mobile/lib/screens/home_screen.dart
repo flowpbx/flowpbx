@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:flowpbx_mobile/providers/auth_provider.dart';
 import 'package:flowpbx_mobile/providers/sip_provider.dart';
 import 'package:flowpbx_mobile/widgets/sip_status_indicator.dart';
@@ -48,16 +49,16 @@ class HomeScreen extends ConsumerWidget {
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
             ),
-            const SizedBox(height: 32),
-            Text(
-              'Ready to make calls',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
           ],
         ),
       ),
+      floatingActionButton: FloatingActionButton.large(
+        heroTag: 'dialpad',
+        onPressed: () => context.go('/dialpad'),
+        backgroundColor: Colors.green,
+        child: const Icon(Icons.dialpad, size: 32, color: Colors.white),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 }

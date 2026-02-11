@@ -24,6 +24,7 @@ dependencies:
   firebase_messaging: ^15.1.6
   sqflite: ^2.3.2
   path_provider: ^2.1.2
+  just_audio: ^0.9.40
 
 dev_dependencies:
   flutter_test:

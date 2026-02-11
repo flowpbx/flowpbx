@@ -18,10 +18,10 @@
 
 ### Voicemail
 - [x] Create voicemail list screen (shows messages from all boxes linked to extension)
-- [ ] Fetch voicemails from `GET /api/v1/app/voicemail`
-- [ ] Implement audio playback: stream from `GET /api/v1/app/voicemail/:id/audio`
-- [ ] Implement playback controls: play/pause, seek, speed (1x/1.5x/2x)
-- [ ] Mark as read on playback via `PUT /api/v1/app/voicemail/:id/read`
+- [x] Fetch voicemails from `GET /api/v1/app/voicemail`
+- [x] Implement audio playback: stream from `GET /api/v1/app/voicemail/:id/audio`
+- [x] Implement playback controls: play/pause, seek, speed (1x/1.5x/2x)
+- [x] Mark as read on playback via `PUT /api/v1/app/voicemail/:id/read`
 - [ ] Show unread voicemail badge count
 - [ ] Pull-to-refresh voicemail list
 

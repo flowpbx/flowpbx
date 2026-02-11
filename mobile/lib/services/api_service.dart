@@ -119,6 +119,16 @@ class ApiService {
     await _dio.put('/app/voicemail/$id/read');
   }
 
+  /// Build the full URL for streaming a voicemail audio file.
+  String voicemailAudioUrl(int id) {
+    return '${_dio.options.baseUrl}/app/voicemail/$id/audio';
+  }
+
+  /// Get the current auth token for use in custom HTTP headers.
+  Future<String?> getAuthToken() async {
+    return _storage.getToken();
+  }
+
   /// Unwrap the API envelope: { "data": ... }
   Map<String, dynamic> _unwrap(Response response) {
     final data = response.data;

@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 
@@ -42,9 +43,12 @@ class CallForegroundService : Service() {
         }
     }
 
+    private var wifiLock: WifiManager.WifiLock? = null
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        acquireWifiLock()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -61,6 +65,32 @@ class CallForegroundService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onDestroy() {
+        releaseWifiLock()
+        super.onDestroy()
+    }
+
+    /**
+     * Acquire a WiFi lock to prevent the WiFi radio from going to sleep
+     * during an active VoIP call. Without this, WiFi can be disabled by
+     * the system when the screen turns off, dropping the call.
+     */
+    private fun acquireWifiLock() {
+        if (wifiLock?.isHeld == true) return
+        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            ?: return
+        wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "flowpbx:call")
+        wifiLock?.acquire()
+    }
+
+    /** Release the WiFi lock when the call ends. */
+    private fun releaseWifiLock() {
+        wifiLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wifiLock = null
+    }
 
     private fun createNotificationChannel() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

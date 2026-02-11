@@ -35,4 +35,4 @@
 - [ ] Implement background audio session handling (iOS/Android)
 - [ ] Handle app backgrounding: maintain SIP registration or rely on push
 - [ ] Battery optimization whitelisting guidance in-app (Android)
-- [ ] Implement WiFi lock for active calls (Android)
+- [x] Implement WiFi lock for active calls (Android)

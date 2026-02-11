@@ -146,10 +146,10 @@ The PRD references `flutter_ooh_sip` and `ooh_ooh` as candidate SIP libraries. *
 | **sip_native** | ⚠️ Partial | ❌ Minimal | ❌ Stale | ✅ Open source | Not viable |
 
 ### Authentication & Registration
-- [ ] Create login screen: server URL + extension number + SIP password
-- [ ] Implement app auth flow: call `POST /api/v1/app/auth` → store JWT + SIP config
-- [ ] Implement secure token storage (flutter_secure_storage)
-- [ ] Implement SIP registration to PBX over TLS/TCP using credentials from auth response
-- [ ] Implement auto-reconnect on network change (WiFi ↔ cellular)
-- [ ] Implement registration status indicator in UI
-- [ ] Implement logout: de-register SIP, clear tokens, return to login
+- [x] Create login screen: server URL + extension number + SIP password
+- [x] Implement app auth flow: call `POST /api/v1/app/auth` → store JWT + SIP config
+- [x] Implement secure token storage (flutter_secure_storage)
+- [x] Implement SIP registration to PBX over TLS/TCP using credentials from auth response
+- [x] Implement auto-reconnect on network change (WiFi ↔ cellular)
+- [x] Implement registration status indicator in UI
+- [x] Implement logout: de-register SIP, clear tokens, return to login

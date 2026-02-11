@@ -8,13 +8,15 @@ class SipStatusIndicator extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final status = ref.watch(sipStatusProvider);
+    final statusAsync = ref.watch(sipStatusProvider);
+
+    final status = statusAsync.valueOrNull ?? SipRegState.unregistered;
 
     final (color, label) = switch (status) {
-      SipStatus.registered => (Colors.green, 'Registered'),
-      SipStatus.registering => (Colors.orange, 'Registering...'),
-      SipStatus.error => (Colors.red, 'Error'),
-      SipStatus.unregistered => (Colors.grey, 'Unregistered'),
+      SipRegState.registered => (Colors.green, 'Registered'),
+      SipRegState.registering => (Colors.orange, 'Registering...'),
+      SipRegState.error => (Colors.red, 'Error'),
+      SipRegState.unregistered => (Colors.grey, 'Unregistered'),
     };
 
     return Tooltip(

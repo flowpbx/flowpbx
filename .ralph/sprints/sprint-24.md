@@ -21,8 +21,8 @@
 - [ ] Push testing: app backgrounded → push → wake → answer (both platforms)
 
 ### Security Hardening
-- [ ] SIP auth: nonce replay prevention, brute-force lockout
-- [ ] Fail2ban-style IP blocking for failed SIP auth attempts
+- [x] SIP auth: nonce replay prevention, brute-force lockout
+- [x] Fail2ban-style IP blocking for failed SIP auth attempts
 - [x] Rate limiting on all API endpoints
 - [ ] HTTPS enforcement for admin UI (auto Let's Encrypt or manual cert)
 - [ ] Verify all secrets encrypted at rest (SIP passwords, trunk credentials)

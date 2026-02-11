@@ -22,17 +22,22 @@ const (
 )
 
 // Authenticator handles SIP digest authentication against the extensions table.
+// It integrates with BruteForceGuard to automatically block source IPs that
+// exceed the failed authentication threshold (fail2ban-style protection).
 type Authenticator struct {
 	extensions database.ExtensionRepository
 	logger     *slog.Logger
 	nonces     sync.Map // map[string]time.Time — tracks issued nonces
+	guard      *BruteForceGuard
 }
 
-// NewAuthenticator creates a new SIP digest authenticator.
+// NewAuthenticator creates a new SIP digest authenticator with brute-force
+// protection enabled.
 func NewAuthenticator(extensions database.ExtensionRepository, logger *slog.Logger) *Authenticator {
 	return &Authenticator{
 		extensions: extensions,
 		logger:     logger.With("subsystem", "auth"),
+		guard:      NewBruteForceGuard(logger),
 	}
 }
 
@@ -59,7 +64,21 @@ func (a *Authenticator) Challenge(req *sip.Request, tx sip.ServerTransaction) {
 // Authenticate validates the Authorization header against the extensions table.
 // Returns the matched extension on success, or nil if authentication fails.
 // When authentication fails, it sends the appropriate SIP error response.
+//
+// Brute-force protection: if the source IP is blocked by the BruteForceGuard,
+// the request is rejected with 403 Forbidden without processing credentials.
 func (a *Authenticator) Authenticate(req *sip.Request, tx sip.ServerTransaction) *models.Extension {
+	source := req.Source()
+
+	// Check brute-force guard before processing any credentials.
+	if a.guard.IsBlocked(source) {
+		a.logger.Warn("sip auth rejected: ip blocked by brute-force guard",
+			"source", source,
+		)
+		a.respondError(req, tx, 403, "Forbidden")
+		return nil
+	}
+
 	h := req.GetHeader("Authorization")
 	if h == nil {
 		a.Challenge(req, tx)
@@ -70,8 +89,9 @@ func (a *Authenticator) Authenticate(req *sip.Request, tx sip.ServerTransaction)
 	if err != nil {
 		a.logger.Warn("failed to parse authorization header",
 			"error", err,
-			"source", req.Source(),
+			"source", source,
 		)
+		a.guard.RecordFailure(source)
 		a.respondError(req, tx, 400, "Bad Request")
 		return nil
 	}
@@ -81,7 +101,7 @@ func (a *Authenticator) Authenticate(req *sip.Request, tx sip.ServerTransaction)
 	if !ok {
 		a.logger.Debug("unknown nonce, re-challenging",
 			"username", cred.Username,
-			"source", req.Source(),
+			"source", source,
 		)
 		a.Challenge(req, tx)
 		return nil
@@ -90,7 +110,7 @@ func (a *Authenticator) Authenticate(req *sip.Request, tx sip.ServerTransaction)
 		a.nonces.Delete(cred.Nonce)
 		a.logger.Debug("expired nonce, re-challenging",
 			"username", cred.Username,
-			"source", req.Source(),
+			"source", source,
 		)
 		a.Challenge(req, tx)
 		return nil
@@ -109,8 +129,9 @@ func (a *Authenticator) Authenticate(req *sip.Request, tx sip.ServerTransaction)
 	if ext == nil {
 		a.logger.Warn("unknown sip username",
 			"username", cred.Username,
-			"source", req.Source(),
+			"source", source,
 		)
+		a.guard.RecordFailure(source)
 		a.respondError(req, tx, 403, "Forbidden")
 		return nil
 	}
@@ -141,14 +162,18 @@ func (a *Authenticator) Authenticate(req *sip.Request, tx sip.ServerTransaction)
 	if cred.Response != expected.Response {
 		a.logger.Warn("digest auth failed",
 			"username", cred.Username,
-			"source", req.Source(),
+			"source", source,
 		)
+		a.guard.RecordFailure(source)
 		a.Challenge(req, tx)
 		return nil
 	}
 
 	// Consume the nonce after successful auth.
 	a.nonces.Delete(cred.Nonce)
+
+	// Clear failure counter on successful auth.
+	a.guard.RecordSuccess(source)
 
 	a.logger.Debug("digest auth successful",
 		"username", cred.Username,
@@ -157,7 +182,8 @@ func (a *Authenticator) Authenticate(req *sip.Request, tx sip.ServerTransaction)
 	return ext
 }
 
-// CleanExpiredNonces removes nonces that are older than the expiry window.
+// CleanExpiredNonces removes nonces that are older than the expiry window
+// and runs brute-force guard cleanup to expire old blocks.
 func (a *Authenticator) CleanExpiredNonces() {
 	now := time.Now()
 	a.nonces.Range(func(key, value any) bool {
@@ -166,6 +192,13 @@ func (a *Authenticator) CleanExpiredNonces() {
 		}
 		return true
 	})
+	a.guard.Cleanup()
+}
+
+// BruteForceGuard returns the brute-force guard for admin visibility
+// (listing blocked IPs, manual unblock).
+func (a *Authenticator) BruteForceGuard() *BruteForceGuard {
+	return a.guard
 }
 
 func (a *Authenticator) generateNonce() string {

@@ -18,7 +18,7 @@
 ### Android — ConnectionService
 - [x] Implement ConnectionService for native Android call integration
 - [x] Handle incoming call notification (heads-up notification with answer/reject)
-- [ ] Handle outgoing call routing through ConnectionService
+- [x] Handle outgoing call routing through ConnectionService
 - [ ] Implement foreground service for active calls
 
 ### Push Notifications

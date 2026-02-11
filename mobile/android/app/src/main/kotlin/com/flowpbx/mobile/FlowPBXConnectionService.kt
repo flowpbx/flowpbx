@@ -80,14 +80,26 @@ class FlowPBXConnectionService : ConnectionService() {
     ): Connection {
         appContext = applicationContext
         val extras = request?.extras ?: Bundle()
-        val uuid = extras.getString("uuid") ?: ""
+        var uuid = extras.getString("uuid") ?: ""
         val handle = request?.address?.schemeSpecificPart ?: ""
+        val displayName = extras.getString("displayName")
+
+        // If uuid is empty, this is a system-initiated outgoing call (e.g. user
+        // tapped a number in the native dialer/contacts). Generate a UUID and
+        // notify Flutter so the SIP stack can place the call.
+        val systemInitiated = uuid.isEmpty()
+        if (systemInitiated) {
+            uuid = java.util.UUID.randomUUID().toString()
+        }
 
         val connection = FlowPBXConnection(uuid).apply {
             setAddress(
                 request?.address ?: Uri.fromParts("tel", handle, null),
                 TelecomManager.PRESENTATION_ALLOWED
             )
+            if (!displayName.isNullOrEmpty()) {
+                setCallerDisplayName(displayName, TelecomManager.PRESENTATION_ALLOWED)
+            }
             setInitializing()
             setDialing()
             connectionCapabilities = Connection.CAPABILITY_HOLD or
@@ -97,6 +109,14 @@ class FlowPBXConnectionService : ConnectionService() {
         }
 
         connections[uuid] = connection
+
+        if (systemInitiated) {
+            channelHandler?.onConnectionEvent("onStartCall", mapOf(
+                "uuid" to uuid,
+                "handle" to handle
+            ))
+        }
+
         return connection
     }
 

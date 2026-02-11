@@ -505,11 +505,12 @@ class SipService {
   void _onCallProceeding(int callId, String response) {
     if (callId != _callState.callId) return;
 
-    // Notify CallKit that the outgoing call has started connecting so the
-    // system UI shows the correct timing indicator.
+    // Notify CallKit / ConnectionService that the outgoing call has started
+    // connecting so the system UI shows the correct timing indicator.
     final uuid = _callState.callUuid;
     if (uuid != null && !_callState.isIncoming) {
       _callKitService.reportOutgoingCallStartedConnecting(uuid: uuid);
+      _connectionService.reportOutgoingCallProceeding(uuid: uuid);
     }
   }
 
@@ -672,14 +673,21 @@ class SipService {
           _setCallState(ActiveCallState.idle);
           _audioSessionService.deactivate();
         }
+      case ConnectionStartCallAction(:final uuid, :final handle):
+        // System-initiated outgoing call (e.g. user tapped in native dialer).
+        // Only place the call if we're not already in one and we're registered.
+        if (!_callState.isActive && _accountId != null) {
+          _onSystemStartCall(uuid, handle);
+        }
     }
   }
 
-  /// Handle a system-initiated outgoing call (e.g. user tapped in iOS Recents).
+  /// Handle a system-initiated outgoing call (e.g. user tapped in native
+  /// dialer/contacts on Android, or iOS Recents).
   ///
-  /// CallKit has already created the CXStartCallAction with a UUID and handle.
-  /// We need to place the SIP call using that existing UUID rather than
-  /// generating a new one.
+  /// The platform has already created the call representation (CXStartCallAction
+  /// on iOS, Connection on Android) with a UUID and handle. We need to place
+  /// the SIP call using that existing UUID rather than generating a new one.
   Future<void> _onSystemStartCall(String uuid, String handle) async {
     if (_accountId == null) return;
 
@@ -702,6 +710,7 @@ class SipService {
       _setCallState(_callState.copyWith(callId: callId));
     } catch (e) {
       await _callKitService.reportCallEnded(uuid: uuid, reason: 2);
+      await _connectionService.reportCallEnded(uuid: uuid, reason: 2);
       _setCallState(ActiveCallState.idle.copyWith(error: e.toString()));
     }
   }

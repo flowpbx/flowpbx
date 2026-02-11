@@ -57,6 +57,12 @@ class ConnectionServiceBridge {
         final args = call.arguments as Map;
         final uuid = args['uuid'] as String;
         _actionController.add(ConnectionAction.failed(uuid));
+      case 'onStartCall':
+        final args = call.arguments as Map;
+        _actionController.add(ConnectionAction.startCall(
+          args['uuid'] as String,
+          args['handle'] as String,
+        ));
     }
   }
 
@@ -84,6 +90,7 @@ class ConnectionServiceBridge {
   Future<void> reportOutgoingCall({
     required String uuid,
     required String handle,
+    String? displayName,
   }) async {
     if (!Platform.isAndroid) return;
 
@@ -91,6 +98,20 @@ class ConnectionServiceBridge {
       await _channel.invokeMethod('reportOutgoingCall', {
         'uuid': uuid,
         'handle': handle,
+        'displayName': displayName,
+      });
+    } on PlatformException {
+      // Non-fatal.
+    }
+  }
+
+  /// Report that an outgoing call is proceeding (remote ringing).
+  Future<void> reportOutgoingCallProceeding({required String uuid}) async {
+    if (!Platform.isAndroid) return;
+
+    try {
+      await _channel.invokeMethod('reportOutgoingCallProceeding', {
+        'uuid': uuid,
       });
     } on PlatformException {
       // Non-fatal.
@@ -192,6 +213,8 @@ sealed class ConnectionAction {
   const factory ConnectionAction.dtmf(String uuid, String digits) =
       ConnectionDtmfAction;
   const factory ConnectionAction.failed(String uuid) = ConnectionFailedAction;
+  const factory ConnectionAction.startCall(String uuid, String handle) =
+      ConnectionStartCallAction;
 }
 
 class ConnectionAnswerAction extends ConnectionAction {
@@ -225,4 +248,10 @@ class ConnectionDtmfAction extends ConnectionAction {
 class ConnectionFailedAction extends ConnectionAction {
   final String uuid;
   const ConnectionFailedAction(this.uuid);
+}
+
+class ConnectionStartCallAction extends ConnectionAction {
+  final String uuid;
+  final String handle;
+  const ConnectionStartCallAction(this.uuid, this.handle);
 }

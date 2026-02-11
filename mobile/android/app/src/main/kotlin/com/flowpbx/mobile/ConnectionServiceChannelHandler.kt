@@ -69,7 +69,13 @@ class ConnectionServiceChannelHandler(
             "reportOutgoingCall" -> {
                 val uuid = call.argument<String>("uuid") ?: return result.error("INVALID_ARGS", "Missing uuid", null)
                 val handle = call.argument<String>("handle") ?: ""
-                reportOutgoingCall(uuid, handle, result)
+                val displayName = call.argument<String>("displayName")
+                reportOutgoingCall(uuid, handle, displayName, result)
+            }
+            "reportOutgoingCallProceeding" -> {
+                val uuid = call.argument<String>("uuid") ?: return result.error("INVALID_ARGS", "Missing uuid", null)
+                reportOutgoingCallProceeding(uuid)
+                result.success(true)
             }
             "reportCallConnected" -> {
                 val uuid = call.argument<String>("uuid") ?: return result.error("INVALID_ARGS", "Missing uuid", null)
@@ -120,9 +126,10 @@ class ConnectionServiceChannelHandler(
         }
     }
 
-    private fun reportOutgoingCall(uuid: String, handle: String, result: MethodChannel.Result) {
+    private fun reportOutgoingCall(uuid: String, handle: String, displayName: String?, result: MethodChannel.Result) {
         val extras = Bundle().apply {
             putString("uuid", uuid)
+            if (displayName != null) putString("displayName", displayName)
             putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, phoneAccountHandle)
         }
         try {
@@ -136,6 +143,13 @@ class ConnectionServiceChannelHandler(
         } catch (e: Exception) {
             result.error("ERROR", "Failed to report outgoing call: ${e.message}", null)
         }
+    }
+
+    private fun reportOutgoingCallProceeding(uuid: String) {
+        // Transition the Connection from DIALING to DIALING state is already set.
+        // On Android, there's no separate "started connecting" state like iOS.
+        // The Connection stays in DIALING until setActive() is called on connect.
+        // This is here for API symmetry with CallKit's startedConnecting.
     }
 
     private fun reportCallConnected(uuid: String) {

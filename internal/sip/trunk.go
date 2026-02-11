@@ -47,9 +47,12 @@ type TrunkState struct {
 // state with periodic re-registration. It also manages IP-auth trunk ACL
 // matching for inbound call identification.
 type TrunkRegistrar struct {
-	ua        *sipgo.UserAgent
-	logger    *slog.Logger
-	ipMatcher *IPAuthMatcher
+	ua          *sipgo.UserAgent
+	logger      *slog.Logger
+	ipMatcher   *IPAuthMatcher
+	contactHost string // resolvable IP/hostname for Contact headers (from config)
+	sipPort     int    // SIP UDP/TCP listen port
+	sipTLSPort  int    // SIP TLS listen port
 
 	mu     sync.RWMutex
 	states map[int64]*trunkEntry // keyed by trunk ID
@@ -72,13 +75,19 @@ type trunkEntry struct {
 }
 
 // NewTrunkRegistrar creates a trunk registration manager.
-func NewTrunkRegistrar(ua *sipgo.UserAgent, logger *slog.Logger) *TrunkRegistrar {
+// contactHost is the resolvable IP/hostname to advertise in Contact headers
+// (typically from config.MediaIP()). sipPort/sipTLSPort are the local SIP
+// listen ports so the Contact URI includes the correct port.
+func NewTrunkRegistrar(ua *sipgo.UserAgent, contactHost string, sipPort, sipTLSPort int, logger *slog.Logger) *TrunkRegistrar {
 	l := logger.With("subsystem", "trunk-registrar")
 	return &TrunkRegistrar{
-		ua:        ua,
-		logger:    l,
-		ipMatcher: NewIPAuthMatcher(l),
-		states:    make(map[int64]*trunkEntry),
+		ua:          ua,
+		logger:      l,
+		contactHost: contactHost,
+		sipPort:     sipPort,
+		sipTLSPort:  sipTLSPort,
+		ipMatcher:   NewIPAuthMatcher(l),
+		states:      make(map[int64]*trunkEntry),
 	}
 }
 
@@ -338,8 +347,13 @@ func (tr *TrunkRegistrar) sendRegister(ctx context.Context, entry *trunkEntry, e
 	req.AppendHeader(sip.NewHeader("From", aor))
 	req.AppendHeader(sip.NewHeader("To", aor))
 
-	// Add Contact header with our local address.
-	contactURI := fmt.Sprintf("<sip:%s@%s>", username, tr.ua.Hostname())
+	// Add Contact header with our routable IP and SIP listen port so the
+	// remote server can send INVITEs back to us (important behind NAT).
+	contactPort := tr.sipPort
+	if strings.EqualFold(trunk.Transport, "tls") {
+		contactPort = tr.sipTLSPort
+	}
+	contactURI := fmt.Sprintf("<sip:%s@%s:%d;transport=%s>", username, tr.contactHost, contactPort, strings.ToLower(trunk.Transport))
 	req.AppendHeader(sip.NewHeader("Contact", contactURI))
 
 	// Set Expires header.

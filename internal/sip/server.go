@@ -69,7 +69,7 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sys
 	auth := NewAuthenticator(extensions, logger)
 	regNotifier := NewRegistrationNotifier()
 	registrar := NewRegistrar(extensions, registrations, pushTokens, auth, regNotifier, logger)
-	trunkRegistrar := NewTrunkRegistrar(ua, logger)
+	trunkRegistrar := NewTrunkRegistrar(ua, cfg.MediaIP(), cfg.SIPPort, cfg.SIPTLSPort, logger)
 
 	forker, err := NewForker(ua, logger)
 	if err != nil {

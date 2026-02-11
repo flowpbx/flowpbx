@@ -24,7 +24,7 @@
 
 ### In-Call Screen
 - [x] Create in-call screen layout: caller info, duration timer, action buttons
-- [ ] Implement mute/unmute toggle
+- [x] Implement mute/unmute toggle
 - [ ] Implement speaker/earpiece toggle
 - [ ] Implement hold/resume
 - [ ] Implement DTMF pad (send RFC 2833 telephone-event)

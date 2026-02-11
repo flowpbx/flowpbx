@@ -60,6 +60,11 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     await sipService.hangup();
   }
 
+  Future<void> _toggleMute() async {
+    final sipService = ref.read(sipServiceProvider);
+    await sipService.toggleMute();
+  }
+
   @override
   Widget build(BuildContext context) {
     final callAsync = ref.watch(callStateProvider);
@@ -127,6 +132,22 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                   ),
             ),
             const Spacer(flex: 3),
+            // Call controls.
+            if (callState.status == CallStatus.connected ||
+                callState.status == CallStatus.held) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _CallControlButton(
+                    icon: callState.isMuted ? Icons.mic_off : Icons.mic,
+                    label: callState.isMuted ? 'Unmute' : 'Mute',
+                    isActive: callState.isMuted,
+                    onPressed: _toggleMute,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+            ],
             // Hangup button.
             SizedBox(
               width: 72,
@@ -173,5 +194,56 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
     }
     return name.isNotEmpty ? name[0].toUpperCase() : '?';
+  }
+}
+
+/// A circular call control button with icon and label.
+class _CallControlButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isActive;
+  final VoidCallback onPressed;
+
+  const _CallControlButton({
+    required this.icon,
+    required this.label,
+    required this.isActive,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 56,
+          height: 56,
+          child: FilledButton.tonal(
+            onPressed: onPressed,
+            style: FilledButton.styleFrom(
+              backgroundColor: isActive
+                  ? colorScheme.primary
+                  : colorScheme.surfaceContainerHighest,
+              foregroundColor: isActive
+                  ? colorScheme.onPrimary
+                  : colorScheme.onSurface,
+              shape: const CircleBorder(),
+              padding: EdgeInsets.zero,
+            ),
+            child: Icon(icon, size: 24),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+        ),
+      ],
+    );
   }
 }

@@ -71,9 +71,16 @@ class SipService {
   /// Query the current audio output route.
   Future<AudioRoute> getAudioRoute() => _audioSessionService.getAudioRoute();
 
+  /// Whether SIP is suspended due to app being in background.
+  bool _backgroundSuspended = false;
+
+  /// Stored registration params for re-registering on foreground return.
+  _SipCredentials? _credentials;
+
   SipRegState get regState => _regState;
   String get regResponse => _regResponse;
   bool get isRegistered => _regState == SipRegState.registered;
+  bool get isBackgroundSuspended => _backgroundSuspended;
 
   /// Initialize the Siprix SDK. Must be called once before register().
   Future<void> initialize() async {
@@ -144,6 +151,19 @@ class SipService {
     if (!_initialized) {
       await initialize();
     }
+
+    // Store credentials for re-registration after background suspend.
+    _credentials = _SipCredentials(
+      domain: domain,
+      port: port,
+      tlsPort: tlsPort,
+      username: username,
+      password: password,
+      transport: transport,
+    );
+
+    // Clear background suspend flag on explicit registration.
+    _backgroundSuspended = false;
 
     // Unregister existing account if any.
     if (_accountId != null) {
@@ -384,6 +404,51 @@ class SipService {
     _accountId = null;
   }
 
+  // -- App lifecycle --
+
+  /// Called when the app transitions to the background.
+  ///
+  /// If there is no active call, unregisters SIP to conserve battery and
+  /// network resources. Incoming calls will be delivered via push
+  /// notifications (PushKit on iOS, FCM on Android), which will re-wake
+  /// the SIP stack when needed.
+  ///
+  /// If there is an active call, SIP registration is kept alive — the
+  /// foreground service (Android) or CallKit audio session (iOS) ensures
+  /// the OS does not kill the process.
+  Future<void> onBackground() async {
+    if (_backgroundSuspended) return;
+    if (!_initialized || _accountId == null) return;
+
+    // Keep SIP alive during active calls.
+    if (_callState.isActive) return;
+
+    _backgroundSuspended = true;
+    await _removeCurrentAccount();
+    _setRegState(SipRegState.unregistered);
+  }
+
+  /// Called when the app returns to the foreground.
+  ///
+  /// Re-registers SIP if it was suspended due to backgrounding. Uses the
+  /// stored credentials from the last [register] call.
+  Future<void> onForeground() async {
+    if (!_backgroundSuspended) return;
+    _backgroundSuspended = false;
+
+    final creds = _credentials;
+    if (creds == null || !_initialized) return;
+
+    await register(
+      domain: creds.domain,
+      port: creds.port,
+      tlsPort: creds.tlsPort,
+      username: creds.username,
+      password: creds.password,
+      transport: creds.transport,
+    );
+  }
+
   // -- Private helpers --
 
   Future<void> _removeCurrentAccount() async {
@@ -604,6 +669,10 @@ class SipService {
     // Cancel any existing push wake timer from a prior push.
     _cancelPushWakeTimer();
 
+    // Clear background suspend — we're being woken by a push notification
+    // and need to re-register regardless of lifecycle state.
+    _backgroundSuspended = false;
+
     // Set call state to ringing with info from the push payload.
     // The actual SIP INVITE will arrive after the PBX sees us re-register.
     _setCallState(ActiveCallState(
@@ -615,9 +684,18 @@ class SipService {
     ));
 
     // Trigger SIP re-registration so the PBX knows we're awake and can
-    // route the INVITE to us. The callId will be set when the SIP INVITE
-    // arrives via _onCallIncoming.
-    if (_accountId != null && _regState != SipRegState.registered) {
+    // route the INVITE to us. If the account was removed during background
+    // suspend, re-register with stored credentials.
+    if (_accountId == null && _credentials != null) {
+      register(
+        domain: _credentials!.domain,
+        port: _credentials!.port,
+        tlsPort: _credentials!.tlsPort,
+        username: _credentials!.username,
+        password: _credentials!.password,
+        transport: _credentials!.transport,
+      );
+    } else if (_accountId != null && _regState != SipRegState.registered) {
       refreshRegistration();
     }
 
@@ -813,4 +891,23 @@ class SipService {
         '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
         '${hex.substring(20, 32)}';
   }
+}
+
+/// Stored SIP credentials for re-registration after background suspend.
+class _SipCredentials {
+  final String domain;
+  final int port;
+  final int tlsPort;
+  final String username;
+  final String password;
+  final String transport;
+
+  const _SipCredentials({
+    required this.domain,
+    required this.port,
+    required this.tlsPort,
+    required this.username,
+    required this.password,
+    required this.transport,
+  });
 }

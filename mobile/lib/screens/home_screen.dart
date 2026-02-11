@@ -68,6 +68,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         actions: [
           const SipStatusIndicator(),
           IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Call History',
+            onPressed: () => context.push('/history'),
+          ),
+          IconButton(
             icon: const Icon(Icons.contacts_outlined),
             tooltip: 'Contacts',
             onPressed: () => context.push('/contacts'),

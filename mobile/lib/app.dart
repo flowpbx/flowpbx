@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flowpbx_mobile/providers/lifecycle_provider.dart';
 import 'package:flowpbx_mobile/router.dart';
+import 'package:flowpbx_mobile/widgets/offline_banner.dart' show OfflineBannerWrapper;
 
 class FlowPBXApp extends ConsumerWidget {
   const FlowPBXApp({super.key});
@@ -33,6 +34,9 @@ class FlowPBXApp extends ConsumerWidget {
       ),
       themeMode: ThemeMode.system,
       routerConfig: router,
+      builder: (context, child) {
+        return OfflineBannerWrapper(child: child!);
+      },
     );
   }
 }

@@ -10,11 +10,11 @@
 
 ### Project Setup (`mobile/`)
 - [x] Create Flutter project in `mobile/` directory within monorepo
-- [ ] Configure state management (Riverpod or Bloc)
-- [ ] Set up project structure: screens, services, models, widgets, providers
+- [x] Configure state management (Riverpod or Bloc)
+- [x] Set up project structure: screens, services, models, widgets, providers
 - [ ] Configure app icon and branding assets
-- [ ] Set up linting rules (flutter_lints)
-- [ ] Add `mobile/` build commands to root Makefile
+- [x] Set up linting rules (flutter_lints)
+- [x] Add `mobile/` build commands to root Makefile
 
 ### SIP Library Evaluation
 - [ ] Evaluate `dart_sip_ua` — TLS, SRTP, Opus support, push wake-up capability

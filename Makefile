@@ -16,11 +16,12 @@ GOFLAGS  := -trimpath
 LINT     := golangci-lint
 
 # Output directories
-BUILD_DIR := build
-WEB_DIR   := web
-WEB_DIST  := $(WEB_DIR)/dist
+BUILD_DIR  := build
+WEB_DIR    := web
+WEB_DIST   := $(WEB_DIR)/dist
+MOBILE_DIR := mobile
 
-.PHONY: build dev test lint ui-build release clean help
+.PHONY: build dev test lint ui-build mobile-deps mobile-build mobile-test mobile-lint mobile-clean release clean help
 
 ## build: Compile flowpbx and pushgw binaries
 build: ui-build
@@ -53,6 +54,51 @@ ui-build:
 		mkdir -p internal/web/dist; \
 	fi
 
+## mobile-deps: Install Flutter dependencies
+mobile-deps:
+	@if [ -d "$(MOBILE_DIR)" ] && [ -f "$(MOBILE_DIR)/pubspec.yaml" ]; then \
+		cd $(MOBILE_DIR) && flutter pub get; \
+	else \
+		echo "mobile/ not yet scaffolded, skipping"; \
+	fi
+
+## mobile-build: Build Flutter app (APK + iOS archive)
+mobile-build: mobile-deps
+	@if [ -d "$(MOBILE_DIR)" ] && [ -f "$(MOBILE_DIR)/pubspec.yaml" ]; then \
+		cd $(MOBILE_DIR) && flutter build apk --release; \
+		echo "Android APK built successfully"; \
+		if [ "$$(uname)" = "Darwin" ]; then \
+			cd $(MOBILE_DIR) && flutter build ios --release --no-codesign; \
+			echo "iOS build completed (no-codesign)"; \
+		else \
+			echo "Skipping iOS build (requires macOS)"; \
+		fi \
+	else \
+		echo "mobile/ not yet scaffolded, skipping"; \
+	fi
+
+## mobile-test: Run Flutter tests
+mobile-test:
+	@if [ -d "$(MOBILE_DIR)" ] && [ -f "$(MOBILE_DIR)/pubspec.yaml" ]; then \
+		cd $(MOBILE_DIR) && flutter test; \
+	else \
+		echo "mobile/ not yet scaffolded, skipping"; \
+	fi
+
+## mobile-lint: Run Flutter analyzer
+mobile-lint:
+	@if [ -d "$(MOBILE_DIR)" ] && [ -f "$(MOBILE_DIR)/pubspec.yaml" ]; then \
+		cd $(MOBILE_DIR) && flutter analyze; \
+	else \
+		echo "mobile/ not yet scaffolded, skipping"; \
+	fi
+
+## mobile-clean: Clean Flutter build artifacts
+mobile-clean:
+	@if [ -d "$(MOBILE_DIR)" ]; then \
+		cd $(MOBILE_DIR) && flutter clean; \
+	fi
+
 ## release: Cross-compile release binaries for linux/amd64 and linux/arm64
 release: ui-build
 	GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/flowpbx
@@ -63,6 +109,9 @@ release: ui-build
 ## clean: Remove build artifacts
 clean:
 	rm -rf $(BUILD_DIR)
+	@if [ -d "$(MOBILE_DIR)" ]; then \
+		cd $(MOBILE_DIR) && flutter clean 2>/dev/null || true; \
+	fi
 
 ## help: Show this help message
 help:

@@ -1,5 +1,8 @@
 # FlowPBX
 
+> **WARNING: This project is under active development and is NOT production-ready.**
+> APIs, database schemas, and configuration formats may change without notice. Use at your own risk. We're building in the open — contributions and feedback are welcome, but please do not deploy this for real phone systems yet.
+
 A single-binary, self-hosted PBX for small-to-medium businesses (5–100 extensions). FlowPBX combines a visual drag-and-drop call flow editor with a complete SIP telephony system — if you can draw a flowchart, you can build a phone system.
 
 ## License

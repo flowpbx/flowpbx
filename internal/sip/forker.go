@@ -34,6 +34,12 @@ type ForkResult struct {
 	// AllBusy is true if every fork responded with 486 Busy Here.
 	AllBusy bool
 
+	// AllFailed is true if every fork failed with connection/transport errors
+	// (e.g. stale TCP connections) without receiving any provisional responses.
+	// This indicates the registrations are stale and push notification retry
+	// should be attempted.
+	AllFailed bool
+
 	// Error is set if the fork failed for a non-SIP reason (e.g. transport error).
 	Error error
 }
@@ -167,6 +173,7 @@ func (f *Forker) Fork(
 
 	// Track state across all forks.
 	ringingRelayed := false
+	receivedProvisional := false
 	busyCount := 0
 	failedCount := 0
 	totalLegs := len(legs)
@@ -175,7 +182,7 @@ func (f *Forker) Fork(
 
 	for lr := range responseCh {
 		if lr.err != nil {
-			f.logger.Debug("fork leg error",
+			f.logger.Error("fork leg transaction error",
 				"call_id", callID,
 				"contact", lr.leg.contact.ContactURI,
 				"error", lr.err,
@@ -210,6 +217,7 @@ func (f *Forker) Fork(
 			//
 			// Only the first provisional is relayed to avoid confusing the caller UA
 			// with multiple provisional SDP offers.
+			receivedProvisional = true
 			if !ringingRelayed {
 				ringingRelayed = true
 
@@ -277,7 +285,7 @@ func (f *Forker) Fork(
 		case res.StatusCode >= 400:
 			// Other failure — count it.
 			failedCount++
-			f.logger.Debug("fork leg failed",
+			f.logger.Error("fork leg rejected",
 				"call_id", callID,
 				"contact", lr.leg.contact.ContactURI,
 				"status", res.StatusCode,
@@ -297,7 +305,14 @@ func (f *Forker) Fork(
 	if busyCount == totalLegs {
 		return &ForkResult{AllBusy: true}
 	}
-	return &ForkResult{Answered: false}
+
+	// If all legs failed (transport/connection errors or 4xx errors) without
+	// ever receiving a provisional response (180/183), the registrations are
+	// likely stale. Signal this so the caller can attempt push notification retry.
+	return &ForkResult{
+		Answered:  false,
+		AllFailed: failedCount == totalLegs && !receivedProvisional,
+	}
 
 answered:
 	// Cancel and terminate all non-winning legs.

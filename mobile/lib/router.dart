@@ -16,20 +16,33 @@ import 'package:flowpbx_mobile/screens/incoming_call_screen.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 
+/// A [ChangeNotifier] that fires whenever auth or call state changes,
+/// triggering GoRouter to re-evaluate its redirect.
+class _RouterRefreshNotifier extends ChangeNotifier {
+  _RouterRefreshNotifier(Ref ref) {
+    ref.listen(authStateProvider, (_, __) => notifyListeners());
+    ref.listen(callStateProvider, (_, __) => notifyListeners());
+  }
+}
+
 final routerProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authStateProvider);
-  final callState = ref.watch(callStateProvider);
-  final call = callState.valueOrNull;
-  final hasActiveCall = call?.isActive ?? false;
-  final isIncomingRinging = call != null &&
-      call.isIncoming &&
-      call.status == CallStatus.ringing;
+  final refreshNotifier = _RouterRefreshNotifier(ref);
 
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
     initialLocation: '/dialpad',
+    refreshListenable: refreshNotifier,
     redirect: (context, state) {
-      final isAuthenticated = authState.valueOrNull?.isAuthenticated ?? false;
+      final authState = ref.read(authStateProvider);
+      final callState = ref.read(callStateProvider);
+      final call = callState.valueOrNull;
+      final hasActiveCall = call?.isActive ?? false;
+      final isIncomingRinging = call != null &&
+          call.isIncoming &&
+          call.status == CallStatus.ringing;
+
+      final isAuthenticated =
+          authState.valueOrNull?.isAuthenticated ?? false;
       final isLoginRoute = state.matchedLocation == '/login';
       final isCallRoute = state.matchedLocation == '/call';
       final isIncomingRoute = state.matchedLocation == '/incoming';
@@ -46,7 +59,8 @@ final routerProvider = Provider<GoRouter>((ref) {
         return '/incoming';
       }
 
-      // Redirect to in-call screen for active calls that are not incoming ringing.
+      // Redirect to in-call screen for active calls that are not incoming
+      // ringing.
       if (isAuthenticated &&
           hasActiveCall &&
           !isIncomingRinging &&

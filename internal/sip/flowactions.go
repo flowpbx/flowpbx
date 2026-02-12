@@ -241,6 +241,113 @@ func (a *FlowSIPActions) RingExtension(ctx context.Context, callCtx *flow.CallCo
 		return &flow.RingResult{AllBusy: true}, nil
 	}
 
+	// If all fork legs failed without receiving any provisional responses,
+	// the registrations are likely stale (TCP connections closed). Try push
+	// notification wake-up and retry the fork.
+	if !result.Answered && result.AllFailed {
+		a.logger.Info("all registrations failed, attempting push notification retry",
+			"call_id", callID,
+			"extension", ext.Extension,
+		)
+
+		// Send push notifications to wake mobile apps.
+		pushed := a.sendPushForExtension(regs, ext, callID, callCtx.CallerIDNum)
+
+		if pushed > 0 && a.regNotifier != nil {
+			a.logger.Info("push sent for stale registrations, waiting for app to register",
+				"call_id", callID,
+				"extension", ext.Extension,
+				"push_count", pushed,
+				"wait_timeout", defaultPushWaitTimeout,
+			)
+
+			waitCtx, waitCancel := context.WithTimeout(ctx, defaultPushWaitTimeout)
+			registered := a.regNotifier.WaitForRegistration(waitCtx, ext.ID)
+			waitCancel()
+
+			if registered {
+				a.logger.Info("app registered after push, retrying fork",
+					"call_id", callID,
+					"extension", ext.Extension,
+				)
+
+				// Re-fetch active registrations — the app should now have a fresh one.
+				regs, err = a.registrations.GetByExtensionID(ctx, ext.ID)
+				if err != nil {
+					if bridge != nil {
+						bridge.Release()
+					}
+					return nil, fmt.Errorf("looking up registrations after push wait: %w", err)
+				}
+
+				now = time.Now()
+				active = active[:0]
+				for _, reg := range regs {
+					if reg.Expires.After(now) {
+						active = append(active, reg)
+					}
+				}
+
+				if len(active) > 0 {
+					// Retry the fork with fresh registrations.
+					ringDuration := time.Duration(ringTimeout) * time.Second
+					retryCtx, retryCancel := context.WithTimeout(ctx, ringDuration)
+
+					a.pendingMgr.Add(&PendingCall{
+						CallID:     callID,
+						CallerTx:   tx,
+						CallerReq:  req,
+						CancelFork: retryCancel,
+						Bridge:     bridge,
+					})
+
+					result = a.forker.Fork(retryCtx, req, tx, active, nil, callID, calleeSDP)
+
+					pc = a.pendingMgr.Remove(callID)
+					retryCancel()
+
+					// Check retry result.
+					if pc == nil {
+						a.logger.Info("retry fork completed but call was already cancelled",
+							"call_id", callID,
+						)
+						if result.Answered && result.AnsweringTx != nil {
+							result.AnsweringTx.Terminate()
+						}
+						return &flow.RingResult{}, fmt.Errorf("call cancelled during retry")
+					}
+
+					if result.Error != nil {
+						if bridge != nil {
+							bridge.Release()
+						}
+						return nil, fmt.Errorf("retry fork failed: %w", result.Error)
+					}
+
+					if result.AllBusy {
+						if bridge != nil {
+							bridge.Release()
+						}
+						return &flow.RingResult{AllBusy: true}, nil
+					}
+
+					// If retry succeeded, fall through to handle the answer below.
+					// If retry also failed to answer, fall through to return not answered.
+				} else {
+					a.logger.Info("no active registrations after push wait",
+						"call_id", callID,
+						"extension", ext.Extension,
+					)
+				}
+			} else {
+				a.logger.Info("push wait timed out, no registration received",
+					"call_id", callID,
+					"extension", ext.Extension,
+				)
+			}
+		}
+	}
+
 	if !result.Answered {
 		if bridge != nil {
 			bridge.Release()

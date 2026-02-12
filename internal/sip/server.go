@@ -128,7 +128,13 @@ func NewServer(cfg *config.Config, db *database.DB, enc *database.Encryptor, sys
 
 	// Create the flow engine for inbound call routing via visual flow graphs.
 	voicemailMessages := database.NewVoicemailMessageRepository(db)
-	flowEngine := flow.NewEngine(callFlows, cdrs, nil, logger)
+	ringGroups := database.NewRingGroupRepository(db)
+	voicemailBoxes := database.NewVoicemailBoxRepository(db)
+	ivrMenus := database.NewIVRMenuRepository(db)
+	timeSwitches := database.NewTimeSwitchRepository(db)
+	conferenceBridges := database.NewConferenceBridgeRepository(db)
+	entityResolver := flow.NewEntityResolver(extensions, ringGroups, voicemailBoxes, ivrMenus, timeSwitches, conferenceBridges, inboundNumbers)
+	flowEngine := flow.NewEngine(callFlows, cdrs, entityResolver, logger)
 	flowSIPActions := NewFlowSIPActions(extensions, registrations, pushTokens, forker, outboundRouter, dialogMgr, pendingMgr, sessionMgr, dtmfMgr, conferenceMgr, cdrs, pushClient, regNotifier, proxyIP, cfg.DataDir, logger)
 	nodes.RegisterAll(flowEngine, flowSIPActions, extensions, voicemailMessages, sysConfig, enc, emailSend, cfg.DataDir, logger)
 
